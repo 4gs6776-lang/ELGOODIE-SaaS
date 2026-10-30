@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import AppIcon from '../icons'
-import { HMO_PROVIDERS } from '../../lib/hmoProviders'
+import { useHmoProviders } from '../../lib/useHmoProviders'
 
 // =====================================================================
 // GOODIE-MEDHUB — HmoProviderSelect
@@ -41,18 +41,22 @@ export default function HmoProviderSelect({
   ariaLabel = 'HMO provider',
   disabled = false,
   includeSelfPay = true,
+  hospitalId,  // Phase 2: passed from parent for DB-backed provider list
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const containerRef = useRef(null)
   const searchInputRef = useRef(null)
 
+  // Phase 2: read from the database (with fallback to hardcoded list)
+  const { providers: dbProviders } = useHmoProviders(hospitalId)
+
   // The full provider list, optionally filtering out Self-Pay
   const providers = useMemo(() => {
     return includeSelfPay
-      ? HMO_PROVIDERS
-      : HMO_PROVIDERS.filter(p => p.id !== 'self-pay')
-  }, [includeSelfPay])
+      ? dbProviders
+      : dbProviders.filter(p => p.slug !== 'self-pay' && p.id !== 'self-pay')
+  }, [dbProviders, includeSelfPay])
 
   // Filter the list by the search query
   const filtered = useMemo(() => {
