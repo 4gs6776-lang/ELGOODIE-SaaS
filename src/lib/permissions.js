@@ -83,15 +83,12 @@ const ROLE_MODULES = {
     'patients',
     'hmo_patients',
     'anc_patients',
-    'hmo-patients',
-    'anc-patients',
     'appointments',
     'doctor',
     'ipd',
     'admissions',
     'handover',
     'ai_diagnostics',
-    'ai-diagnostics',
   ],
 
   nurse: [
@@ -99,8 +96,6 @@ const ROLE_MODULES = {
     'patients',
     'hmo_patients',
     'anc_patients',
-    'hmo-patients',
-    'anc-patients',
     'appointments',
     'nursing',
     'ipd',
@@ -110,7 +105,6 @@ const ROLE_MODULES = {
     'laboratory',
     'radiology',
     'ai_diagnostics',
-    'ai-diagnostics',
   ],
 
   front_desk: [
