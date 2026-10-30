@@ -531,6 +531,7 @@ export default function Insurance(){
                   placeholder="Search HMO provider…"
                   ariaLabel="HMO provider"
                   includeSelfPay={false}
+                  hospitalId={hospital?.id}
                 />
               </div>
               <div className="field">

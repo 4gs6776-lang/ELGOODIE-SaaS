@@ -83,8 +83,6 @@ const QUEUE_STAGES = [
   },
 ]
 
-const HMO_PROVIDERS = ['Self-Pay (No HMO)', 'NHIS', 'Hygeia HMO', 'Reliance HMO', 'AXA Mansard', 'AIICO', 'Avon HMO', 'Other']
-
 const EMPTY_FORM = {
   surname: '',
   otherNames: '',
@@ -1988,6 +1986,7 @@ export default function Reception() {
                       onChange={name => set('hmoProvider', name || 'Self-Pay (No HMO)')}
                       placeholder="Search HMO provider…"
                       ariaLabel="HMO provider"
+                      hospitalId={hospital?.id}
                     />
                   </div>
 
