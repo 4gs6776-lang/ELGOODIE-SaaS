@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabaseClient'
 import AppIcon from '../../components/icons'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
+import SpringToggle from '../../components/SpringToggle'
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -226,16 +227,9 @@ export default function Dashboard(){
 
   const [tab, setTab] = useState('overview')
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem('gmedhub-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
-  })
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('light-mode', theme === 'light')
-    try { localStorage.setItem('gmedhub-theme', theme) } catch {}
-  }, [theme])
-
-  function toggleTheme(){ setTheme(current => current === 'light' ? 'dark' : 'light') }
+  // Theme is now managed by ThemeContext (ThemeProvider in main.jsx)
+  // The old useState + useEffect + toggleTheme code is removed —
+  // useTheme() provides toggleMode() + isDark instead.
 
   const [syncErrors, setSyncErrors] = useState([])
   const [syncPanelOpen, setSyncPanelOpen] = useState(false)
@@ -1254,14 +1248,8 @@ export default function Dashboard(){
 
             <LiveClock hospital={hospital} />
 
-            {/* 1. Theme Toggle */}
-            <button
-              className="dash-icon-btn"
-              title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
-              onClick={toggleTheme}
-            >
-              <AppIcon name={theme === 'light' ? 'sun' : 'moon'} size={18}/>
-            </button>
+            {/* 1. Theme Toggle — Premium SpringToggle */}
+            <SpringToggle />
 
             {/* 2. Notifications Bell Popover */}
             <div style={{ position: 'relative' }}>

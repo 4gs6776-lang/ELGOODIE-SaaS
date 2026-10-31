@@ -12,6 +12,7 @@ import ExpenseVendorManager from '../../components/ExpenseVendorManager'
 import RecurringExpenseManager from '../../components/RecurringExpenseManager'
 import CreditControlRulesManager from '../../components/CreditControlRulesManager'
 import RolePermissionManager from '../../components/RolePermissionManager'
+import AppearanceSettings from '../../components/AppearanceSettings'
 import {
   DEFAULT_REGISTRATION_FEES,
   FOLDER_CATEGORY_LABELS,
@@ -449,6 +450,19 @@ export default function Settings(){
             </div>
           </div>
         </div>
+
+      {/* ---- Appearance (available to all users — individual preference) ---- */}
+      <div className="dash-panel" style={{ marginTop: 20 }}>
+        <div className="dash-panel-head dash-panel-head-wrap">
+          <div>
+            <div className="dash-panel-title">Appearance</div>
+            <div className="dash-panel-sub">Customize your theme, mode, and accent color — saved per user</div>
+          </div>
+        </div>
+        <div style={{ padding: 14 }}>
+          <AppearanceSettings />
+        </div>
+      </div>
 
         <div className="dash-panel">
           <div className="dash-panel-head">
