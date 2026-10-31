@@ -628,6 +628,13 @@ export default function Reception() {
         queue_updated_at:
           new Date().toISOString(),
 
+        // Auto-generate a Hospital Number (MRN) for this patient.
+        // Format: GMH-{CATEGORY}-{YEAR}-{timestamp} (unique per patient)
+        hospital_number:
+          'GMH-' + (form.category ? form.category.toUpperCase().slice(0, 3) : 'PER')
+          + '-' + new Date().getFullYear()
+          + '-' + Date.now().toString().slice(-6),
+
         created_by:
           profile.id,
       }
@@ -727,8 +734,8 @@ export default function Reception() {
 
       showToast(
         isOnline
-          ? `${fullName} registered and checked in`
-          : `${fullName} registered — will sync when back online`
+          ? `${fullName} registered · MRN: ${patientData.hospital_number}`
+          : `${fullName} registered · MRN: ${patientData.hospital_number} — will sync when back online`
       )
     } catch (error) {
       console.error(
