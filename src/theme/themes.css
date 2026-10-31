@@ -1,0 +1,209 @@
+/* ============================================================
+   GOODIE-MEDHUB — Premium Multi-Theme System
+   ------------------------------------------------------------
+   7 named themes × 2 modes (dark/light) + custom accent color.
+   Applied via data-theme + data-mode attributes on <html>:
+
+     <html data-theme="ocean" data-mode="dark">
+     <html data-theme="clinical" data-mode="light">
+
+   Each theme re-binds --teal (the brand accent used everywhere)
+   plus --teal-bright, --teal-soft, --teal-active, --teal-border.
+   The existing --bg, --bg-elevated, --bg-card, --ivory, --muted,
+   --line variables are re-bound per mode (dark/light) per theme
+   so surfaces pick up the theme's tint.
+
+   Backward compat:
+   - If data-theme is not set, the existing globals.css :root
+     defaults apply (teal on dark — the original look).
+   - The html.light-mode class from the old system is preserved:
+     ThemeContext sets BOTH data-mode="light" AND the light-mode
+     class so existing CSS that checks html.light-mode still works.
+   ============================================================ */
+
+/* ============================================================
+   THEME: midnight (the original dark — default)
+   ============================================================ */
+html[data-theme="midnight"][data-mode="dark"] {
+  --bg: #070F14; --bg-elevated: #0A131A; --bg-card: #0C151D; --bg-card-hover: #101D26;
+  --sidebar-bg: #071016; --header-bg: #081118;
+  --line: #17252F; --line-soft: #1B2B35;
+  --teal: #00C7C7; --teal-bright: #00E0D0;
+  --teal-soft: rgba(0,199,199,0.12); --teal-active: rgba(0,199,199,0.16); --teal-border: rgba(0,199,199,0.25);
+  --ivory: #F1F6FA; --muted: #9AAAB7; --muted-dim: #667784;
+}
+html[data-theme="midnight"][data-mode="light"] {
+  --bg: #F3F6F8; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #F1F5F7;
+  --sidebar-bg: #FFFFFF; --header-bg: #FFFFFF;
+  --line: #E1E8EC; --line-soft: #EAEFF2;
+  --teal: #00A6A6; --teal-bright: #00BFB5;
+  --teal-soft: rgba(0,166,166,0.10); --teal-active: rgba(0,166,166,0.14); --teal-border: rgba(0,166,166,0.22);
+  --ivory: #101B23; --muted: #5C6B76; --muted-dim: #8B98A2;
+}
+
+/* ============================================================
+   THEME: clinical (clean white/light neutral)
+   Same accent as midnight but brighter surfaces in light mode
+   and slightly cooler dark mode.
+   ============================================================ */
+html[data-theme="clinical"][data-mode="dark"] {
+  --bg: #0A1018; --bg-elevated: #0E1622; --bg-card: #101A28; --bg-card-hover: #142232;
+  --sidebar-bg: #081018; --header-bg: #0A1220;
+  --line: #1A2A3A; --line-soft: #1F3042;
+  --teal: #00C7C7; --teal-bright: #00E0D0;
+  --teal-soft: rgba(0,199,199,0.10); --teal-active: rgba(0,199,199,0.14); --teal-border: rgba(0,199,199,0.22);
+  --ivory: #F1F6FA; --muted: #9AAAB7; --muted-dim: #667784;
+}
+html[data-theme="clinical"][data-mode="light"] {
+  --bg: #FAFBFC; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #F5F7FA;
+  --sidebar-bg: #FFFFFF; --header-bg: #FFFFFF;
+  --line: #E5EAF0; --line-soft: #EFF2F6;
+  --teal: #00A6A6; --teal-bright: #00BFB5;
+  --teal-soft: rgba(0,166,166,0.08); --teal-active: rgba(0,166,166,0.12); --teal-border: rgba(0,166,166,0.20);
+  --ivory: #1A2332; --muted: #5C6B76; --muted-dim: #8B98A2;
+}
+
+/* ============================================================
+   THEME: ocean (blue-tinted surfaces + cyan/teal accent)
+   ============================================================ */
+html[data-theme="ocean"][data-mode="dark"] {
+  --bg: #061226; --bg-elevated: #0A1A36; --bg-card: #0C2040; --bg-card-hover: #102850;
+  --sidebar-bg: #051020; --header-bg: #08162E;
+  --line: #1A2E50; --line-soft: #1F3860;
+  --teal: #00C7E7; --teal-bright: #2EE6FF;
+  --teal-soft: rgba(0,199,231,0.12); --teal-active: rgba(0,199,231,0.16); --teal-border: rgba(0,199,231,0.25);
+  --ivory: #E8F4FF; --muted: #8FAAC8; --muted-dim: #5A7A9A;
+}
+html[data-theme="ocean"][data-mode="light"] {
+  --bg: #EDF4FB; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #E2EDF7;
+  --sidebar-bg: #F5F9FD; --header-bg: #FFFFFF;
+  --line: #C8DCEC; --line-soft: #DCE8F2;
+  --teal: #0078B8; --teal-bright: #0090D0;
+  --teal-soft: rgba(0,120,184,0.08); --teal-active: rgba(0,120,184,0.12); --teal-border: rgba(0,120,184,0.20);
+  --ivory: #0A1A30; --muted: #4A6480; --muted-dim: #7A8EA0;
+}
+
+/* ============================================================
+   THEME: emerald (neutral surfaces + emerald accent)
+   ============================================================ */
+html[data-theme="emerald"][data-mode="dark"] {
+  --bg: #06141A; --bg-elevated: #0A1C24; --bg-card: #0C242E; --bg-card-hover: #102E3A;
+  --sidebar-bg: #051014; --header-bg: #08181E;
+  --line: #1A3038; --line-soft: #1F3A44;
+  --teal: #18D99B; --teal-bright: #2EE8AC;
+  --teal-soft: rgba(24,217,155,0.12); --teal-active: rgba(24,217,155,0.16); --teal-border: rgba(24,217,155,0.25);
+  --ivory: #E8FAF2; --muted: #8AB0A0; --muted-dim: #5A8074;
+}
+html[data-theme="emerald"][data-mode="light"] {
+  --bg: #EDF8F4; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #E0F0E8;
+  --sidebar-bg: #F4FAF7; --header-bg: #FFFFFF;
+  --line: #C4DED4; --line-soft: #D8ECE2;
+  --teal: #0A9E6A; --teal-bright: #0AB87A;
+  --teal-soft: rgba(10,158,106,0.08); --teal-active: rgba(10,158,106,0.12); --teal-border: rgba(10,158,106,0.20);
+  --ivory: #0A2818; --muted: #4A7060; --muted-dim: #7A9A88;
+}
+
+/* ============================================================
+   THEME: royal (neutral surfaces + purple accent)
+   ============================================================ */
+html[data-theme="royal"][data-mode="dark"] {
+  --bg: #0C0A1A; --bg-elevated: #141026; --bg-card: #1A142E; --bg-card-hover: #221A3A;
+  --sidebar-bg: #0A0816; --header-bg: #100C1E;
+  --line: #2A2050; --line-soft: #30265C;
+  --teal: #9B7EE8; --teal-bright: #AE94F0;
+  --teal-soft: rgba(155,126,232,0.14); --teal-active: rgba(155,126,232,0.18); --teal-border: rgba(155,126,232,0.28);
+  --ivory: #F0EAFF; --muted: #A89AC8; --muted-dim: #6A5E94;
+}
+html[data-theme="royal"][data-mode="light"] {
+  --bg: #F4F0FB; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #EBE5F7;
+  --sidebar-bg: #FAF8FD; --header-bg: #FFFFFF;
+  --line: #D8CCEC; --line-soft: #E4DAF2;
+  --teal: #6A42D4; --teal-bright: #7A52E0;
+  --teal-soft: rgba(106,66,212,0.08); --teal-active: rgba(106,66,212,0.12); --teal-border: rgba(106,66,212,0.20);
+  --ivory: #180A30; --muted: #5A4A80; --muted-dim: #847AA0;
+}
+
+/* ============================================================
+   THEME: rose (neutral surfaces + muted rose accent)
+   ============================================================ */
+html[data-theme="rose"][data-mode="dark"] {
+  --bg: #1A0A14; --bg-elevated: #260E1E; --bg-card: #2E1426; --bg-card-hover: #3A1A30;
+  --sidebar-bg: #160810; --header-bg: #1E0C18;
+  --line: #3A2040; --line-soft: #42284A;
+  --teal: #F06AA8; --teal-bright: #F884BC;
+  --teal-soft: rgba(240,106,168,0.14); --teal-active: rgba(240,106,168,0.18); --teal-border: rgba(240,106,168,0.28);
+  --ivory: #FFEAF4; --muted: #C08AA0; --muted-dim: #8A5E74;
+}
+html[data-theme="rose"][data-mode="light"] {
+  --bg: #FBEAF2; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #F7DAE8;
+  --sidebar-bg: #FDF2F8; --header-bg: #FFFFFF;
+  --line: #ECC8DA; --line-soft: #F0D4E2;
+  --teal: #D43680; --teal-bright: #E04690;
+  --teal-soft: rgba(212,54,128,0.08); --teal-active: rgba(212,54,128,0.12); --teal-border: rgba(212,54,128,0.20);
+  --ivory: #2A0A18; --muted: #804A60; --muted-dim: #A07088;
+}
+
+/* ============================================================
+   THEME: sunset (amber/gold/orange accents)
+   ============================================================ */
+html[data-theme="sunset"][data-mode="dark"] {
+  --bg: #180E04; --bg-elevated: #24160A; --bg-card: #2A1A0C; --bg-card-hover: #362212;
+  --sidebar-bg: #140A04; --header-bg: #1C1206;
+  --line: #3A2A14; --line-soft: #423420;
+  --teal: #F4B62A; --teal-bright: #FFC644;
+  --teal-soft: rgba(244,182,42,0.14); --teal-active: rgba(244,182,42,0.18); --teal-border: rgba(244,182,42,0.28);
+  --ivory: #FFF4E0; --muted: #C0A878; --muted-dim: #8A7448;
+}
+html[data-theme="sunset"][data-mode="light"] {
+  --bg: #FDF6E8; --bg-elevated: #FFFFFF; --bg-card: #FFFFFF; --bg-card-hover: #F8EFD8;
+  --sidebar-bg: #FFF9F0; --header-bg: #FFFFFF;
+  --line: #E8D8B8; --line-soft: #EDE2C8;
+  --teal: #D48A0A; --teal-bright: #E89A1A;
+  --teal-soft: rgba(212,138,10,0.08); --teal-active: rgba(212,138,10,0.12); --teal-border: rgba(212,138,10,0.20);
+  --ivory: #2A1A04; --muted: #80684A; --muted-dim: #A08864;
+}
+
+/* ============================================================
+   CUSTOM ACCENT — overrides --teal with the user's chosen color.
+   Applied via data-accent attribute containing a hex color.
+   ============================================================ */
+html[data-accent] {
+  --teal: var(--custom-accent);
+  --teal-bright: var(--custom-accent-bright);
+  --teal-soft: color-mix(in srgb, var(--custom-accent) 12%, transparent);
+  --teal-active: color-mix(in srgb, var(--custom-accent) 16%, transparent);
+  --teal-border: color-mix(in srgb, var(--custom-accent) 25%, transparent);
+}
+
+/* ============================================================
+   BODY BACKGROUND — follows the active theme
+   ============================================================ */
+body {
+  background:
+    radial-gradient(900px 520px at 100% -10%, color-mix(in srgb, var(--teal) 5%, transparent), transparent 58%),
+    linear-gradient(160deg, var(--bg) 0%, var(--bg) 50%, var(--bg) 100%) !important;
+  background-attachment: fixed !important;
+  transition: background-color 0.3s ease !important;
+}
+
+/* ============================================================
+   SMOOTH THEME TRANSITION — applied when switching themes
+   ============================================================ */
+html.transitioning *,
+html.transitioning *::before,
+html.transitioning *::after {
+  transition: background-color 0.3s ease, border-color 0.3s ease,
+              color 0.3s ease, box-shadow 0.3s ease,
+              fill 0.3s ease, stroke 0.3s ease !important;
+}
+
+/* ============================================================
+   REDUCED MOTION — disable all transitions
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  html.transitioning *,
+  html.transitioning *::before,
+  html.transitioning *::after {
+    transition: none !important;
+  }
+}
