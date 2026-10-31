@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabaseClient'
 import { useOfflineTable } from '../lib/useOfflineTable'
 import MedicationChart from './MedicationChart'
 import AppIcon from './icons'
@@ -55,6 +56,15 @@ export default function PatientProfile({ patientId, onClose }){
   const [pharmPriority, setPharmPriority] = useState('routine')
   const [pharmSaving, setPharmSaving] = useState(false)
   const [pharmError, setPharmError] = useState('')
+
+  // ---- Patient Portal Account modal state ----
+  // Lets staff create a portal login account for this patient.
+  const [showPortalModal, setShowPortalModal] = useState(false)
+  const [portalEmail, setPortalEmail] = useState('')
+  const [portalPassword, setPortalPassword] = useState('')
+  const [portalSaving, setPortalSaving] = useState(false)
+  const [portalError, setPortalError] = useState('')
+  const [portalSuccess, setPortalSuccess] = useState('')
 
   const patient = patients.find(p => p.id === patientId)
 
@@ -319,6 +329,20 @@ export default function PatientProfile({ patientId, onClose }){
               Send to Pharmacy
             </button>
             <button
+              className="btn btn-primary"
+              style={{ width: 'auto', padding: '6px 12px', fontSize: 11.5, background: 'var(--blue)', color: '#fff' }}
+              onClick={() => {
+                setPortalError('')
+                setPortalSuccess('')
+                setPortalEmail(patient?.email || '')
+                setPortalPassword('')
+                setShowPortalModal(true)
+              }}
+              title="Create a Patient Portal account for this patient"
+            >
+              Create Portal Account
+            </button>
+            <button
               onClick={onClose}
               style={{ background: 'transparent', border: '1px solid var(--line)', color: 'var(--muted)', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', flexShrink: 0 }}
             >✕</button>
@@ -580,6 +604,156 @@ export default function PatientProfile({ patientId, onClose }){
               <div className="dash-modal-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowPharmModal(false)} disabled={pharmSaving}>Cancel</button>
                 <button type="submit" form="pharm-form" className="btn btn-primary" disabled={pharmSaving}>{pharmSaving ? 'Sending…' : 'Send to Pharmacy'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ---- Create Portal Account modal ---- */}
+        {showPortalModal && patient && (
+          <div className="dash-modal-backdrop" style={{ zIndex: 80 }} onClick={e => { if (e.target === e.currentTarget) setShowPortalModal(false) }}>
+            <div className="card dash-modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14 }}>
+                <div>
+                  <div className="dash-modal-title" style={{ paddingBottom: 0 }}>Create Portal Account</div>
+                  <div style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 700, marginTop: 2 }}>For {patient.full_name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>MRN: {patient.hospital_number || '—'}</div>
+                </div>
+                <button className="dash-icon-btn" onClick={() => setShowPortalModal(false)} aria-label="Close"><AppIcon name="close" size={18} /></button>
+              </div>
+              <div className="dash-modal-body">
+                {portalError && <div className="error-box" role="alert" style={{ marginBottom: 12 }}>{portalError}</div>}
+                {portalSuccess && (
+                  <div style={{ marginBottom: 12, padding: '12px 14px', borderRadius: 8, background: 'rgba(24,217,155,0.08)', border: '1px solid var(--mint-border)', fontSize: 12.5, color: 'var(--mint)' }}>
+                    ✅ {portalSuccess}
+                  </div>
+                )}
+                <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+                  This creates a login account the patient can use on the Patient Portal app. They'll log in with the email + password you set below.
+                  Give the patient their credentials after creating the account.
+                </p>
+                <form id="portal-form" onSubmit={async (e) => {
+                  e.preventDefault()
+                  setPortalError(''); setPortalSuccess('')
+                  if (!portalEmail.trim()) { setPortalError('Email is required.'); return }
+                  if (!portalPassword || portalPassword.length < 6) { setPortalError('Password must be at least 6 characters.'); return }
+                  setPortalSaving(true)
+                  try {
+                    // Step 1: Check if patient already has a portal account
+                    const { data: existingLink } = await supabase
+                      .from('patient_users')
+                      .select('id, user_id')
+                      .eq('patient_id', patient.id)
+                      .eq('is_active', true)
+                      .maybeSingle()
+
+                    if (existingLink) {
+                      setPortalError('This patient already has a portal account. Ask the patient to log in, or reset their password from Supabase → Authentication.')
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    // Step 2: Create the auth account via Supabase admin API
+                    // Note: supabase.auth.admin requires the service role key.
+                    // Since the staff app uses the anon key, we use the
+                    // public signUp endpoint instead. This creates the user
+                    // with email confirmation OFF (if that's the project setting).
+                    const { data: authData, error: authError } = await supabase.auth.signUp({
+                      email: portalEmail.trim(),
+                      password: portalPassword,
+                    })
+
+                    if (authError) {
+                      setPortalError(authError.message || 'Could not create auth account.')
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    if (!authData?.user?.id) {
+                      setPortalError('Account creation returned no user ID. Please try again.')
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    // Step 3: Link the auth account to the patient record
+                    const { error: linkError } = await supabase
+                      .from('patient_users')
+                      .insert({
+                        user_id: authData.user.id,
+                        patient_id: patient.id,
+                        hospital_id: patient.hospital_id,
+                        is_relative: false,
+                        is_active: true,
+                      })
+
+                    if (linkError) {
+                      console.error('patient_users insert failed:', linkError)
+                      // The auth account was created but linking failed.
+                      // The patient can still log in, but the portal won't
+                      // find their patient record. Staff can manually link
+                      // later by inserting a row in patient_users.
+                      setPortalError('Account created but linking failed. Please note the email and contact support to complete the setup. Error: ' + linkError.message)
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    // Step 4: Audit
+                    writeAudit({
+                      hospitalId: hospital?.id, actor: profile,
+                      action: 'patient.portal_account_created',
+                      entityType: 'patient', entityId: patient.id,
+                      patientId: patient.id,
+                      summary: `Created portal account for ${patient.full_name} (${patient.hospital_number || 'no MRN'}) — email: ${portalEmail.trim()}`,
+                      metadata: {
+                        patient_id: patient.id,
+                        hospital_number: patient.hospital_number,
+                        portal_email: portalEmail.trim(),
+                        auth_user_id: authData.user.id,
+                      },
+                    })
+
+                    setPortalSuccess(`Portal account created! Email: ${portalEmail.trim()} · Password: ${portalPassword}. Give these credentials to the patient. They can now log in to the Patient Portal.`)
+                    setPortalEmail(''); setPortalPassword('')
+                  } catch (err) {
+                    setPortalError(err.message || 'Could not create portal account.')
+                  } finally {
+                    setPortalSaving(false)
+                  }
+                }}>
+                  <div className="field">
+                    <label>Email Address *</label>
+                    <input
+                      type="email"
+                      value={portalEmail}
+                      onChange={e => setPortalEmail(e.target.value)}
+                      placeholder="patient@email.com"
+                      autoFocus
+                      required
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      Pre-filled from patient record. Change if needed.
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Temporary Password *</label>
+                    <input
+                      type="text"
+                      value={portalPassword}
+                      onChange={e => setPortalPassword(e.target.value)}
+                      placeholder="e.g. patient123"
+                      required
+                      style={{ width: '100%', fontFamily: 'var(--font-mono, monospace)' }}
+                    />
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      Minimum 6 characters. Patient can change this after logging in.
+                    </div>
+                  </div>
+                </form>
+              </div>
+              <div className="dash-modal-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowPortalModal(false)} disabled={portalSaving}>Close</button>
+                <button type="submit" form="portal-form" className="btn btn-primary" disabled={portalSaving}>{portalSaving ? 'Creating…' : 'Create Account'}</button>
               </div>
             </div>
           </div>
