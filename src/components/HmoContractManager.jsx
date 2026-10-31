@@ -226,7 +226,7 @@ export default function HmoContractManager() {
 
       {showModal && (
         <div className="dash-modal-backdrop" onClick={e => { if (e.target === e.currentTarget) { setShowModal(false); resetForm() } }}>
-          <div className="card dash-modal" style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
+          <div className="card dash-modal" style={{ maxWidth: 680, width: '100%' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14 }}>
               <div className="dash-modal-title" style={{ paddingBottom: 0 }}>{editingId ? 'Edit HMO Contract' : 'Add HMO Contract'}</div>
               <button className="dash-icon-btn" onClick={() => { setShowModal(false); resetForm() }} aria-label="Close"><AppIcon name="close" size={18} /></button>
