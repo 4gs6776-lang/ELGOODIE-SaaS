@@ -680,6 +680,9 @@ export default function PatientProfile({ patientId, onClose }){
                     // lookup_portal_email RPC can resolve the patient's auth
                     // email from (name + hospital_id + mrn) at portal login
                     // time (migration 070_patient_portal_lookup_fix.sql).
+                    // The patients table only has `hospital_number` as its
+                    // MRN column (migration 068) — there is no `mrn` column
+                    // on patients, so we only use patient.hospital_number.
                     const { error: linkError } = await supabase
                       .from('patient_users')
                       .insert({
@@ -687,7 +690,7 @@ export default function PatientProfile({ patientId, onClose }){
                         patient_id: patient.id,
                         hospital_id: patient.hospital_id,
                         patient_name: patient.full_name,
-                        mrn: patient.hospital_number || patient.mrn || null,
+                        mrn: patient.hospital_number || null,
                         is_relative: false,
                         is_active: true,
                       })
