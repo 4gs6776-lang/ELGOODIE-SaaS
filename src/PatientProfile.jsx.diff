@@ -1,0 +1,41 @@
+--- /home/z/my-project/download/goodie-medhub-v2-create-portal-account/src/components/PatientProfile.jsx	2026-10-31 14:07:30.021137618 +0000
++++ /home/z/my-project/download/patient-portal-lookup-fix/staff-app/src/components/PatientProfile.jsx	2026-10-31 15:35:26.588651390 +0000
+@@ -629,8 +629,8 @@
+                   </div>
+                 )}
+                 <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+-                  This creates a login account the patient can use on the Patient Portal app. They'll log in with the email + password you set below.
+-                  Give the patient their credentials after creating the account.
++                  This creates a login account the patient can use on the Patient Portal app.
++                  The patient logs in with their <b>Full Name</b>, <b>Hospital</b>, <b>Hospital Number (MRN)</b>, and the password you set below — they do NOT need to remember the email.
+                 </p>
+                 <form id="portal-form" onSubmit={async (e) => {
+                   e.preventDefault()
+@@ -676,12 +676,18 @@
+                     }
+ 
+                     // Step 3: Link the auth account to the patient record
++                    // IMPORTANT: also store patient_name + mrn so the new
++                    // lookup_portal_email RPC can resolve the patient's auth
++                    // email from (name + hospital_id + mrn) at portal login
++                    // time (migration 070_patient_portal_lookup_fix.sql).
+                     const { error: linkError } = await supabase
+                       .from('patient_users')
+                       .insert({
+                         user_id: authData.user.id,
+                         patient_id: patient.id,
+                         hospital_id: patient.hospital_id,
++                        patient_name: patient.full_name,
++                        mrn: patient.hospital_number || patient.mrn || null,
+                         is_relative: false,
+                         is_active: true,
+                       })
+@@ -712,7 +718,7 @@
+                       },
+                     })
+ 
+-                    setPortalSuccess(`Portal account created! Email: ${portalEmail.trim()} · Password: ${portalPassword}. Give these credentials to the patient. They can now log in to the Patient Portal.`)
++                    setPortalSuccess(`Portal account created! Patient should log in with their Full Name, Hospital, Hospital Number (${patient.hospital_number || '—'}), and the password you set. They do NOT need their email to log in.`)
+                     setPortalEmail(''); setPortalPassword('')
+                   } catch (err) {
+                     setPortalError(err.message || 'Could not create portal account.')
