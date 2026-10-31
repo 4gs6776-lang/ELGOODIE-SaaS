@@ -129,14 +129,15 @@ create index if not exists patient_users_name_idx
 -- =====================================================================
 -- 3. Backfill patient_name + mrn from the patients table
 -- =====================================================================
--- `hospital_number` is the MRN column added in migration 068.
--- `full_name` is the patient's name.
--- If hospital_number is NULL, fall back to `patient_id` text or `mrn`
--- if it exists on the patients table.
+-- `hospital_number` is the MRN column added in migration 068 — that is
+-- the ONLY MRN column on the patients table. (There is no `mrn`
+-- column on patients; do not reference one.) If hospital_number is
+-- NULL for a patient, fall back to the patient UUID as text so the
+-- patient_users row is still searchable.
 
 update public.patient_users pu
    set patient_name = p.full_name,
-       mrn = coalesce(p.hospital_number, p.mrn, p.patient_id::text)
+       mrn = coalesce(p.hospital_number, p.id::text)
   from public.patients p
  where pu.patient_id = p.id
    and (pu.patient_name is null or pu.mrn is null);
