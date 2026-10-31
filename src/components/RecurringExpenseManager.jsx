@@ -332,7 +332,7 @@ export default function RecurringExpenseManager() {
                   <div className="field">
                     <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <input type="checkbox" checked={form.requires_approval} onChange={e => setField('requires_approval', e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--gold)' }} />
-                      Require approval if amount > threshold
+                      Require approval if amount {'>'} threshold
                     </label>
                     <input type="number" min="0" step="any" value={form.approval_threshold} onChange={e => setField('approval_threshold', e.target.value)} placeholder="e.g. 100000" disabled={!form.requires_approval} style={{ marginTop: 4, opacity: form.requires_approval ? 1 : 0.5, fontFamily: 'var(--font-mono, monospace)' }} />
                   </div>
