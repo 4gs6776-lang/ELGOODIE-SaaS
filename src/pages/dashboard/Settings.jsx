@@ -14,6 +14,7 @@ import CreditControlRulesManager from '../../components/CreditControlRulesManage
 import RolePermissionManager from '../../components/RolePermissionManager'
 import AppearanceSettings from '../../components/AppearanceSettings'
 import FolderCategoryManager from '../../components/FolderCategoryManager'
+import HmoProviderManager from '../../components/HmoProviderManager'
 import {
   DEFAULT_REGISTRATION_FEES,
   FOLDER_CATEGORY_LABELS,
@@ -840,6 +841,28 @@ export default function Settings(){
         ) : (
           <div style={{ padding: 14 }}>
             <HmoContractManager />
+          </div>
+        )}
+      </div>
+
+      {/* ---- HMO Providers (admin / owner only) ---------------------------
+          Admin manages which HMOs appear in the folder-opening dropdown
+          when a patient is registered as 'HMO Folder'. Adds custom HMOs
+          + shows/hides the default system HMOs. */}
+      <div className="dash-panel" style={{ marginTop: 20 }}>
+        <div className="dash-panel-head dash-panel-head-wrap">
+          <div>
+            <div className="dash-panel-title">HMO Providers</div>
+            <div className="dash-panel-sub">Manage which HMOs appear in the registration dropdown when opening an HMO folder</div>
+          </div>
+        </div>
+        {!canManageBank ? (
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--muted)', background: 'var(--bg-elevated)', borderRadius: 8 }}>
+            Only hospital administrators can configure HMO providers.
+          </div>
+        ) : (
+          <div style={{ padding: 14 }}>
+            <HmoProviderManager hospital={hospital} profile={profile} />
           </div>
         )}
       </div>
