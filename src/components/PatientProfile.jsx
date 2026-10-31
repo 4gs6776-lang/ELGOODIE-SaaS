@@ -303,7 +303,7 @@ export default function PatientProfile({ patientId, onClose }){
               )}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-              {patient.age ? `${patient.age} yrs` : ''}{patient.gender ? ` · ${patient.gender}` : ''}{patient.hospital_number ? ` · #${patient.hospital_number}` : ''}
+              {patient.hospital_number ? `MRN: ${patient.hospital_number}` : ''}{patient.hospital_number && (patient.age || patient.gender) ? ' · ' : ''}{patient.age ? `${patient.age} yrs` : ''}{patient.gender ? ` · ${patient.gender}` : ''}
               {folderExpiry && ` · Registered ${new Date(patient.created_at).toLocaleDateString('en-NG')}`}
               {folderExpiry && ` · Expires ${folderExpiry.expiresAt.toLocaleDateString('en-NG')}`}
               {patient.folder_renewal_count > 0 && ` · Renewed ${patient.folder_renewal_count}×`}
@@ -650,6 +650,7 @@ function OverviewTab({ patient, latestConsultation, activePrescriptions, outstan
     <div>
       <AdmissionStatusCard request={admissionRequest} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+        {detailRow('Hospital No. (MRN)', patient.hospital_number)}
         {detailRow('Registered', patient.created_at ? new Date(patient.created_at).toLocaleString() : null)}
         {detailRow('Gender', patient.gender)}
         {detailRow('Date of Birth', patient.date_of_birth ? new Date(patient.date_of_birth).toLocaleDateString() : null)}
