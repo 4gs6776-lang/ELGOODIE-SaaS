@@ -11,6 +11,7 @@ import PaymentMethodManager from '../../components/PaymentMethodManager'
 import ExpenseVendorManager from '../../components/ExpenseVendorManager'
 import RecurringExpenseManager from '../../components/RecurringExpenseManager'
 import CreditControlRulesManager from '../../components/CreditControlRulesManager'
+import RolePermissionManager from '../../components/RolePermissionManager'
 import {
   DEFAULT_REGISTRATION_FEES,
   FOLDER_CATEGORY_LABELS,
@@ -887,6 +888,29 @@ export default function Settings(){
         ) : (
           <div style={{ padding: 14 }}>
             <CreditControlRulesManager />
+          </div>
+        )}
+      </div>
+
+      {/* ---- Role Permissions (admin / owner only) -------------------------
+          Hospital admins can customize which modules each role can access
+          and what actions (view/create/edit/delete) they can perform.
+          Owner is always locked to full access. CMD is always read-only.
+          Falls back to hardcoded defaults when no custom config exists. */}
+      <div className="dash-panel" style={{ marginTop: 20 }}>
+        <div className="dash-panel-head dash-panel-head-wrap">
+          <div>
+            <div className="dash-panel-title">Role Permissions</div>
+            <div className="dash-panel-sub">Customize which modules each role can access and what actions they can perform</div>
+          </div>
+        </div>
+        {!canManageBank ? (
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--muted)', background: 'var(--bg-elevated)', borderRadius: 8 }}>
+            Only hospital administrators can configure role permissions.
+          </div>
+        ) : (
+          <div style={{ padding: 14 }}>
+            <RolePermissionManager hospital={hospital} profile={profile} />
           </div>
         )}
       </div>
