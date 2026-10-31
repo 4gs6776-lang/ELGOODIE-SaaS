@@ -33,6 +33,10 @@
 -- Safe to re-run (CREATE OR REPLACE).
 -- =====================================================================
 
+-- DROP first because CREATE OR REPLACE can't change the return type
+-- of an existing function (PostgreSQL error 42P13).
+drop function if exists public.create_staff_member(text, text, text, text) cascade;
+
 create or replace function public.create_staff_member(
   p_email text,
   p_full_name text,

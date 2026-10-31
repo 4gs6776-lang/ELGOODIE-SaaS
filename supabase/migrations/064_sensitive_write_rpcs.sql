@@ -30,6 +30,10 @@
 -- ---------------------------------------------------------------------
 -- 1. finalize_invoice — assigns sequential invoice number + marks finalized
 -- ---------------------------------------------------------------------
+-- DROP first because CREATE OR REPLACE can't change the return type
+-- of an existing function (PostgreSQL error 42P13).
+drop function if exists public.finalize_invoice(uuid) cascade;
+
 create or replace function public.finalize_invoice(p_invoice_id uuid)
 returns table(success boolean, invoice_number text)
 language plpgsql
@@ -73,9 +77,9 @@ begin
   end if;
 
   -- Generate sequential invoice number via the existing next_document_number RPC
+  -- (next_document_number() returns text — scalar, not TABLE — so use := assignment)
   v_year := extract(year from now());
-  select doc_number into v_invoice_number
-    from public.next_document_number(v_caller_hospital, 'invoice', v_year);
+  v_invoice_number := public.next_document_number(v_caller_hospital, 'invoice', v_year);
 
   -- Update the invoice
   update public.invoices
@@ -100,6 +104,10 @@ grant execute on function public.finalize_invoice(uuid) to authenticated;
 -- Frontend filters should exclude patients where deleted_at IS NOT NULL.
 alter table public.patients add column if not exists deleted_at timestamptz;
 alter table public.patients add column if not exists deleted_by uuid;
+
+-- DROP first because CREATE OR REPLACE can't change the return type
+-- of an existing function (PostgreSQL error 42P13).
+drop function if exists public.soft_delete_patient(uuid, text) cascade;
 
 create or replace function public.soft_delete_patient(
   p_patient_id uuid,
@@ -164,6 +172,10 @@ grant execute on function public.soft_delete_patient(uuid, text) to authenticate
 -- The existing 029 trigger blocks direct UPDATE on profiles.role.
 -- This RPC is the sanctioned path: validates the caller is admin/owner
 -- of the same hospital, then updates the role.
+-- DROP first because CREATE OR REPLACE can't change the return type
+-- of an existing function (PostgreSQL error 42P13).
+drop function if exists public.change_staff_role(uuid, text) cascade;
+
 create or replace function public.change_staff_role(
   p_profile_id uuid,
   p_new_role text

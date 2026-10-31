@@ -45,7 +45,11 @@ CREATE TABLE IF NOT EXISTS public.hmo_providers (
   updated_at      timestamptz NOT NULL DEFAULT now(),
   -- Unique constraint: one (hospital_id, slug) combo. System entries
   -- (hospital_id IS NULL) are unique by slug.
-  CONSTRAINT hmo_providers_unique UNIQUE NULLS NOT NULL (hospital_id, slug)
+  -- NOTE: PostgreSQL does not support UNIQUE NULLS NOT NULL syntax.
+  -- The default UNIQUE constraint treats NULLs as distinct (multiple
+  -- rows with hospital_id=NULL + same slug are allowed). To enforce
+  -- uniqueness for system entries too, we use a partial unique index below.
+  CONSTRAINT hmo_providers_unique UNIQUE (hospital_id, slug)
 );
 
 -- Index for fast lookups per hospital
@@ -55,6 +59,13 @@ CREATE INDEX IF NOT EXISTS hmo_providers_hospital_idx
 -- Index for system-wide entries (hospital_id IS NULL)
 CREATE INDEX IF NOT EXISTS hmo_providers_system_idx
   ON public.hmo_providers (is_active, sort_order)
+  WHERE hospital_id IS NULL;
+
+-- Partial unique index for system entries (hospital_id IS NULL) — ensures
+-- each system slug appears only once. The table-level UNIQUE constraint
+-- doesn't catch this because PostgreSQL treats NULLs as distinct by default.
+CREATE UNIQUE INDEX IF NOT EXISTS hmo_providers_system_slug_uniq
+  ON public.hmo_providers (slug)
   WHERE hospital_id IS NULL;
 
 -- ---------------------------------------------------------------------
@@ -98,18 +109,29 @@ CREATE POLICY "hmo_providers_delete" ON public.hmo_providers
   );
 
 -- Add to realtime publication so the frontend sees new providers instantly
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.hmo_providers;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'hmo_providers') THEN ALTER PUBLICATION supabase_realtime ADD TABLE public.hmo_providers; END IF; END $$;
 
 -- ---------------------------------------------------------------------
 -- Seed: the 30 default HMO providers (from hmoProviders.js)
 -- ---------------------------------------------------------------------
 -- These are inserted with hospital_id = NULL (system-wide) and
--- is_system = true. The ON CONFLICT clause makes this idempotent —
--- re-running the migration won't duplicate entries.
+-- is_system = true.
+--
+-- NOTE: PostgreSQL treats NULLs as distinct in a UNIQUE constraint,
+-- so ON CONFLICT (hospital_id, slug) does NOT catch duplicate system
+-- entries. We solve this by:
+--   1. DELETE all existing system entries (hospital_id IS NULL) first
+--   2. INSERT fresh with ON CONFLICT DO NOTHING as a safety net
+-- The partial unique index hmo_providers_system_slug_uniq enforces
+-- uniqueness at the DB level going forward.
 --
 -- sort_order: 0 = Self-Pay (always first), 1-99 = public, 100+ = private,
 --             999 = Other (always last).
 
+-- Step 1: Clear existing system entries (safe — only affects hospital_id IS NULL rows)
+DELETE FROM public.hmo_providers WHERE hospital_id IS NULL;
+
+-- Step 2: Insert all 30 system entries fresh
 INSERT INTO public.hmo_providers (hospital_id, slug, name, type, is_system, sort_order) VALUES
   -- Sentinel: always first
   (NULL, 'self-pay', 'Self-Pay (No HMO)', 'private', true, 0),
@@ -150,12 +172,7 @@ INSERT INTO public.hmo_providers (hospital_id, slug, name, type, is_system, sort
 
   -- Sentinel: always last
   (NULL, 'other', 'Other (specify in notes)', 'private', true, 999)
-ON CONFLICT (hospital_id, slug) DO UPDATE SET
-  name = EXCLUDED.name,
-  type = EXCLUDED.type,
-  is_system = EXCLUDED.is_system,
-  sort_order = EXCLUDED.sort_order,
-  updated_at = now();
+ON CONFLICT DO NOTHING;
 
 -- ---------------------------------------------------------------------
 -- Verification

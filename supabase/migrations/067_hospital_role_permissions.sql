@@ -101,7 +101,7 @@ CREATE TRIGGER trg_hospital_role_permissions_updated_at
 
 -- Add to realtime publication
 ALTER TABLE public.hospital_role_permissions REPLICA IDENTITY FULL;
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.hospital_role_permissions;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'hospital_role_permissions') THEN ALTER PUBLICATION supabase_realtime ADD TABLE public.hospital_role_permissions; END IF; END $$;
 
 -- ---------------------------------------------------------------------
 -- Safety constraints (DB-level enforcement)

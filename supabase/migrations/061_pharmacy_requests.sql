@@ -55,4 +55,4 @@ CREATE POLICY "pharmacy_requests_delete_own" ON public.pharmacy_requests FOR DEL
   USING (hospital_id = current_hospital_id());
 
 -- Add to realtime publication so pharmacy sees new requests instantly
-ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS public.pharmacy_requests;
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'pharmacy_requests') THEN ALTER PUBLICATION supabase_realtime ADD TABLE public.pharmacy_requests; END IF; EXCEPTION WHEN OTHERS THEN NULL; END $$;
