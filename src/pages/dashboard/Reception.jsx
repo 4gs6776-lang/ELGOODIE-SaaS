@@ -36,6 +36,17 @@ const CATEGORIES = [
   { value: 'hmo',       label: 'HMO Folder',        defaultPrice: DEFAULT_REGISTRATION_FEES.hmo },
 ]
 
+// Helper: filters CATEGORIES to only show those the hospital admin has enabled.
+// Uses the hospital_registration_fees table's is_active column.
+// If no feeRecords exist for a category, it defaults to shown (backward compat).
+function getActiveCategories(feeRecords) {
+  return CATEGORIES.filter(cat => {
+    const row = (feeRecords || []).find(f => f.category === cat.value)
+    // Default to active if no row exists (backward compat)
+    return row ? row.is_active !== false : true
+  })
+}
+
 const NIGERIAN_STATES = [
   'Abia','Adamawa','Akwa Ibom','Anambra','Bauchi','Bayelsa','Benue','Borno',
   'Cross River','Delta','Ebonyi','Edo','Ekiti','Enugu','FCT (Abuja)',
@@ -1638,7 +1649,7 @@ export default function Reception() {
                       —
                     </option>
 
-                    {CATEGORIES.map(
+                    {getActiveCategories(feeRecords).map(
                       category => {
                         const fee = getFeeForCategory(category.value, feeRecords)
                         return (

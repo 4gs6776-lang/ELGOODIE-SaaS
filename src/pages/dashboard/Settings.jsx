@@ -13,6 +13,7 @@ import RecurringExpenseManager from '../../components/RecurringExpenseManager'
 import CreditControlRulesManager from '../../components/CreditControlRulesManager'
 import RolePermissionManager from '../../components/RolePermissionManager'
 import AppearanceSettings from '../../components/AppearanceSettings'
+import FolderCategoryManager from '../../components/FolderCategoryManager'
 import {
   DEFAULT_REGISTRATION_FEES,
   FOLDER_CATEGORY_LABELS,
@@ -758,6 +759,27 @@ export default function Settings(){
               patient has a wallet balance) or the receptionist can waive it with a reason.
             </div>
           </form>
+        )}
+      </div>
+
+      {/* ---- Folder Categories (admin / owner only) ----------------------
+          Admin can enable/disable which folder categories appear at patient
+          registration. Also controls the registration fee per category. */}
+      <div className="dash-panel" style={{ marginTop: 20 }}>
+        <div className="dash-panel-head dash-panel-head-wrap">
+          <div>
+            <div className="dash-panel-title">Folder Categories</div>
+            <div className="dash-panel-sub">Enable or disable patient folder categories + set registration fees</div>
+          </div>
+        </div>
+        {!canManageBank ? (
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--muted)', background: 'var(--bg-elevated)', borderRadius: 8 }}>
+            Only hospital administrators can configure folder categories.
+          </div>
+        ) : (
+          <div style={{ padding: 14 }}>
+            <FolderCategoryManager hospital={hospital} profile={profile} />
+          </div>
         )}
       </div>
 
