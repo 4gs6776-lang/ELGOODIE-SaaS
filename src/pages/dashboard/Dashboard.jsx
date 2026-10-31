@@ -18,7 +18,7 @@ import {
 import {
   FULL_ACCESS_ROLES,
   ROLE_LABELS,
-  getAccessibleModules,
+  getAccessibleModulesWithDb,
 } from '../../lib/permissions'
 import {
   DEFAULT_REGISTRATION_FEES,
@@ -208,8 +208,11 @@ export default function Dashboard(){
 
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
-    return getAccessibleModules(profile?.role)
-  }, [profile?.role])
+    // DB-backed: uses the hospital's custom role permissions if they exist,
+    // falls back to hardcoded defaults when the DB is empty or a specific
+    // role+module row doesn't exist.
+    return getAccessibleModulesWithDb(profile?.role, dbRolePerms)
+  }, [profile?.role, dbRolePerms])
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
@@ -269,77 +272,6 @@ export default function Dashboard(){
   // NEW: Fetch patient vitals to determine who was attended today
   const { records: vitals } = useOfflineTable('patient_vitals', hospital?.id)
 
-  // ---- Admission requests (for green blinking light on Admissions nav) ----
-  // The light blinks green when there are pending admission requests (status='pending').
-  // It stops only when the patient is actually admitted (status='converted').
-  const { records: admissionRequests } = useOfflineTable('admission_requests', hospital?.id)
-  const pendingAdmissions = useMemo(() =>
-    (admissionRequests || []).filter(r => r.status === 'pending'),
-  [admissionRequests])
-
-  // ---- Role-based reminders (for red blinking light on Reminders nav) ----
-  // Auto-generated from system events based on the user's role:
-  //   pharmacist  → pending pharmacy_requests, low stock, expiring drugs
-  //   billing     → unpaid invoices >7 days, pending insurance claims
-  //   lab         → pending lab orders, lab tests awaiting verification
-  //   staff/nurse → patients in queue, overdue appointments
-  //   admin/owner → all of the above
-  const { records: invoicesList2 } = useOfflineTable('invoices', hospital?.id)
-  const { records: labOrdersList } = useOfflineTable('lab_orders', hospital?.id)
-  const { records: pharmReqList } = useOfflineTable('pharmacy_requests', hospital?.id)
-  const { records: insuranceClaims } = useOfflineTable('insurance_claims', hospital?.id)
-
-  const roleBasedReminders = useMemo(() => {
-    const role = profile?.role
-    const reminders = []
-    const isAdmin = role === 'admin' || role === 'owner'
-
-    // Pharmacy reminders (pharmacist + admin)
-    if (role === 'pharmacist' || isAdmin) {
-      const pendingPharmReqs = (pharmReqList || []).filter(r => r.status === 'pending')
-      pendingPharmReqs.forEach(r => {
-        reminders.push({ category: 'pharmacy', title: `Pharmacy request: ${r.request_text?.slice(0, 50)}`, patient: r.patient_name })
-      })
-    }
-
-    // Billing reminders (billing + admin)
-    if (role === 'billing' || isAdmin) {
-      const overdueInvoices = (invoicesList2 || []).filter(i =>
-        i.draft_status !== 'draft' && i.status !== 'cancelled' && i.status !== 'paid' &&
-        Number(i.balance || 0) > 0.001 &&
-        (Date.now() - new Date(i.created_at).getTime()) > 7 * 24 * 60 * 60 * 1000
-      )
-      overdueInvoices.forEach(i => {
-        reminders.push({ category: 'billing', title: `Overdue invoice ${i.invoice_number}: ${formatMoney(i.balance)}`, patient: i.patient_name })
-      })
-      const pendingClaims = (insuranceClaims || []).filter(c => c.status === 'submitted' || c.status === 'queried')
-      pendingClaims.forEach(c => {
-        reminders.push({ category: 'billing', title: `Pending claim ${c.claim_number || c.id?.slice(0, 8)}: ${formatMoney(c.amount)}`, patient: c.patient_name })
-      })
-    }
-
-    // Lab reminders (lab + admin)
-    if (role === 'lab' || isAdmin) {
-      const pendingLabOrders = (labOrdersList || []).filter(o =>
-        ['requested', 'pending'].includes(o.status) &&
-        (Date.now() - new Date(o.created_at).getTime()) > 2 * 60 * 60 * 1000 // >2 hours
-      )
-      pendingLabOrders.forEach(o => {
-        reminders.push({ category: 'lab', title: `Pending lab order: ${o.test_name}`, patient: o.patient_name })
-      })
-    }
-
-    // Patient reminders (staff/nurse/reception + admin)
-    if (['staff', 'nurse', 'reception', 'cmd'].includes(role) || isAdmin) {
-      const queuedPatients = (patients || []).filter(p => p.queue_status && p.queue_status !== 'discharged')
-      queuedPatients.forEach(p => {
-        reminders.push({ category: 'patient', title: `Patient in queue: ${p.full_name}`, patient: p.full_name })
-      })
-    }
-
-    return reminders
-  }, [profile?.role, pharmReqList, invoicesList2, labOrdersList, insuranceClaims, patients])
-
   const [profilePatientId, setProfilePatientId] = useState(null)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(EMPTY_PATIENT_FORM)
@@ -386,6 +318,12 @@ export default function Dashboard(){
   // (DEFAULT_REGISTRATION_FEES) until the admin sets values in Settings.
   const { records: feeRecords } = useOfflineTable('hospital_registration_fees', hospital?.id)
   const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
+  // ---- DB-backed role permissions (RBAC Phase 4) ----
+  // Loads the hospital's custom role permission overrides. When empty
+  // (migration 067 not run, or admin hasn't customized), the
+  // getAccessibleModulesWithDb() function falls back to the hardcoded
+  // defaults in permissions.js — so existing behavior is unchanged.
+  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
   const selectedCategoryFee = getFeeForCategory(form.category, feeRecords)
   const hasRegistrationFee = selectedCategoryFee > 0
 
@@ -1176,36 +1114,13 @@ export default function Dashboard(){
                 >
                   <AppIcon name={item.icon} size={17}/>
                   <span>{item.label}</span>
-
-                  {/* ---- Green blinking light on Admissions ----
-                      Blinks when there are pending admission requests.
-                      Stops only when the patient is actually admitted
-                      (status='converted') — per user's explicit choice. */}
-                  {item.key === 'admissions' && pendingAdmissions.length > 0 && (
-                    <span style={{
-                      width: 10, height: 10, borderRadius: '50%',
-                      background: 'var(--success)',
-                      display: 'inline-block', marginLeft: 'auto',
-                      animation: 'gmedhub-blink 1s ease-in-out infinite alternate',
-                      boxShadow: '0 0 8px var(--success)',
-                      flexShrink: 0,
-                    }} />
-                  )}
-
-                  {/* ---- Red blinking light on Reminders ----
-                      Blinks when there are medication reminders OR
-                      role-based reminders (pending pharmacy requests,
-                      overdue invoices, pending lab orders, etc.).
-                      Stops when ALL items are resolved/cleared — per
-                      user's explicit choice. */}
-                  {item.key === 'notifications' && (dueIn2Min.length > 0 || dueNow.length > 0 || roleBasedReminders.length > 0) && (
+                  {item.key === 'notifications' && (dueIn2Min.length > 0 || dueNow.length > 0) && (
                     <span style={{
                       width: 10, height: 10, borderRadius: '50%',
                       background: 'var(--danger)',
                       display: 'inline-block', marginLeft: 'auto',
                       animation: 'gmedhub-blink 1s ease-in-out infinite alternate',
                       boxShadow: '0 0 6px var(--danger)',
-                      flexShrink: 0,
                     }} />
                   )}
                 </button>
