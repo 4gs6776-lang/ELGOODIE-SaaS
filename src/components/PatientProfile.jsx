@@ -653,12 +653,20 @@ export default function PatientProfile({ patientId, onClose }){
                       return
                     }
 
-                    // Step 2: Create the auth account via Supabase admin API
-                    // Note: supabase.auth.admin requires the service role key.
-                    // Since the staff app uses the anon key, we use the
-                    // public signUp endpoint instead. This creates the user
-                    // with email confirmation OFF (if that's the project setting).
-                    const { data: authData, error: authError } = await supabase.auth.signUp({
+                    // Step 2: Create the auth account.
+                    // IMPORTANT: We use a SEPARATE Supabase client here so
+                    // that the signUp() call doesn't replace the staff
+                    // user's session (which would log them out).
+                    // The staff app and patient portal share the same
+                    // Supabase project, so calling supabase.auth.signUp()
+                    // on the main client would overwrite the staff session.
+                    const { createClient } = await import('@supabase/supabase-js')
+                    const portalClient = createClient(
+                      import.meta.env.VITE_SUPABASE_URL,
+                      import.meta.env.VITE_SUPABASE_ANON_KEY,
+                      { auth: { persistSession: false } }  // don't save the patient's session
+                    )
+                    const { data: authData, error: authError } = await portalClient.auth.signUp({
                       email: portalEmail.trim(),
                       password: portalPassword,
                     })
