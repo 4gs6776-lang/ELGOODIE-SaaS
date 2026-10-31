@@ -1,5 +1,5 @@
 --- /home/z/my-project/download/goodie-medhub-v2-create-portal-account/src/components/PatientProfile.jsx	2026-10-31 14:07:30.021137618 +0000
-+++ /home/z/my-project/download/patient-portal-lookup-fix/staff-app/src/components/PatientProfile.jsx	2026-10-31 15:35:26.588651390 +0000
++++ staff-app/src/components/PatientProfile.jsx	2026-10-31 15:46:44.007204842 +0000
 @@ -629,8 +629,8 @@
                    </div>
                  )}
@@ -11,7 +11,7 @@
                  </p>
                  <form id="portal-form" onSubmit={async (e) => {
                    e.preventDefault()
-@@ -676,12 +676,18 @@
+@@ -676,12 +676,21 @@
                      }
  
                      // Step 3: Link the auth account to the patient record
@@ -19,6 +19,9 @@
 +                    // lookup_portal_email RPC can resolve the patient's auth
 +                    // email from (name + hospital_id + mrn) at portal login
 +                    // time (migration 070_patient_portal_lookup_fix.sql).
++                    // The patients table only has `hospital_number` as its
++                    // MRN column (migration 068) — there is no `mrn` column
++                    // on patients, so we only use patient.hospital_number.
                      const { error: linkError } = await supabase
                        .from('patient_users')
                        .insert({
@@ -26,11 +29,11 @@
                          patient_id: patient.id,
                          hospital_id: patient.hospital_id,
 +                        patient_name: patient.full_name,
-+                        mrn: patient.hospital_number || patient.mrn || null,
++                        mrn: patient.hospital_number || null,
                          is_relative: false,
                          is_active: true,
                        })
-@@ -712,7 +718,7 @@
+@@ -712,7 +721,7 @@
                        },
                      })
  
