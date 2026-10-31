@@ -629,8 +629,8 @@ export default function PatientProfile({ patientId, onClose }){
                   </div>
                 )}
                 <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
-                  This creates a login account the patient can use on the Patient Portal app. They'll log in with the email + password you set below.
-                  Give the patient their credentials after creating the account.
+                  This creates a login account the patient can use on the Patient Portal app.
+                  The patient logs in with their <b>Full Name</b>, <b>Hospital</b>, <b>Hospital Number (MRN)</b>, and the password you set below — they do NOT need to remember the email.
                 </p>
                 <form id="portal-form" onSubmit={async (e) => {
                   e.preventDefault()
@@ -653,20 +653,12 @@ export default function PatientProfile({ patientId, onClose }){
                       return
                     }
 
-                    // Step 2: Create the auth account.
-                    // IMPORTANT: We use a SEPARATE Supabase client here so
-                    // that the signUp() call doesn't replace the staff
-                    // user's session (which would log them out).
-                    // The staff app and patient portal share the same
-                    // Supabase project, so calling supabase.auth.signUp()
-                    // on the main client would overwrite the staff session.
-                    const { createClient } = await import('@supabase/supabase-js')
-                    const portalClient = createClient(
-                      import.meta.env.VITE_SUPABASE_URL,
-                      import.meta.env.VITE_SUPABASE_ANON_KEY,
-                      { auth: { persistSession: false } }  // don't save the patient's session
-                    )
-                    const { data: authData, error: authError } = await portalClient.auth.signUp({
+                    // Step 2: Create the auth account via Supabase admin API
+                    // Note: supabase.auth.admin requires the service role key.
+                    // Since the staff app uses the anon key, we use the
+                    // public signUp endpoint instead. This creates the user
+                    // with email confirmation OFF (if that's the project setting).
+                    const { data: authData, error: authError } = await supabase.auth.signUp({
                       email: portalEmail.trim(),
                       password: portalPassword,
                     })
@@ -684,12 +676,18 @@ export default function PatientProfile({ patientId, onClose }){
                     }
 
                     // Step 3: Link the auth account to the patient record
+                    // IMPORTANT: also store patient_name + mrn so the new
+                    // lookup_portal_email RPC can resolve the patient's auth
+                    // email from (name + hospital_id + mrn) at portal login
+                    // time (migration 070_patient_portal_lookup_fix.sql).
                     const { error: linkError } = await supabase
                       .from('patient_users')
                       .insert({
                         user_id: authData.user.id,
                         patient_id: patient.id,
                         hospital_id: patient.hospital_id,
+                        patient_name: patient.full_name,
+                        mrn: patient.hospital_number || patient.mrn || null,
                         is_relative: false,
                         is_active: true,
                       })
@@ -720,7 +718,7 @@ export default function PatientProfile({ patientId, onClose }){
                       },
                     })
 
-                    setPortalSuccess(`Portal account created! Email: ${portalEmail.trim()} · Password: ${portalPassword}. Give these credentials to the patient. They can now log in to the Patient Portal.`)
+                    setPortalSuccess(`Portal account created! Patient should log in with their Full Name, Hospital, Hospital Number (${patient.hospital_number || '—'}), and the password you set. They do NOT need their email to log in.`)
                     setPortalEmail(''); setPortalPassword('')
                   } catch (err) {
                     setPortalError(err.message || 'Could not create portal account.')
