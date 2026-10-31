@@ -100,6 +100,9 @@ export default function RolePermissionManager({ hospital, profile }) {
   const hasPendingChanges = Object.keys(pendingChanges).length > 0
 
   // Save all pending changes to the DB
+  // Uses upsert logic: if INSERT fails with a unique constraint violation
+  // (because the row was seeded by migration 067 but not yet in IndexedDB),
+  // it fetches the existing server row by (role, module) and UPDATEs it.
   async function handleSave() {
     if (!hospital || !profile) return
     setSaving(true)
@@ -115,16 +118,51 @@ export default function RolePermissionManager({ hospital, profile }) {
             updated_by: profile?.id || null,
           })
         } else {
-          await addRecord({
-            hospital_id: hospital.id,
-            role: data.role,
-            module: data.module,
-            can_view: data.can_view,
-            can_create: data.can_create,
-            can_edit: data.can_edit,
-            can_delete: data.can_delete,
-            updated_by: profile?.id || null,
-          })
+          // Try INSERT first. If it fails with a duplicate key (23505),
+          // the row was seeded on the server but hasn't synced to IndexedDB
+          // yet. In that case, fetch the existing row by (role, module)
+          // from the server and UPDATE it.
+          try {
+            await addRecord({
+              hospital_id: hospital.id,
+              role: data.role,
+              module: data.module,
+              can_view: data.can_view,
+              can_create: data.can_create,
+              can_edit: data.can_edit,
+              can_delete: data.can_delete,
+              updated_by: profile?.id || null,
+            })
+          } catch (insertErr) {
+            // Check if it's a unique constraint violation
+            if (insertErr.message && (insertErr.message.includes('already exists') || insertErr.message.includes('duplicate'))) {
+              // Fetch the existing row from Supabase by (role, module)
+              const { supabase } = await import('../lib/supabaseClient')
+              const { data: serverRow, error: fetchErr } = await supabase
+                .from('hospital_role_permissions')
+                .select('*')
+                .eq('hospital_id', hospital.id)
+                .eq('role', data.role)
+                .eq('module', data.module)
+                .maybeSingle()
+
+              if (fetchErr || !serverRow) {
+                throw new Error(`Could not resolve existing permission row for ${data.role}/${data.module}: ${fetchErr?.message || 'not found'}`)
+              }
+
+              // Update the existing server row
+              await updateRecord(serverRow.id, {
+                can_view: data.can_view,
+                can_create: data.can_create,
+                can_edit: data.can_edit,
+                can_delete: data.can_delete,
+                updated_by: profile?.id || null,
+              })
+            } else {
+              // Re-throw non-duplicate errors
+              throw insertErr
+            }
+          }
         }
       }
 
