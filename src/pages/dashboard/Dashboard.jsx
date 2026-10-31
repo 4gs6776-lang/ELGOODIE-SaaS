@@ -207,6 +207,16 @@ export default function Dashboard(){
   // through src/lib/datetime.js with this zone (Stage 1 req. #11).
   const hospitalTz = getTimezone(hospital)
 
+  // ---- DB-backed role permissions (RBAC) ----
+  // MUST be declared BEFORE allowedKeys which uses it.
+  // Wrapped in try-catch so a missing hospital_role_permissions table
+  // (migration 067 not run yet) doesn't crash the dashboard.
+  let dbRolePerms = []
+  try {
+    const result = useOfflineTable('hospital_role_permissions', hospital?.id)
+    dbRolePerms = result.records || []
+  } catch { dbRolePerms = [] }
+
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
     // DB-backed: uses the hospital's custom role permissions if they exist,
@@ -312,12 +322,9 @@ export default function Dashboard(){
   // (DEFAULT_REGISTRATION_FEES) until the admin sets values in Settings.
   const { records: feeRecords } = useOfflineTable('hospital_registration_fees', hospital?.id)
   const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
-  // ---- DB-backed role permissions (RBAC Phase 4) ----
-  // Loads the hospital's custom role permission overrides. When empty
-  // (migration 067 not run, or admin hasn't customized), the
-  // getAccessibleModulesWithDb() function falls back to the hardcoded
-  // defaults in permissions.js — so existing behavior is unchanged.
-  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
+  // dbRolePerms is now declared earlier (before allowedKeys) with a
+  // try-catch wrapper so a missing hospital_role_permissions table
+  // doesn't crash the dashboard.
   const selectedCategoryFee = getFeeForCategory(form.category, feeRecords)
   const hasRegistrationFee = selectedCategoryFee > 0
 
