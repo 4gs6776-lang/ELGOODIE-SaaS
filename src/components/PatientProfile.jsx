@@ -639,74 +639,68 @@ export default function PatientProfile({ patientId, onClose }){
                   if (!portalPassword || portalPassword.length < 6) { setPortalError('Password must be at least 6 characters.'); return }
                   setPortalSaving(true)
                   try {
-                    // Step 1: Check if patient already has a portal account
-                    const { data: existingLink } = await supabase
-                      .from('patient_users')
-                      .select('id, user_id')
-                      .eq('patient_id', patient.id)
-                      .eq('is_active', true)
-                      .maybeSingle()
+                    // ---------------------------------------------------------------
+                    // Create the portal account via the create-portal-account
+                    // Edge Function (server-side).
+                    //
+                    // WHY NOT supabase.auth.signUp()?
+                    //   signUp() creates the user AND replaces the current
+                    //   browser session with the new user's session — so the
+                    //   staff member gets logged out (their profiles row is
+                    //   no longer found for the new auth.uid).
+                    //
+                    //   The Edge Function uses the SERVICE ROLE KEY (server-
+                    //   side only, never exposed to the browser) to call
+                    //   supabase.auth.admin.createUser(), which creates the
+                    //   user WITHOUT touching the caller's session.
+                    //
+                    // The Edge Function also:
+                    //   - Verifies the caller's JWT (only authenticated staff
+                    //     can call it)
+                    //   - Verifies the caller's role is in the allowed list
+                    //   - Verifies the patient belongs to the caller's
+                    //     hospital (multi-tenant isolation)
+                    //   - Checks for an existing patient_users link
+                    //   - Checks for an existing auth user with the same email
+                    //   - Creates the auth user with email_confirm: true
+                    //     (skips email-confirmation flow)
+                    //   - Inserts the patient_users row with patient_name +
+                    //     mrn so lookup_portal_email can resolve them later
+                    //   - Rolls back the auth user if the link insert fails
+                    // ---------------------------------------------------------------
+                    const { data: fnData, error: fnError } = await supabase.functions.invoke(
+                      'create-portal-account',
+                      {
+                        body: {
+                          email: portalEmail.trim(),
+                          password: portalPassword,
+                          patient_id: patient.id,
+                          hospital_id: patient.hospital_id,
+                          patient_name: patient.full_name,
+                          mrn: patient.hospital_number || null,
+                        },
+                      }
+                    )
 
-                    if (existingLink) {
-                      setPortalError('This patient already has a portal account. Ask the patient to log in, or reset their password from Supabase → Authentication.')
+                    if (fnError) {
+                      setPortalError(fnError.message || 'Edge Function call failed.')
                       setPortalSaving(false)
                       return
                     }
 
-                    // Step 2: Create the auth account via Supabase admin API
-                    // Note: supabase.auth.admin requires the service role key.
-                    // Since the staff app uses the anon key, we use the
-                    // public signUp endpoint instead. This creates the user
-                    // with email confirmation OFF (if that's the project setting).
-                    const { data: authData, error: authError } = await supabase.auth.signUp({
-                      email: portalEmail.trim(),
-                      password: portalPassword,
-                    })
-
-                    if (authError) {
-                      setPortalError(authError.message || 'Could not create auth account.')
+                    if (fnData?.error) {
+                      setPortalError(fnData.error || 'Could not create portal account.')
                       setPortalSaving(false)
                       return
                     }
 
-                    if (!authData?.user?.id) {
+                    if (!fnData?.user_id) {
                       setPortalError('Account creation returned no user ID. Please try again.')
                       setPortalSaving(false)
                       return
                     }
 
-                    // Step 3: Link the auth account to the patient record
-                    // IMPORTANT: also store patient_name + mrn so the new
-                    // lookup_portal_email RPC can resolve the patient's auth
-                    // email from (name + hospital_id + mrn) at portal login
-                    // time (migration 070_patient_portal_lookup_fix.sql).
-                    // The patients table only has `hospital_number` as its
-                    // MRN column (migration 068) — there is no `mrn` column
-                    // on patients, so we only use patient.hospital_number.
-                    const { error: linkError } = await supabase
-                      .from('patient_users')
-                      .insert({
-                        user_id: authData.user.id,
-                        patient_id: patient.id,
-                        hospital_id: patient.hospital_id,
-                        patient_name: patient.full_name,
-                        mrn: patient.hospital_number || null,
-                        is_relative: false,
-                        is_active: true,
-                      })
-
-                    if (linkError) {
-                      console.error('patient_users insert failed:', linkError)
-                      // The auth account was created but linking failed.
-                      // The patient can still log in, but the portal won't
-                      // find their patient record. Staff can manually link
-                      // later by inserting a row in patient_users.
-                      setPortalError('Account created but linking failed. Please note the email and contact support to complete the setup. Error: ' + linkError.message)
-                      setPortalSaving(false)
-                      return
-                    }
-
-                    // Step 4: Audit
+                    // Step 2: Audit
                     writeAudit({
                       hospitalId: hospital?.id, actor: profile,
                       action: 'patient.portal_account_created',
@@ -717,7 +711,8 @@ export default function PatientProfile({ patientId, onClose }){
                         patient_id: patient.id,
                         hospital_number: patient.hospital_number,
                         portal_email: portalEmail.trim(),
-                        auth_user_id: authData.user.id,
+                        auth_user_id: fnData.user_id,
+                        created_via: 'edge-function',
                       },
                     })
 
