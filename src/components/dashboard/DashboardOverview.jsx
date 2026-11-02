@@ -340,6 +340,305 @@ export default function DashboardOverview({ hospital, profile }) {
           )}
         </div>
       )}
+
+      {/* ---------- PREMIUM FILLER CARDS (v2 redesign) ----------
+          New cards to fill the voided space below the scrollbar.
+          Each uses available data from useHospitalDashboard; where
+          data isn't available, shows a graceful "no data yet" state.
+          All cards inherit the glassmorphism + hover lift + animated
+          gradient border from the .hd-card CSS. */}
+      <div className="hd-filler">
+
+        {/* ---- Revenue today + wait time KPIs ---- */}
+        {access.finance && (
+          <>
+            <div className="hd-card hd-kpi-mini" data-tone="green" style={{ '--i': 15 }}>
+              <div className="hd-kpi-mini-label">Collected today</div>
+              <div className="hd-kpi-mini-value">
+                {ready ? <AnimatedNumber value={d.revenueToday} ready={ready} format={money} /> : '—'}
+              </div>
+              <div className="hd-kpi-mini-trend up">
+                ▲ {ready ? `${nf.format(d.invoicesToday)} invoices` : '—'}
+              </div>
+              {ready && d.revenueSeries?.length > 1 && (
+                <Sparkline data={last(d.revenueSeries, 14)} color={PALETTE[theme].green} width={200} height={36} />
+              )}
+            </div>
+
+            <div className="hd-card hd-kpi-mini" data-tone="cyan" style={{ '--i': 16 }}>
+              <div className="hd-kpi-mini-label">Avg wait time</div>
+              <div className="hd-kpi-mini-value">
+                {ready && d.consultList?.length > 0
+                  ? `${Math.round(d.consultList.reduce((s, c) => s + (c.waitMinutes || 0), 0) / d.consultList.length)}m`
+                  : '—'}
+              </div>
+              <div className="hd-kpi-mini-trend">
+                {ready ? `${nf.format(d.consultList?.length || 0)} consults today` : 'No consults yet'}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ---- Bed occupancy donut ---- */}
+        {access.beds && (
+          <div className="hd-card" data-tone="amber" style={{ '--i': 17 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Bed occupancy</h3>
+                  <p>{ready ? `${nf.format(d.bedsOccupied)}/${nf.format(d.bedsTotal)} beds in use` : 'Live bed status'}</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : d.bedsTotal === 0 ? <EmptyNote>No beds configured yet.</EmptyNote> : (
+                <div className="hd-donut">
+                  <svg viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--hd-line)" strokeWidth="8" />
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--hd-amber)"
+                      strokeWidth="8" strokeLinecap="round"
+                      strokeDasharray={`${(d.occupancyPct || 0) * 2.64} 264`}
+                      transform="rotate(-90 50 50)"
+                      style={{ filter: 'drop-shadow(0 0 4px var(--hd-amber))', transition: 'stroke-dasharray 1s ease' }}
+                    />
+                  </svg>
+                  <div className="hd-donut-center">
+                    <div className="hd-donut-value">{Math.round(d.occupancyPct || 0)}%</div>
+                    <div className="hd-donut-label">occupied</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Staff on duty (from audit activity today) ---- */}
+        {access.activity && (
+          <div className="hd-card" data-tone="blue" style={{ '--i': 18 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Staff activity</h3>
+                  <p>Active roles today</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : d.activity.length === 0 ? <EmptyNote>No staff activity recorded yet.</EmptyNote> : (
+                <div className="hd-staff-list">
+                  {(() => {
+                    const byRole = {}
+                    d.activity.forEach(a => {
+                      const role = a.actor_role || 'other'
+                      byRole[role] = (byRole[role] || 0) + 1
+                    })
+                    const sorted = Object.entries(byRole).sort((a, b) => b[1] - a[1]).slice(0, 5)
+                    if (sorted.length === 0) return <EmptyNote>No staff on duty today.</EmptyNote>
+                    return sorted.map(([role, count]) => (
+                      <div key={role} className="hd-staff-row">
+                        <span className={`hd-staff-badge ${['doctor', 'nurse', 'pharmacist', 'admin'].includes(role) ? role : 'other'}`}>
+                          {role}
+                        </span>
+                        <span style={{ flex: 1, color: 'var(--hd-text)' }}>{count} action{count === 1 ? '' : 's'}</span>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Recent admissions ---- */}
+        {access.beds && (
+          <div className="hd-card" data-tone="cyan" style={{ '--i': 19 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Recent admissions</h3>
+                  <p>Last patients admitted</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : (!d.admittedList || d.admittedList.length === 0) ? <EmptyNote>No admissions recorded yet.</EmptyNote> : (
+                <div className="hd-recent-list">
+                  {d.admittedList.slice(0, 5).map((a, i) => (
+                    <div key={i} className="hd-recent-row" data-tone="cyan">
+                      <span className="hd-recent-dot" />
+                      <span className="hd-recent-name">{a.patient_name || a.name || 'Unknown'}</span>
+                      <span className="hd-recent-time">{a.admitted_at ? relativeShort(a.admitted_at) : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Outstanding balances ---- */}
+        {access.finance && (
+          <div className="hd-card" data-tone="red" style={{ '--i': 20 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Outstanding balances</h3>
+                  <p>{ready ? `${nf.format(d.outstandingCount)} unpaid invoices` : 'Patient balances'}</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : (
+                <div className="hd-kpi-mini">
+                  <div className="hd-kpi-mini-label">Total outstanding</div>
+                  <div className="hd-kpi-mini-value" style={{ color: 'var(--hd-red)' }}>
+                    {money(d.outstanding)}
+                  </div>
+                  <div className="hd-kpi-mini-trend down">
+                    across {nf.format(d.outstandingCount)} invoice{(d.outstandingCount || 0) === 1 ? '' : 's'}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Top medications (placeholder — data not in dashboard hook) ---- */}
+        {access.pharmacy && (
+          <div className="hd-card" data-tone="purple" style={{ '--i': 21 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Top medications</h3>
+                  <p>Most prescribed this month</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : (
+                <div className="hd-minibars">
+                  <EmptyNote>Top medications chart appears here once prescription data is available. Visit Pharmacy for live data.</EmptyNote>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Patient demographics (placeholder) ---- */}
+        {access.patients && (
+          <div className="hd-card" data-tone="pink" style={{ '--i': 22 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Patient demographics</h3>
+                  <p>Age + gender distribution</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : (
+                <div className="hd-minibars">
+                  <EmptyNote>Demographics breakdown appears here once patient profiles include age + gender data. Total registered: {nf.format(d.totalPatients)}.</EmptyNote>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Department load (placeholder — uses appointment count) ---- */}
+        {access.appointments && (
+          <div className="hd-card" data-tone="green" style={{ '--i': 23 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Department load</h3>
+                  <p>Appointments per department</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : d.apptUpcoming.length === 0 ? <EmptyNote>No upcoming appointments to break down by department.</EmptyNote> : (
+                <div className="hd-minibars">
+                  {(() => {
+                    const byDept = {}
+                    d.apptUpcoming.forEach(a => {
+                      const dept = a.department || a.doctor_name || 'Unassigned'
+                      byDept[dept] = (byDept[dept] || 0) + 1
+                    })
+                    const sorted = Object.entries(byDept).sort((a, b) => b[1] - a[1]).slice(0, 5)
+                    const max = Math.max(1, ...sorted.map(s => s[1]))
+                    return sorted.map(([dept, count]) => (
+                      <div key={dept} className="hd-minibar" data-tone="green">
+                        <span className="hd-minibar-label">{dept}</span>
+                        <span className="hd-minibar-track">
+                          <span className="hd-minibar-fill" style={{ width: `${(count / max) * 100}%` }} />
+                        </span>
+                        <span className="hd-minibar-value">{count}</span>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Insurance claims (placeholder) ---- */}
+        {access.finance && (
+          <div className="hd-card" data-tone="amber" style={{ '--i': 24 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Insurance claims</h3>
+                  <p>Pending + approved + rejected</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : (
+                <div className="hd-minibars">
+                  <EmptyNote>Insurance claims summary appears here once HMO claim data is available. Visit Billing for live HMO balances.</EmptyNote>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Top diagnoses (placeholder) ---- */}
+        {access.patients && (
+          <div className="hd-card" data-tone="blue" style={{ '--i': 25 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Top diagnoses</h3>
+                  <p>Most common this month</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : (
+                <div className="hd-minibars">
+                  <EmptyNote>Top diagnoses chart appears here once consultation data includes diagnosis codes. Visit DoctorWorkbench for live data.</EmptyNote>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ---- Recent discharges (derived from activity) ---- */}
+        {access.beds && (
+          <div className="hd-card" data-tone="green" style={{ '--i': 26 }}>
+            <div className="hd-panel">
+              <div className="hd-panel-head">
+                <div>
+                  <h3>Recent discharges</h3>
+                  <p>Recently discharged patients</p>
+                </div>
+              </div>
+              {!ready ? <Skeleton h={120} /> : d.activity.length === 0 ? <EmptyNote>No discharges recorded yet.</EmptyNote> : (
+                <div className="hd-recent-list">
+                  {d.activity
+                    .filter(a => a.action && a.action.includes('discharge'))
+                    .slice(0, 5)
+                    .map((a, i) => (
+                      <div key={i} className="hd-recent-row" data-tone="green">
+                        <span className="hd-recent-dot" />
+                        <span className="hd-recent-name">{a.summary || a.action}</span>
+                        <span className="hd-recent-time">{relativeShort(a.created_at)}</span>
+                      </div>
+                    ))}
+                  {d.activity.filter(a => a.action && a.action.includes('discharge')).length === 0 && (
+                    <EmptyNote>No discharges in the recent audit trail.</EmptyNote>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   )
 }
