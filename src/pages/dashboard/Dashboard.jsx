@@ -5,7 +5,8 @@ import { supabase } from '../../lib/supabaseClient'
 import AppIcon from '../../components/icons'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
-import SpringToggle from '../../components/SpringToggle'
+// Theme system removed — SpringToggle + useTheme no longer imported
+// (the app now uses a single fixed dark theme; see main.jsx)
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -237,9 +238,8 @@ export default function Dashboard(){
 
   const [tab, setTab] = useState('overview')
   const [drawerOpen, setDrawerOpen] = useState(false)
-  // Theme is now managed by ThemeContext (ThemeProvider in main.jsx)
-  // The old useState + useEffect + toggleTheme code is removed —
-  // useTheme() provides toggleMode() + isDark instead.
+  // Theme system removed — app now uses a single fixed dark theme.
+  // (Previously: ThemeProvider + useTheme() + SpringToggle here.)
 
   const [syncErrors, setSyncErrors] = useState([])
   const [syncPanelOpen, setSyncPanelOpen] = useState(false)
@@ -1255,8 +1255,8 @@ export default function Dashboard(){
 
             <LiveClock hospital={hospital} />
 
-            {/* 1. Theme Toggle — Premium SpringToggle */}
-            <SpringToggle />
+            {/* Theme Toggle REMOVED — was causing reload loop + app misbehavior.
+                The app now uses a single fixed dark theme (see main.jsx). */}
 
             {/* 2. Notifications Bell Popover */}
             <div style={{ position: 'relative' }}>
