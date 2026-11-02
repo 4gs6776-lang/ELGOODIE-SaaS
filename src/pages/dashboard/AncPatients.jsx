@@ -130,7 +130,11 @@ export default function AncPatients() {
 
   // ---- If the user clicked into a patient profile, render it instead -
   if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+    return <PatientProfile
+      patientId={profilePatientId}
+      patient={patients.find(p => p.id === profilePatientId)}
+      onClose={() => setProfilePatientId(null)}
+    />
   }
 
   const trimesterLabel = (t) => t === 1 ? '1st' : t === 2 ? '2nd' : t === 3 ? '3rd' : '—'

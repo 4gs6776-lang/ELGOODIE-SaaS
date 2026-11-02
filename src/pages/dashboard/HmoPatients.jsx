@@ -102,7 +102,11 @@ export default function HmoPatients() {
 
   // ---- If the user clicked into a patient profile, render it instead -
   if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+    return <PatientProfile
+      patientId={profilePatientId}
+      patient={patients.find(p => p.id === profilePatientId)}
+      onClose={() => setProfilePatientId(null)}
+    />
   }
 
   return (

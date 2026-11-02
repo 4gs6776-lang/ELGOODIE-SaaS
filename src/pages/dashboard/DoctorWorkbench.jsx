@@ -131,7 +131,12 @@ export default function DoctorWorkbench() {
   useRealtimeAlert('patient_vitals', hospital?.id, (row) => {
     syncVitals()
     syncPatients()  // queue_status may have changed on the patient row too
-    if (row.patient_name) {
+    // Only toast if this is an actual queue entry — NOT a "recorded"
+    // vitals entry from the Patient Profile (which has status='recorded').
+    // PatientProfile.jsx's handleSaveVitals uses status='recorded' to
+    // avoid auto-queueing; only Nursing triage + the explicit "Send to
+    // Doctor" button use status='waiting'.
+    if (row.status === 'waiting' && row.patient_name) {
       showToast(`New vitals ready: ${row.patient_name}`)
     }
   }, { event: 'INSERT' })
@@ -139,8 +144,9 @@ export default function DoctorWorkbench() {
     syncVitals()
     syncPatients()
     // Only toast if the patient was just sent to the doctor queue
-    // (status changed to "sent_to_doctor" or queue_status === "with_doctor")
-    if (row.queue_status === 'with_doctor' || row.status === 'sent_to_doctor') {
+    // (status changed to "waiting" via the "Send to Doctor" button,
+    // OR queue_status === "with_doctor")
+    if (row.queue_status === 'with_doctor' || row.status === 'sent_to_doctor' || row.status === 'waiting') {
       showToast(`Patient sent to your queue: ${row.patient_name || 'a patient'}`)
     }
   }, { event: 'UPDATE' })

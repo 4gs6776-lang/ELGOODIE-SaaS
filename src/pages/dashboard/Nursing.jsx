@@ -578,7 +578,11 @@ export default function Nursing(){
       )}
 
       {profilePatientId && (
-        <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+        <PatientProfile
+          patientId={profilePatientId}
+          patient={patients.find(p => p.id === profilePatientId)}
+          onClose={() => setProfilePatientId(null)}
+        />
       )}
 
       {aiTriagePatientId && (
