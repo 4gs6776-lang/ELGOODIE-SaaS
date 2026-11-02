@@ -13,11 +13,11 @@ const TABS = ['Overview', 'Vitals', 'Wallet', 'History', 'Items Given', 'Prescri
 // Full-screen patient dashboard, opened by clicking a patient anywhere in
 // the app. Reuses the same offline-first tables every other module reads —
 // nothing new is stored here except through those existing hooks.
-export default function PatientProfile({ patientId, onClose }){
+export default function PatientProfile({ patientId, patient: initialPatient, onClose }){
   const { profile, hospital } = useAuth()
   const timezone = getTimezone(hospital)
   const { records: patients, addRecord: addPatient, updateRecord: updatePatient, loadError: patientsLoadError } = useOfflineTable('patients', hospital?.id)
-  const { records: vitals, addRecord: addVitals } = useOfflineTable('patient_vitals', hospital?.id)
+  const { records: vitals, addRecord: addVitals, updateRecord: updateVitals } = useOfflineTable('patient_vitals', hospital?.id)
   const { records: prescriptions, addRecord: addPrescription, updateRecord: updatePrescription } = useOfflineTable('prescriptions', hospital?.id)
   const { records: pharmacyItems, updateRecord: updatePharmacyItem } = useOfflineTable('pharmacy_items', hospital?.id)
   const { records: invoices, addRecord: addInvoice, updateRecord: updateInvoice } = useOfflineTable('invoices', hospital?.id)
@@ -66,7 +66,13 @@ export default function PatientProfile({ patientId, onClose }){
   const [portalError, setPortalError] = useState('')
   const [portalSuccess, setPortalSuccess] = useState('')
 
-  const patient = patients.find(p => p.id === patientId)
+  // Use the patient passed in as a prop if available — eliminates the
+  // first-render race where useOfflineTable returns [] and the lookup
+  // fails for 6 seconds until "Couldn't load this patient" fires.
+  // The parent (Dashboard, Nursing, HmoPatients, etc.) already has the
+  // patient record in scope — pass it through so we don't have to
+  // re-fetch it.
+  const patient = initialPatient || patients.find(p => p.id === patientId)
 
   // ---- Phase 5: Folder expiry computation (category-based) ----
   // Personal + Emergency: 3 years
@@ -1779,11 +1785,22 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
 
     setSaving(true)
     try {
+      // CRITICAL: status 'waiting' would auto-send this patient to the
+      // DoctorWorkbench queue (DoctorWorkbench.jsx:233 filters on
+      // v.status === 'waiting'). Recording vitals from the Patient
+      // Profile is a HISTORY append, not a triage action — use
+      // 'recorded' so the vitals save to the patient's history
+      // WITHOUT appearing in the doctor's queue.
+      //
+      // If staff wants to send the patient to the doctor, they should
+      // click the "Send to Doctor" button below the vitals table,
+      // which calls handleSendToDoctor() and explicitly sets
+      // status='waiting' + assigned_doctor.
       await addVitals({
         patient_id: patient.id,
         patient_name: patient.full_name,
         ...newVitals,
-        status: 'waiting',
+        status: 'recorded',
         recorded_at: new Date().toISOString(),
         created_by: profile.id,
       })
@@ -1792,16 +1809,45 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
         action: 'vitals.recorded_from_profile',
         entityType: 'patient_vitals', entityId: null,
         patientId: patient.id,
-        summary: `Vitals recorded for ${patient.full_name} from patient profile`,
-        metadata: { ...newVitals, source: 'patient_profile' },
+        summary: `Vitals recorded for ${patient.full_name} from patient profile (history only — not sent to doctor queue)`,
+        metadata: { ...newVitals, source: 'patient_profile', status: 'recorded' },
       })
-      showToast('Vitals recorded')
+      showToast('Vitals recorded — saved to history only')
       setShowAddModal(false)
       setNewVitals({ temperature: '', blood_pressure: '', pulse_rate: '', respiratory_rate: '', spo2: '', weight: '', height: '', nurse_notes: '', urgency: 'Routine' })
     } catch (err) {
       setFormError(err.message || 'Could not save vitals.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Send to Doctor Queue — explicit action.
+  // Only called when staff clicks the "Send to Doctor" button below
+  // the vitals table. Sets status='waiting' so DoctorWorkbench picks
+  // it up.
+  // ---------------------------------------------------------------
+  async function handleSendToDoctor(vitalsId) {
+    if (!vitalsId) return
+    if (!patient?.id) { showToast('Patient not loaded.'); return }
+    if (!profile?.id) { showToast('Account still loading.'); return }
+    try {
+      await updateVitals(vitalsId, {
+        status: 'waiting',
+        queue_status: 'sent_to_doctor',
+      })
+      writeAudit({
+        hospitalId: hospital?.id, actor: profile,
+        action: 'vitals.sent_to_doctor_from_profile',
+        entityType: 'patient_vitals', entityId: vitalsId,
+        patientId: patient.id,
+        summary: `Vitals for ${patient.full_name} explicitly sent to doctor queue from patient profile`,
+        metadata: { vitals_id: vitalsId, action: 'send_to_doctor' },
+      })
+      showToast(`Sent to doctor queue`)
+    } catch (err) {
+      showToast(err.message || 'Could not send to doctor queue.')
     }
   }
 
@@ -1835,6 +1881,8 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
                 <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Wt</th>
                 <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Urgency</th>
                 <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Doctor</th>
+                <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Status</th>
+                <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -1859,10 +1907,31 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
                         </span>
                       </td>
                       <td style={{ padding: 12, fontSize: 11.5, color: 'var(--muted)' }}>{v.assigned_doctor || '—'}</td>
+                      <td style={{ padding: 12 }}>
+                        {v.status === 'waiting' ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(24,217,155,0.18)', color: 'var(--mint)', textTransform: 'uppercase' }}>In Doctor Queue</span>
+                        ) : v.status === 'completed' ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(0,168,255,0.18)', color: 'var(--blue)', textTransform: 'uppercase' }}>Completed</span>
+                        ) : (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(150,150,150,0.18)', color: 'var(--muted)', textTransform: 'uppercase' }}>Recorded</span>
+                        )}
+                      </td>
+                      <td style={{ padding: 12, textAlign: 'right' }}>
+                        {v.status !== 'waiting' && v.status !== 'completed' && (
+                          <button
+                            className="btn btn-ghost"
+                            style={{ width: 'auto', padding: '5px 10px', fontSize: 11, color: 'var(--mint)', borderColor: 'var(--mint-border)' }}
+                            onClick={(e) => { e.stopPropagation(); handleSendToDoctor(v.id) }}
+                            title="Send this vitals record to the doctor's queue"
+                          >
+                            <AppIcon name="send" size={12} /> Send to Doctor
+                          </button>
+                        )}
+                      </td>
                     </tr>
                     {expanded && (
                       <tr key={v.id + '-expanded'} style={{ background: 'var(--bg-elevated)' }}>
-                        <td colSpan={9} style={{ padding: 14 }}>
+                        <td colSpan={11} style={{ padding: 14 }}>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
                             {v.chief_complaints && (
                               <div>

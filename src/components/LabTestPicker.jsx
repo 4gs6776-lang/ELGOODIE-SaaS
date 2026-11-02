@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import AppIcon from './icons'
 import { formatMoney, resolvePriceForPatient, computeHmoSplit, findContractForPatient } from '../lib/billingService'
 
@@ -37,6 +37,24 @@ export default function LabTestPicker({ catalog, priceLists, priceListItems, con
   // Filter to lab tests only (category = 'lab')
   const labTests = useMemo(() => {
     return (catalog || []).filter(s => s.is_active !== false && s.category === 'lab')
+  }, [catalog])
+
+  // Defensive warning — helps diagnose "no lab tests loading" silently.
+  // If catalog is empty, it's almost always because migration 066 didn't
+  // run, OR the service_catalog table is missing, OR RLS is blocking reads.
+  // The console.warn makes this visible without breaking the UI.
+  useEffect(() => {
+    if (!catalog || catalog.length === 0) {
+      console.warn(
+        '[LabTestPicker] service_catalog is empty — possible causes:\n' +
+        '  1. Migration 066_reconstruct_phase1_master_data.sql was not applied\n' +
+        '  2. The service_catalog table is missing entirely\n' +
+        '  3. RLS policy "service_catalog_select" is blocking reads\n' +
+        '  4. No lab tests have been added to Settings → Service Catalog yet\n' +
+        'Run this in Supabase SQL editor to verify:\n' +
+        "  select count(*) from public.service_catalog where category = 'lab';"
+      )
+    }
   }, [catalog])
 
   const categories = useMemo(() => {
