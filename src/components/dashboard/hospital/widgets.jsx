@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
+import { useTheme } from '../../../context/ThemeContext'
 
 // =====================================================================
 // Small reusable pieces for the hospital overview. Nothing in here
@@ -25,19 +26,27 @@ export function useReducedMotion() {
   return reduced
 }
 
-// Watches the existing "light-mode" class on <html> (set by the app's
-// theme toggle) so chart colours can follow the theme without a second
-// theme system.
+// Returns the current theme mode ('light' | 'dark') for chart colour
+// selection. Reads from the React ThemeContext — no MutationObserver.
 //
-// THEME SYSTEM REMOVED — this hook now always returns 'dark' because
-// the app uses a single fixed dark theme. The previous implementation
-// used a MutationObserver on <html>'s class attribute, which fired on
-// every ThemeProvider DOM mutation and contributed to the reload
-// loop. With ThemeProvider removed entirely, there's nothing for the
-// observer to watch — and reading <html>'s class would always return
-// 'dark' anyway.
+// CRITICAL ARCHITECTURE FIX (vs the previous reload loop):
+//   The old version of this hook used a MutationObserver on <html>'s
+//   class attribute. When ThemeProvider.applyThemeToDOM() toggled the
+//   `light-mode` class, the MutationObserver fired → setMode →
+//   re-render → framer-motion re-evaluated → ThemeProvider re-rendered
+//   → applyThemeToDOM ran again → MutationObserver fired again →
+//   infinite render loop → browser reloaded forever.
+//
+//   This version reads `themeMode` directly from the React context
+//   (useTheme()). No DOM observation. No feedback loop possible.
+//   The hook is also a no-op component (no useState, no useEffect,
+//   no observer) so it adds zero render overhead.
+//
+//   If ThemeProvider is not mounted (e.g., during testing), it falls
+//   back to 'dark' (the default).
 export function useThemeMode() {
-  return 'dark'
+  const { themeMode } = useTheme()
+  return themeMode || 'dark'
 }
 
 export const PALETTE = {
