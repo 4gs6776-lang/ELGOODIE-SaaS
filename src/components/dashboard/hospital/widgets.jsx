@@ -28,15 +28,16 @@ export function useReducedMotion() {
 // Watches the existing "light-mode" class on <html> (set by the app's
 // theme toggle) so chart colours can follow the theme without a second
 // theme system.
+//
+// THEME SYSTEM REMOVED — this hook now always returns 'dark' because
+// the app uses a single fixed dark theme. The previous implementation
+// used a MutationObserver on <html>'s class attribute, which fired on
+// every ThemeProvider DOM mutation and contributed to the reload
+// loop. With ThemeProvider removed entirely, there's nothing for the
+// observer to watch — and reading <html>'s class would always return
+// 'dark' anyway.
 export function useThemeMode() {
-  const read = () => (document.documentElement.classList.contains('light-mode') ? 'light' : 'dark')
-  const [mode, setMode] = useState(read)
-  useEffect(() => {
-    const obs = new MutationObserver(() => setMode(read()))
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => obs.disconnect()
-  }, [])
-  return mode
+  return 'dark'
 }
 
 export const PALETTE = {
