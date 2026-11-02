@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import { useOfflineTable } from '../lib/useOfflineTable'
+import { useRealtimeAlert } from '../lib/useRealtimeAlert'
 import MedicationChart from './MedicationChart'
 import AppIcon from './icons'
 import PatientWallet from './PatientWallet'
@@ -21,7 +22,12 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   const { records: prescriptions, addRecord: addPrescription, updateRecord: updatePrescription } = useOfflineTable('prescriptions', hospital?.id)
   const { records: pharmacyItems, updateRecord: updatePharmacyItem } = useOfflineTable('pharmacy_items', hospital?.id)
   const { records: invoices, addRecord: addInvoice, updateRecord: updateInvoice } = useOfflineTable('invoices', hospital?.id)
-  const { records: admissionRequests } = useOfflineTable('admission_requests', hospital?.id)
+  // admission_requests — also expose syncFromServer so the realtime
+  // listener can refresh this table when a discharge happens elsewhere
+  // in the app (e.g., from the Admissions module). Without this, the
+  // PatientProfile would keep showing the stale "Currently Admitted"
+  // card until the user closes + reopens it.
+  const { records: admissionRequests, syncFromServer: syncAdmissionRequests } = useOfflineTable('admission_requests', hospital?.id)
   const { records: drugChartEntries, addRecord: addDrugChartEntry, updateRecord: updateDrugChartEntry, deleteRecord: deleteDrugChartEntry } = useOfflineTable('patient_drug_charts', hospital?.id)
 
   // ---- Pharmacy requests (free-text med requests to pharmacy) ----
@@ -199,6 +205,27 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     return () => clearTimeout(timer)
   }, [patientId])
 
+  // ---------------------------------------------------------------
+  // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after
+  // discharge) — listen for UPDATEs on admission_requests so the open
+  // profile refreshes automatically when a discharge happens elsewhere
+  // (e.g., from the Admissions module).
+  //
+  // Without this listener, the user would have to close + reopen the
+  // profile to see the discharge reflected. With it, the "Currently
+  // Admitted" card disappears within ~1 second of the discharge.
+  //
+  // Listens for UPDATE events specifically (not INSERT) because
+  // discharge is an UPDATE on the admission_requests.status field.
+  // ---------------------------------------------------------------
+  useRealtimeAlert('admission_requests', hospital?.id, () => {
+    // Pull fresh rows from Supabase → IndexedDB → React state.
+    // This refreshes the admissionRequests array, which re-runs the
+    // activeAdmissionRequest filter (now excluding 'discharged'), and
+    // the AdmissionStatusCard disappears.
+    if (syncAdmissionRequests) syncAdmissionRequests()
+  }, { event: 'UPDATE' })
+
   function showToast(msg){
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
@@ -270,9 +297,25 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
+  // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after discharge)
+  // -----------------------------------------------------------------
+  // Previously this filter excluded only 'cancelled' and 'rejected' —
+  // but NOT 'discharged'. So once a patient was admitted (status set
+  // to 'converted' on the admission_request), the card kept showing
+  // "CURRENTLY ADMITTED" forever, even after the patient was
+  // discharged.
+  //
+  // Now we also exclude 'discharged' so the card disappears when the
+  // patient is discharged.
   const activeAdmissionRequest = admissionRequests
-    .filter(r => r.patient_id === patient.id && r.status !== 'cancelled' && r.status !== 'rejected')
+    .filter(r => r.patient_id === patient.id && r.status !== 'cancelled' && r.status !== 'rejected' && r.status !== 'discharged')
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null
+
+  // Also expose the most recent discharge (if any) so the UI can show
+  // a "Recently Discharged" notice instead of just hiding the card.
+  const recentDischarge = admissionRequests
+    .filter(r => r.patient_id === patient.id && r.status === 'discharged')
+    .sort((a, b) => new Date(b.reviewed_at || b.created_at) - new Date(a.reviewed_at || a.created_at))[0] || null
 
   function findPharmacyMatch(drugName){
     if (!drugName) return null
@@ -797,6 +840,11 @@ const ADMISSION_STATUS_MAP = {
   pending: { heading: 'ADMISSION RECOMMENDED', label: 'Awaiting Admission', color: 'var(--gold)' },
   approved: { heading: 'ADMISSION APPROVED', label: 'Admission Approved', color: 'var(--teal)' },
   converted: { heading: 'CURRENTLY ADMITTED', label: 'Currently Admitted', color: 'var(--teal)' },
+  // NEW: when the patient has been discharged, the activeAdmissionRequest
+  // filter will exclude this row, so the AdmissionStatusCard returns null
+  // and the card disappears. The map entry is here for safety in case
+  // any code path passes a 'discharged' request to AdmissionStatusCard.
+  discharged: { heading: 'RECENTLY DISCHARGED', label: 'Discharged', color: 'var(--muted)' },
 }
 
 function AdmissionStatusCard({ request }){
