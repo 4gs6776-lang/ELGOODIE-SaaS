@@ -316,7 +316,7 @@ export function ActivityChart({ series, loading, theme }) {
                 tooltipType="none" activeDot={false} isAnimationActive={showAnim} animationDuration={1300} animationEasing="ease-out" />
             ))}
             {active.map((s) => (
-              <Line key={s.key} className={`hd-glowline hd-glow-${s.color}`} type="monotone" dataKey={s.key} name={s.label} stroke={colors[s.color]} strokeWidth={2.4}
+              <Line key={s.key} className={`hd-glowline hd-glow-${s.color}`} type="monotone" dataKey={s.key} name={s.label} stroke={colors[s.color]} strokeWidth={3}
                 dot={makeDot(colors[s.color], rows.length, showAllDots)} activeDot={{ r: 5.5 }}
                 isAnimationActive={showAnim} animationDuration={1300} animationEasing="ease-out" />
             ))}
@@ -351,7 +351,7 @@ export function GrowthChart({ points, loading, theme, name = 'Total patients', t
           <Tooltip content={<ChartTip />} cursor={{ stroke: colors.axis, strokeOpacity: 0.3 }} />
           <Area type="monotone" dataKey="total" name={name} stroke="none" fill={`url(#${uid}-g)`} tooltipType="none" activeDot={false}
             isAnimationActive={showAnim} animationDuration={1300} animationEasing="ease-out" />
-          <Line className={`hd-glowline hd-glow-${tone}`} type="monotone" dataKey="total" name={name} stroke={color} strokeWidth={2.6}
+          <Line className={`hd-glowline hd-glow-${tone}`} type="monotone" dataKey="total" name={name} stroke={color} strokeWidth={3}
             dot={makeDot(color, rows.length, rows.length <= 14)} activeDot={{ r: 5.5 }}
             isAnimationActive={showAnim} animationDuration={1300} animationEasing="ease-out" />
         </ComposedChart>
