@@ -79,30 +79,55 @@ export default function LabTestPicker({ catalog, priceLists, priceListItems, con
   }, [labTests, search, categoryFilter])
 
   // Resolve price + HMO split for each filtered test
+  //
+  // CRITICAL FIX: resolvePriceForPatient takes POSITIONAL args, NOT an
+  // object. The old code passed `{service, catalog, priceLists, ...}`
+  // as a single object → the function received that object as `catalog`
+  // and crashed when it tried `findServiceByCode(catalog, serviceCode)`
+  // → returned null → LabTestPicker accessed `resolved.price` →
+  // "Cannot read properties of null (reading 'price')" → React
+  // ErrorBoundary caught it → "Something went wrong" page.
+  //
+  // Also: resolvePriceForPatient takes a `serviceCode` (string), NOT
+  // the full service object. We pass `t.code` so it can look up the
+  // service in the catalog internally. The `t` object already IS the
+  // catalog row, so we use its `default_price` as the fallback if
+  // resolvePriceForPatient returns null (shouldn't happen, but be
+  // defensive).
+  //
+  // Also: computeHmoSplit takes `totalAmount` as the FIRST positional
+  // arg (number), with coverage as the second (destructured object).
+  // The old code passed `{total, coveragePercent}` as one object →
+  // total was always NaN → split was always 0.
   const resolvedTests = useMemo(() => {
     return filtered.map(t => {
-      const resolved = resolvePriceForPatient({
-        service: t,
-        catalog,
-        priceLists,
-        priceListItems,
-        contracts,
-        patient,
-        quantity: 1,
+      const resolved = resolvePriceForPatient(catalog, priceLists, priceListItems, contracts, patient, t.code)
+
+      // If resolvePriceForPatient returned null (e.g., service code not
+      // found in catalog), fall back to the catalog row's default_price.
+      // This shouldn't happen because `t` came from the catalog filter,
+      // but be defensive so we never crash the picker.
+      const price = resolved?.price ?? (Number(t.default_price) || 0)
+      const coveragePercent = resolved?.coveragePercent ?? 0
+      const priceListId = resolved?.priceListId ?? null
+      const contractId = resolved?.contractId ?? null
+      const requiresPreAuth = resolved?.priorAuthRequired ?? false
+
+      const split = computeHmoSplit(price, {
+        coveragePercent,
+        copayPercent: resolved?.copayPercent ?? 100,
+        copayAmount: resolved?.copayAmount ?? 0,
       })
-      const split = computeHmoSplit({
-        total: resolved.price,
-        coveragePercent: resolved.coveragePercent,
-      })
+
       return {
         ...t,
-        price: resolved.price,
-        priceListId: resolved.priceListId,
-        contractId: resolved.contractId,
-        coveragePercent: resolved.coveragePercent,
+        price,
+        priceListId,
+        contractId,
+        coveragePercent,
         hmoAmount: split.hmoAmount,
         patientAmount: split.patientAmount,
-        requiresPreAuth: resolved.requiresPreAuth,
+        requiresPreAuth,
       }
     })
   }, [filtered, catalog, priceLists, priceListItems, contracts, patient])
