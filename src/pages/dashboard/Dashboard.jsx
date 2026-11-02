@@ -5,8 +5,7 @@ import { supabase } from '../../lib/supabaseClient'
 import AppIcon from '../../components/icons'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
-// Theme system removed — SpringToggle + useTheme no longer imported
-// (the app now uses a single fixed dark theme; see main.jsx)
+import SpringToggle from '../../components/SpringToggle'
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -238,8 +237,8 @@ export default function Dashboard(){
 
   const [tab, setTab] = useState('overview')
   const [drawerOpen, setDrawerOpen] = useState(false)
-  // Theme system removed — app now uses a single fixed dark theme.
-  // (Previously: ThemeProvider + useTheme() + SpringToggle here.)
+  // Theme mode is managed by ThemeContext (ThemeProvider in main.jsx)
+  // — the SpringToggle in the header calls toggleMode() from useTheme().
 
   const [syncErrors, setSyncErrors] = useState([])
   const [syncPanelOpen, setSyncPanelOpen] = useState(false)
@@ -1255,8 +1254,10 @@ export default function Dashboard(){
 
             <LiveClock hospital={hospital} />
 
-            {/* Theme Toggle REMOVED — was causing reload loop + app misbehavior.
-                The app now uses a single fixed dark theme (see main.jsx). */}
+            {/* Theme Toggle — glassmorphic SpringToggle (light/dark mode).
+                Redesigned to NOT cause the reload loop the old version had.
+                Reads from React context, no DOM MutationObserver. */}
+            <SpringToggle />
 
             {/* 2. Notifications Bell Popover */}
             <div style={{ position: 'relative' }}>

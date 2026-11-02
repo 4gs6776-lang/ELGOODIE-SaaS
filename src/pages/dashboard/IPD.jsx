@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useOfflineTable } from '../../lib/useOfflineTable'
 import { useRealtimeAlert } from '../../lib/useRealtimeAlert'
+import { supabase } from '../../lib/supabaseClient'
+import { invalidateTable } from '../../lib/useTableCache'
 import ModuleHistoryButton from '../../components/ModuleHistoryButton'
 import { writeAudit } from '../../lib/audit'
 import AppIcon from '../../components/icons'
@@ -96,6 +98,67 @@ export default function IPD({ onGoToAdmissions }){
       patient_name: null, doctor_name: null, diagnosis: null, admission_date: null,
       billing_cleared: false, pharmacy_cleared: false, doctor_signed: false,
     })
+    // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after discharge from IPD)
+    // -----------------------------------------------------------------
+    // Previously IPD's confirmDischarge only updated the bed table —
+    // it didn't touch `admissions` or `admission_requests`. So
+    // PatientProfile.jsx:273 (which reads from `admission_requests`)
+    // kept showing "Currently Admitted" forever after a discharge
+    // done from IPD.
+    //
+    // Now we look up the active admission for this bed + update it to
+    // 'discharged', and also flip its linked admission_request to
+    // 'discharged' so the PatientProfile card disappears.
+    try {
+      // Look up the active admission by bed_id (only one bed can have
+      // one active admission at a time)
+      const { data: activeAdmission } = await supabase
+        .from('admissions')
+        .select('id, admission_request_id, patient_id')
+        .eq('hospital_id', hospital?.id)
+        .eq('bed_id', selectedBed.id)
+        .eq('status', 'active')
+        .maybeSingle()
+
+      if (activeAdmission) {
+        // Update the admission itself
+        await supabase
+          .from('admissions')
+          .update({
+            status: 'discharged',
+            discharge_date: new Date().toISOString(),
+          })
+          .eq('id', activeAdmission.id)
+
+        // Update the linked admission_request (this is what
+        // PatientProfile.jsx reads to render the "Currently Admitted"
+        // card — without this update, the card stays visible)
+        if (activeAdmission.admission_request_id) {
+          await supabase
+            .from('admission_requests')
+            .update({
+              status: 'discharged',
+              reviewed_at: new Date().toISOString(),
+            })
+            .eq('id', activeAdmission.admission_request_id)
+        }
+
+        // Invalidate the offline-table cache for both tables so any
+        // mounted PatientProfile / Admissions module re-reads from
+        // IndexedDB (which will pick up the change on next sync).
+        try {
+          invalidateTable('admissions', hospital?.id)
+          invalidateTable('admission_requests', hospital?.id)
+        } catch (e) {
+          console.warn('Could not invalidate table cache after discharge:', e.message)
+        }
+      }
+    } catch (admissionErr) {
+      // Non-fatal — the bed is already marked 'cleaning'. The
+      // admission record might still show 'active' until the next
+      // sync, but the bed is free for re-admission.
+      console.warn('Failed to update admission/admission_request on IPD discharge:', admissionErr.message)
+    }
     writeAudit({
       hospitalId: hospital?.id, actor: profile,
       action: 'ipd.patient_discharged',
