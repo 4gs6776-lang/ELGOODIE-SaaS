@@ -36,11 +36,15 @@
   --neu-on-accent:#031318;
 
   /* glass (floating elements only) */
-  --glass-bg:rgba(18,18,24,.78);
-  --glass-head:rgba(255,255,255,.04);
-  --glass-border:rgba(255,255,255,.10);
-  --glass-blur:blur(14px) saturate(150%);
-  --glass-shadow:0 18px 40px -14px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.06);
+  --neu-raised-sm:3px 4px 8px rgba(0,0,0,.55), -2px -2px 6px rgba(255,255,255,.05), inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* glass (floating elements only): tinted, bright edge, soft sheen */
+  --glass-bg:rgba(28,32,44,.66);
+  --glass-sheen:linear-gradient(135deg,rgba(255,255,255,.14) 0%,rgba(255,255,255,.04) 38%,rgba(255,255,255,.02) 62%,rgba(255,255,255,.07) 100%);
+  --glass-head:rgba(255,255,255,.05);
+  --glass-border:rgba(255,255,255,.16);
+  --glass-blur:blur(22px) saturate(180%);
+  --glass-shadow:0 22px 48px -16px rgba(0,0,0,.75), 0 0 0 1px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.18), inset 0 -1px 0 rgba(255,255,255,.04);
 }
 
 /* ---- tokens: light ---- */
@@ -64,10 +68,13 @@ html.light-mode{
     inset -2px -2px 4px rgba(255,255,255,.9);
   --neu-on-accent:#FFFFFF;
 
-  --glass-bg:rgba(255,255,255,.82);
+  --neu-raised-sm:3px 4px 8px rgba(31,52,74,.18), -3px -3px 7px #fff, inset 0 0 0 1px rgba(255,255,255,.7);
+
+  --glass-bg:rgba(255,255,255,.64);
+  --glass-sheen:linear-gradient(135deg,rgba(255,255,255,.85) 0%,rgba(255,255,255,.35) 45%,rgba(255,255,255,.55) 100%);
   --glass-head:rgba(15,23,42,.04);
-  --glass-border:rgba(15,23,42,.10);
-  --glass-shadow:0 18px 40px -16px rgba(31,52,74,.35), inset 0 1px 0 rgba(255,255,255,.9);
+  --glass-border:rgba(255,255,255,.85);
+  --glass-shadow:0 22px 48px -18px rgba(31,52,74,.40), 0 0 0 1px rgba(15,23,42,.07), inset 0 1px 0 #fff;
 }
 
 /* =====================================================================
@@ -151,7 +158,7 @@ html .neu-scope .dash-stat-icon{ box-shadow:var(--neu-inset-sm) }
       from these tokens; chart tooltip here)
    ===================================================================== */
 .hd-tip{
-  background:var(--glass-bg);
+  background-color:var(--glass-bg); background-image:var(--glass-sheen);
   -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
   border:1px solid var(--glass-border);
   box-shadow:var(--glass-shadow);
@@ -172,3 +179,51 @@ html .neu-scope .dash-stat-icon{ box-shadow:var(--neu-inset-sm) }
   html .neu-scope .dash-stat-card:active{ transform:none }
   .hd-in{ animation:none }
 }
+
+/* =====================================================================
+   5. THEME TOGGLE — neumorphic pill (sun | moon). The active side is a
+      pressed well with a glowing ring; the other side is a raised disc.
+   ===================================================================== */
+.neu-toggle{
+  --s:34px; --pad:6px; --ring:#5CF2B0;
+  position:relative; display:inline-flex; align-items:center; gap:8px; flex:none;
+  padding:var(--pad); margin:0; cursor:pointer; border-radius:999px;
+  border:1px solid var(--neu-edge);
+  background:linear-gradient(145deg,var(--neu-a),var(--neu-b));
+  box-shadow:var(--neu-raised);
+  transition:box-shadow .25s ease, background-color .3s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+.neu-toggle.sm{ --s:27px; --pad:5px; gap:6px }
+/* brushed inner panel */
+.neu-toggle::before{
+  content:""; position:absolute; inset:3px; border-radius:inherit; pointer-events:none;
+  background:conic-gradient(from 210deg at 50% 50%,var(--neu-b),var(--neu-a),var(--neu-b),var(--neu-a),var(--neu-b));
+  opacity:.55; box-shadow:var(--neu-inset-sm);
+}
+.neu-toggle:active{ box-shadow:var(--neu-pressed) }
+.neu-toggle:focus-visible{ outline:2px solid var(--hd-cyan,#20D9E8); outline-offset:3px }
+.neu-toggle-slot{
+  position:relative; z-index:1; width:var(--s); height:var(--s); border-radius:50%;
+  display:grid; place-items:center; color:var(--muted-dim);
+  transition:box-shadow .25s ease, background-color .25s ease;
+}
+.neu-toggle-slot.raised{
+  background:linear-gradient(145deg,var(--neu-a),var(--neu-b));
+  box-shadow:var(--neu-raised-sm);
+}
+.neu-toggle-slot.raised svg{ filter:drop-shadow(0 1px 0 rgba(255,255,255,.55)) }
+html:not(.light-mode) .neu-toggle-slot.raised svg{ filter:drop-shadow(0 -1px 0 rgba(255,255,255,.12)) }
+.neu-toggle-slot.well{
+  background:var(--neu-b);
+  box-shadow:var(--neu-pressed);
+}
+.neu-toggle-ring{
+  position:relative; width:64%; height:64%; border-radius:50%;
+  border:max(2px,calc(var(--s) * .09)) solid var(--ring);
+  box-shadow:0 0 calc(var(--s) * .3) var(--ring), inset 0 0 calc(var(--s) * .2) color-mix(in srgb,var(--ring) 70%,transparent);
+  display:grid; place-items:center;
+}
+.neu-toggle-ring i{ width:20%; height:20%; border-radius:50%; background:var(--ring); box-shadow:0 0 6px var(--ring) }
+html.light-mode .neu-toggle{ --ring:#3FE0A0 }
+@media (prefers-reduced-motion:reduce){ .neu-toggle,.neu-toggle-slot{ transition:none } }

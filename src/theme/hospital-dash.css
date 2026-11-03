@@ -312,9 +312,9 @@ html:not(.light-mode) .owner-stat-card:hover{border-color:rgba(32,217,232,.28)}
 .hd-mid .hd-card{min-height:460px}
 .hd-duo .hd-card{min-height:400px}
 .hd-mid .hd-chart,
-.hd-duo .hd-chart{position:relative; flex:1 1 auto; height:auto; min-height:300px; width:100%}
-.hd-mid .hd-chart > .recharts-responsive-container,
-.hd-duo .hd-chart > .recharts-responsive-container{position:absolute; inset:0; width:100% !important; height:100% !important}
+.hd-duo .hd-chart{ flex:1 1 auto; height:auto; min-height:300px; width:100%}
+.hd-chart{position:relative}
+.hd-chart-fill{position:absolute; inset:0}
 
 /* ---- Chart line glow (single soft halo, dark mode only) ---- */
 .hd-glowline{filter:drop-shadow(0 0 5px currentColor)}
