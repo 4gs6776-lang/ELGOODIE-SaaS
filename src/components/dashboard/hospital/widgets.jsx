@@ -267,6 +267,28 @@ function useIntroAnimation() {
 }
 
 // ---- main activity chart (several lines, one gradient-filled lead) ----
+// Measures its box and hands real pixel sizes to the chart, so the chart always
+// fills the card (width and height) even when percentage heights cannot resolve.
+function ChartBox({ children }) {
+  const ref = useRef(null)
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return undefined
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      const w = Math.round(r.width); const h = Math.round(r.height)
+      setSize((s) => (s.w === w && s.h === h ? s : { w, h }))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', measure); return () => window.removeEventListener('resize', measure) }
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return <div ref={ref} className="hd-chart-fill">{size.w > 0 && size.h > 0 ? children(size.w, size.h) : null}</div>
+}
+
 export function ActivityChart({ series, loading, theme }) {
   const showAnim = useIntroAnimation()
   const colors = PALETTE[theme]
@@ -302,8 +324,8 @@ export function ActivityChart({ series, loading, theme }) {
         ))}
       </div>
       <div className="hd-chart" role="img" aria-label={`Daily counts of ${active.map((s) => s.label).join(', ')}`}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: -18 }}>
+        <ChartBox>{(w, h) => (
+          <ComposedChart width={w} height={h} data={rows} margin={{ top: 10, right: 12, bottom: 0, left: -18 }}>
             <defs>
               {active.map((s, i) => <AreaGradient key={s.key} id={`${uid}-${s.key}`} color={colors[s.color]} top={i === 0 ? 0.36 : 0.12} />)}
             </defs>
@@ -321,7 +343,7 @@ export function ActivityChart({ series, loading, theme }) {
                 isAnimationActive={showAnim} animationDuration={1300} animationEasing="ease-out" />
             ))}
           </ComposedChart>
-        </ResponsiveContainer>
+        )}</ChartBox>
       </div>
     </>
   )
@@ -341,8 +363,8 @@ export function GrowthChart({ points, loading, theme, name = 'Total patients', t
   const color = colors[tone]
   return (
     <div className="hd-chart short" role="img" aria-label={`${summary} over the last ${rows.length} days, now ${rows[rows.length - 1].total}`}>
-      <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={rows} margin={{ top: 10, right: 12, bottom: 0, left: -18 }}>
+      <ChartBox>{(w, h) => (
+        <ComposedChart width={w} height={h} data={rows} margin={{ top: 10, right: 12, bottom: 0, left: -18 }}>
           <defs><AreaGradient id={`${uid}-g`} color={color} top={0.4} /></defs>
           <CartesianGrid stroke={colors.grid} strokeDasharray="2 6" vertical={false} />
           <XAxis dataKey="label" tick={{ fill: colors.axis, fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={28} />
@@ -355,7 +377,7 @@ export function GrowthChart({ points, loading, theme, name = 'Total patients', t
             dot={makeDot(color, rows.length, rows.length <= 14)} activeDot={{ r: 5.5 }}
             isAnimationActive={showAnim} animationDuration={1300} animationEasing="ease-out" />
         </ComposedChart>
-      </ResponsiveContainer>
+      )}</ChartBox>
     </div>
   )
 }
