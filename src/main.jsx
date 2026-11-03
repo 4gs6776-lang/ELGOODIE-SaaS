@@ -12,7 +12,7 @@ import './theme/premium-global.css'
 import './theme/login-neo.css'
 import './theme/handover.css'
 import './theme/hospital-dash.css'
-import './theme/neumorph.css'
+import './theme/glass.css'
 import './theme/pagination.css'
 // mobile.css MUST be imported last (its own header demands it).
 import './theme/mobile.css'
@@ -57,6 +57,8 @@ try {
   html.setAttribute('data-theme', 'midnight')
   html.setAttribute('data-mode', mode)
   html.classList.toggle('light-mode', mode === 'light')
+  const glass = localStorage.getItem('medhub-glass')
+  html.setAttribute('data-glass', ['iridescent', 'rainbow', 'aero'].includes(glass) ? glass : 'iridescent')
 } catch {}
 
 registerSW({ immediate: true })
