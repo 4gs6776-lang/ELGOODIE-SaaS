@@ -1678,11 +1678,12 @@ export default function Dashboard(){
           right: 0;
           width: 280px;
           background: var(--bg-elevated);
-          background: var(--glass-bg, var(--bg-elevated));
+          background-color: var(--glass-bg, var(--bg-elevated));
+          background-image: var(--glass-sheen, none);
           -webkit-backdrop-filter: var(--glass-blur, none);
           backdrop-filter: var(--glass-blur, none);
           border: 1px solid var(--glass-border, var(--line));
-          border-radius: 12px;
+          border-radius: 16px;
           box-shadow: var(--glass-shadow, 0 10px 25px rgba(0, 0, 0, 0.4));
           z-index: 100;
           overflow: hidden;
