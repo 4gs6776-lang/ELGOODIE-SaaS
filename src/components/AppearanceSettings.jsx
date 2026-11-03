@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import SpringToggle from './SpringToggle'
 import AppIcon from './icons'
 
@@ -15,7 +16,19 @@ import AppIcon from './icons'
 // custom accents — those features were the source of the bugs.
 // =====================================================================
 
+const GLASS_STYLES = [
+  { id: 'iridescent', label: 'Iridescent Rainbow Glass', hint: 'Pearly rainbow edge' },
+  { id: 'rainbow', label: 'Rainbow Glass', hint: 'Saturated colour tint' },
+  { id: 'aero', label: 'Classic Aero Glass', hint: 'Sky-blue, glossy' },
+]
+
 export default function AppearanceSettings() {
+  const [glass, setGlass] = useState(() => document.documentElement.getAttribute('data-glass') || 'iridescent')
+  const pickGlass = (id) => {
+    setGlass(id)
+    document.documentElement.setAttribute('data-glass', id)
+    try { localStorage.setItem('medhub-glass', id) } catch {}
+  }
   return (
     <div style={{
       padding: '20px',
@@ -56,6 +69,30 @@ export default function AppearanceSettings() {
         <SpringToggle />
       </div>
 
+      <div style={{ marginTop: 14 }} role="radiogroup" aria-label="Glass style">
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ivory)', marginBottom: 8 }}>Glass style</div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {GLASS_STYLES.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              role="radio"
+              aria-checked={glass === g.id}
+              onClick={() => pickGlass(g.id)}
+              style={{
+                textAlign: 'left', cursor: 'pointer', padding: '10px 14px', borderRadius: 10,
+                background: glass === g.id ? 'var(--teal-soft)' : 'var(--bg-card)',
+                border: `1px solid ${glass === g.id ? 'var(--teal)' : 'var(--line-soft)'}`,
+                color: 'var(--ivory)', font: 'inherit',
+              }}
+            >
+              <div style={{ fontSize: 12.5, fontWeight: 650 }}>{g.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{g.hint}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div style={{
         marginTop: 14, padding: '12px 14px',
         borderRadius: 8,
@@ -64,9 +101,8 @@ export default function AppearanceSettings() {
         fontSize: 11.5, color: 'var(--teal)', lineHeight: 1.5,
       }}>
         <AppIcon name="info" size={13} />{' '}
-        The toggle uses a glassmorphic surface with backdrop-blur, a
-        spring-animated knob, and a sun/moon glyph that cross-fades.
-        No reload loop — the previous bug has been fixed.
+        Glass style applies to the dashboard cards, notification panel and
+        chart tooltips. Dark and light mode both work with every style.
       </div>
     </div>
   )
