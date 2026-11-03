@@ -6,6 +6,7 @@ import AppIcon from '../../components/icons'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
 import SpringToggle from '../../components/SpringToggle'
+import { useHospitalBranding } from '../../lib/useHospitalBranding'
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -202,6 +203,11 @@ function LiveClock({ hospital }) {
 
 export default function Dashboard(){
   const { profile, hospital, signOut } = useAuth()
+
+  // ---- Hospital branding (dashboard background) ----
+  // Reads the hospital_branding row + applies it to the #hospital-bg-overlay
+  // div via CSS. This is hospital-level (visible to all staff), not per-user.
+  useHospitalBranding()
 
   // Hospital timezone — every date/time displayed in this file goes
   // through src/lib/datetime.js with this zone (Stage 1 req. #11).
@@ -1079,6 +1085,20 @@ export default function Dashboard(){
   return (
     <HospitalProvider>
     <div className="dash-shell">
+      {/* Hospital branding background overlay — fixed, behind everything,
+          pointer-events:none so it never blocks clicks. Brightness/opacity
+          are applied to this div ONLY, never to dashboard content. */}
+      <div
+        id="hospital-bg-overlay"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 0,
+          pointerEvents: 'none',
+          display: 'none',  // hidden by default — useHospitalBranding enables it
+          transition: 'opacity 0.3s ease',
+        }}
+      />
       <div className={`dash-overlay ${drawerOpen ? 'show' : ''}`} onClick={() => setDrawerOpen(false)} />
 
       <aside className={`dash-sidebar ${drawerOpen ? 'open' : ''}`}>

@@ -13,6 +13,7 @@ import RecurringExpenseManager from '../../components/RecurringExpenseManager'
 import CreditControlRulesManager from '../../components/CreditControlRulesManager'
 import RolePermissionManager from '../../components/RolePermissionManager'
 import AppearanceSettings from '../../components/AppearanceSettings'
+import HospitalBackgroundSettings from '../../components/HospitalBackgroundSettings'
 import FolderCategoryManager from '../../components/FolderCategoryManager'
 import HmoProviderManager from '../../components/HmoProviderManager'
 import {
@@ -464,6 +465,25 @@ export default function Settings(){
         <div style={{ padding: 14 }}>
           <AppearanceSettings />
         </div>
+      </div>
+
+      {/* ---- Dashboard Background (admin/owner only — hospital-level) ---- */}
+      <div className="dash-panel" style={{ marginTop: 20 }}>
+        <div className="dash-panel-head dash-panel-head-wrap">
+          <div>
+            <div className="dash-panel-title">Dashboard Background</div>
+            <div className="dash-panel-sub">Customize the dashboard wallpaper for everyone in your hospital — saved at hospital level, visible to all staff</div>
+          </div>
+        </div>
+        {!canManageBank ? (
+          <div style={{ padding: 14, fontSize: 13, color: 'var(--muted)', background: 'var(--bg-elevated)', borderRadius: 8 }}>
+            Only hospital administrators can change the dashboard background. The configured background (if any) is still visible to you.
+          </div>
+        ) : (
+          <div style={{ padding: 14 }}>
+            <HospitalBackgroundSettings />
+          </div>
+        )}
       </div>
 
         <div className="dash-panel">
