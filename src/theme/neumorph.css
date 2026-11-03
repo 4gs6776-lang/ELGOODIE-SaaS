@@ -1,0 +1,174 @@
+/* =====================================================================
+   GOODIE-MEDHUB — Hybrid neumorphism (cards) + glassmorphism (floating)
+
+   Scope of this file (initial phase only):
+     1. Dashboard overview cards  (.hd-root …)
+     2. Stat cards in Pharmacy and Shift Handover (.neu-scope …)
+     3. Floating elements: notification / menu popover, chart tooltip
+
+   Theme: follows the existing html.light-mode switch. Tokens only — no
+   colours are hard-wired inside component rules, so toggling the theme
+   re-skins everything with no reload. Import order: after
+   hospital-dash.css, before mobile.css.
+   To undo: remove the import in main.jsx and the `neu-scope` class from
+   Pharmacy.jsx / ShiftHandover.jsx.
+   ===================================================================== */
+
+/* ---- tokens: dark (default) ---- */
+:root{
+  --neu-a:#101016; --neu-b:#0A0A0E;                 /* surface gradient */
+  --neu-edge:rgba(255,255,255,.05);
+  --neu-dark:rgba(0,0,0,.62); --neu-light:rgba(255,255,255,.05);
+  --neu-raised:
+    8px 10px 20px -8px var(--neu-dark),
+    -4px -4px 12px -6px var(--neu-light),
+    inset 0 1px 0 rgba(255,255,255,.045);
+  --neu-raised-hover:
+    12px 16px 26px -10px rgba(0,0,0,.72),
+    -5px -5px 14px -6px rgba(255,255,255,.07),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  --neu-pressed:
+    inset 3px 4px 9px rgba(0,0,0,.55),
+    inset -2px -2px 6px rgba(255,255,255,.035);
+  --neu-inset-sm:
+    inset 2px 2px 5px rgba(0,0,0,.5),
+    inset -1px -1px 3px rgba(255,255,255,.04);
+  --neu-on-accent:#031318;
+
+  /* glass (floating elements only) */
+  --glass-bg:rgba(18,18,24,.78);
+  --glass-head:rgba(255,255,255,.04);
+  --glass-border:rgba(255,255,255,.10);
+  --glass-blur:blur(14px) saturate(150%);
+  --glass-shadow:0 18px 40px -14px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.06);
+}
+
+/* ---- tokens: light ---- */
+html.light-mode{
+  --neu-a:#FFFFFF; --neu-b:#F5F8FA;
+  --neu-edge:rgba(255,255,255,.9);
+  --neu-dark:rgba(31,52,74,.20); --neu-light:rgba(255,255,255,.95);
+  --neu-raised:
+    7px 9px 18px -9px var(--neu-dark),
+    -6px -6px 14px -4px var(--neu-light),
+    inset 0 0 0 1px rgba(255,255,255,.7);
+  --neu-raised-hover:
+    10px 14px 24px -10px rgba(31,52,74,.28),
+    -6px -6px 16px -4px #fff,
+    inset 0 0 0 1px rgba(255,255,255,.8);
+  --neu-pressed:
+    inset 3px 4px 9px rgba(31,52,74,.16),
+    inset -3px -3px 8px rgba(255,255,255,.9);
+  --neu-inset-sm:
+    inset 2px 2px 5px rgba(31,52,74,.14),
+    inset -2px -2px 4px rgba(255,255,255,.9);
+  --neu-on-accent:#FFFFFF;
+
+  --glass-bg:rgba(255,255,255,.82);
+  --glass-head:rgba(15,23,42,.04);
+  --glass-border:rgba(15,23,42,.10);
+  --glass-shadow:0 18px 40px -16px rgba(31,52,74,.35), inset 0 1px 0 rgba(255,255,255,.9);
+}
+
+/* =====================================================================
+   1. DASHBOARD CARDS (neumorphic, raised)
+   ===================================================================== */
+.hd-root .hd-card{
+  background:linear-gradient(145deg,var(--neu-a),var(--neu-b));
+  border:1px solid var(--neu-edge);
+  box-shadow:var(--neu-raised);
+  transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease, background-color .3s ease;
+}
+@media (hover:hover){
+  .hd-root .hd-card:hover{
+    transform:translateY(-2px);
+    box-shadow:var(--neu-raised-hover);
+    border-color:color-mix(in srgb,var(--tone,var(--hd-blue)) 30%,var(--neu-edge));
+  }
+}
+
+/* KPI cards: faint tone tint, icon in an inset well, pressed state */
+.hd-root .hd-kpi{
+  padding:15px 16px;
+  background:linear-gradient(145deg,color-mix(in srgb,var(--tone,var(--hd-blue)) 9%,var(--neu-a)),var(--neu-b) 70%);
+}
+.hd-root .hd-kpi-icon{
+  display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:50%;
+  color:var(--tone,var(--hd-blue));
+  background:color-mix(in srgb,var(--tone,var(--hd-blue)) 14%,var(--neu-b));
+  box-shadow:var(--neu-inset-sm);
+}
+.hd-root .hd-kpi.is-link:active{ transform:translateY(0); box-shadow:var(--neu-pressed) }
+.hd-root .hd-kpi:focus-visible,
+.hd-root .hd-stage button:focus-visible,
+.hd-root .hd-seg button:focus-visible,
+.hd-root .hd-chip:focus-visible{
+  outline:2px solid var(--tone,var(--hd-cyan)); outline-offset:2px;
+}
+
+/* Nested wells (pulse sub-cards, flow stages, segmented control, chips): inset */
+.hd-root .hd-sub-card,
+.hd-root .hd-stage button,
+.hd-root .hd-seg,
+.hd-root .hd-chip,
+.hd-root .hd-staff-row{
+  background:var(--hd-surface);
+  border-color:transparent;
+  box-shadow:var(--neu-inset-sm);
+}
+.hd-root .hd-stage.sel button{ box-shadow:var(--neu-pressed); border-color:var(--tone) }
+.hd-root .hd-stage button:not(:disabled):active{ box-shadow:var(--neu-pressed) }
+.hd-root .hd-chip.off{ box-shadow:none }
+
+/* Selected range button: raised, accent filled (readable in both themes) */
+.hd-root .hd-seg button.on{
+  background:var(--hd-cyan); color:var(--neu-on-accent);
+  box-shadow:0 3px 8px -3px color-mix(in srgb,var(--hd-cyan) 60%,transparent);
+}
+html.light-mode .hd-root .hd-seg button.on{ background:#0E8FA8 }
+
+/* =====================================================================
+   2. PHARMACY + SHIFT HANDOVER STAT CARDS (scoped by .neu-scope)
+   ===================================================================== */
+html .neu-scope .dash-stat-card{
+  background:linear-gradient(145deg,var(--neu-a),var(--neu-b));
+  border:1px solid var(--neu-edge);
+  border-radius:16px;
+  box-shadow:var(--neu-raised);
+  transition:transform .22s ease, box-shadow .22s ease, border-color .22s ease, background-color .3s ease;
+}
+@media (hover:hover){
+  html .neu-scope .dash-stat-card:hover{
+    transform:translateY(-2px);
+    box-shadow:var(--neu-raised-hover);
+  }
+}
+html .neu-scope .dash-stat-card:active{ transform:translateY(0); box-shadow:var(--neu-pressed) }
+html .neu-scope .dash-stat-icon{ box-shadow:var(--neu-inset-sm) }
+
+/* =====================================================================
+   3. GLASS — floating elements only (popover is styled in Dashboard.jsx
+      from these tokens; chart tooltip here)
+   ===================================================================== */
+.hd-tip{
+  background:var(--glass-bg);
+  -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
+  border:1px solid var(--glass-border);
+  box-shadow:var(--glass-shadow);
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .hd-tip{ background:var(--hd-card) }
+}
+
+/* =====================================================================
+   4. REDUCED MOTION
+   ===================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .hd-root .hd-card,
+  html .neu-scope .dash-stat-card{ transition:none }
+  .hd-root .hd-card:hover,
+  html .neu-scope .dash-stat-card:hover,
+  .hd-root .hd-kpi.is-link:active,
+  html .neu-scope .dash-stat-card:active{ transform:none }
+  .hd-in{ animation:none }
+}
