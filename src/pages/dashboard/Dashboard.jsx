@@ -1678,18 +1678,24 @@ export default function Dashboard(){
           right: 0;
           width: 280px;
           background: var(--bg-elevated);
-          border: 1px solid var(--line);
-          border-radius: 8px;
-          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+          background: var(--glass-bg, var(--bg-elevated));
+          -webkit-backdrop-filter: var(--glass-blur, none);
+          backdrop-filter: var(--glass-blur, none);
+          border: 1px solid var(--glass-border, var(--line));
+          border-radius: 12px;
+          box-shadow: var(--glass-shadow, 0 10px 25px rgba(0, 0, 0, 0.4));
           z-index: 100;
           overflow: hidden;
+        }
+        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+          .dash-popover-menu { background: var(--bg-elevated); }
         }
         .dash-popover-header {
           padding: 10px 14px;
           font-size: 12px;
           font-weight: 600;
-          background: var(--bg-card-hover);
-          border-bottom: 1px solid var(--line);
+          background: var(--glass-head, var(--bg-card-hover));
+          border-bottom: 1px solid var(--glass-border, var(--line));
           color: var(--ivory);
         }
         .dash-popover-body {
@@ -1699,7 +1705,7 @@ export default function Dashboard(){
         .dash-popover-item {
           padding: 10px 14px;
           font-size: 12px;
-          border-bottom: 1px solid var(--line);
+          border-bottom: 1px solid var(--glass-border, var(--line));
           color: var(--muted);
           line-height: 1.4;
         }

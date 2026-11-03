@@ -551,7 +551,7 @@ export default function ShiftHandover() {
       {/* ================= DASHBOARD ================= */}
       {subTab === 'dashboard' && (
         <>
-          <section className="dash-stats ho-stats">
+          <section className="dash-stats ho-stats neu-scope">
             <div className="dash-stat-card premium-stat red-stat">
               <div className="dash-stat-top"><div className="dash-stat-icon"><AppIcon name="bell" size={20} /></div></div>
               <div className="dash-stat-label">Unacknowledged</div>
