@@ -1,66 +1,129 @@
 /* =====================================================================
-   GOODIE-MEDHUB — Classic Aero Glass (glassmorphism only, no neumorphism)
+   GOODIE-MEDHUB — Liquid Glass (replaces glassmorphism)
 
-   Frosted translucent panels over soft out-of-focus coloured lights:
-   strong backdrop blur, a bright 1px white edge that fades down the panel,
-   a diagonal gloss streak, and an inner glow — the classic Windows-Aero
-   look, on a dusk-blue backdrop.
-   Dark / light follow the existing html.light-mode switch.
+   Liquid Glass effect:
+     - Thicker refractive blur (24-30px) with high saturation
+     - Multiple layered specular highlights (top-left, bottom-right)
+     - Chromatic edge dispersion (subtle RGB split at the borders,
+       mimicking how light bends through thick glass/water)
+     - Stronger inner glow that shifts color based on backdrop
+     - Ripple/sheen streak that catches the eye at different angles
+     - Deeper shadows for a "floating glass" feel
+     - Stronger contrast at the edges so the glass reads as a solid
+       physical object, not just a transparent panel
+
+   Dark mode: deep navy liquid glass with teal/violet refraction
+   Light mode: white frosted liquid glass with warm gold refraction
 
    Applies to: dashboard cards (.hd-root .hd-card), stat cards in Pharmacy
    and Shift Handover (.glass-scope), the notification popover, chart
    tooltips and the sun/moon toggle.
 
-   Glass only reads as glass with colour behind it, so the dashboard gets a
-   static bokeh backdrop (.hd-root::after) and the two module stat rows a
-   small local one. Both are decorative, static, pointer-events:none.
-   To undo: remove the import in main.jsx.
+   Liquid glass only reads as glass with colour behind it, so the dashboard
+   gets a static bokeh backdrop (.hd-root::after) and the two module stat
+   rows a small local one. Both are decorative, static, pointer-events:none.
    ===================================================================== */
 
 /* ---- tokens · dark ---- */
 :root{
-  --g-blur:blur(16px) saturate(150%);
-  --g-pop-blur:blur(22px) saturate(160%);
-  --g-card:rgba(120,155,200,.14);
+  /* Liquid glass — thicker blur + higher saturation for refraction */
+  --g-blur:blur(24px) saturate(180%) brightness(1.05);
+  --g-pop-blur:blur(30px) saturate(190%) brightness(1.05);
+
+  /* Deeper, more translucent card body — the "liquid" layer */
+  --g-card:rgba(120,155,200,.10);
+
+  /* Multi-layer specular highlights — the "liquid" sheen
+     Layer 1: bright top-left diagonal gloss
+     Layer 2: secondary diagonal that catches light at a different angle
+     Layer 3: bottom-right subtle reflection */
   --g-sheen:
-    linear-gradient(115deg,rgba(255,255,255,.17) 0%,rgba(255,255,255,.05) 28%,rgba(255,255,255,0) 29%),
-    linear-gradient(180deg,rgba(150,200,255,.10) 0%,rgba(150,200,255,0) 60%);
-  --g-edge:linear-gradient(180deg,rgba(255,255,255,.95),rgba(190,220,255,.22) 55%,rgba(255,255,255,.55));
-  --g-edge-op:.8;
-  --g-line:rgba(205,228,255,.22);
-  --g-shadow:0 18px 40px -20px rgba(0,8,24,.85), inset 0 1px 0 rgba(255,255,255,.38), inset 0 0 22px rgba(140,190,255,.08);
-  --g-well:rgba(160,200,255,.09);
-  --g-pop:rgba(36,56,92,.58);
-  /* bokeh colours */
-  --g-c1:rgba(25,230,208,.62);   /* teal   */
-  --g-c2:rgba(160,107,255,.55);  /* violet */
-  --g-c3:rgba(255,193,90,.55);   /* amber  */
-  --g-c4:rgba(74,163,255,.60);   /* blue   */
-  --g-c5:rgba(255,110,190,.40);  /* pink   */
-  --g-c6:rgba(90,230,150,.42);   /* green  */
-  --g-haze:rgba(60,95,150,.38);
+    linear-gradient(115deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,.06) 22%,rgba(255,255,255,0) 23%),
+    linear-gradient(245deg,rgba(255,255,255,.12) 0%,rgba(255,255,255,.03) 18%,rgba(255,255,255,0) 19%),
+    linear-gradient(180deg,rgba(150,200,255,.08) 0%,rgba(150,200,255,0) 50%);
+
+  /* Chromatic edge — RGB split that mimics light dispersion through thick glass
+     The edge has a subtle rainbow effect (red on top, blue on bottom) */
+  --g-edge:
+    linear-gradient(180deg,
+      rgba(255,200,200,.45) 0%,
+      rgba(255,255,255,.95) 8%,
+      rgba(200,220,255,.30) 50%,
+      rgba(200,255,200,.40) 92%,
+      rgba(255,255,255,.60) 100%);
+  --g-edge-op:.9;
+
+  /* Stronger inner line for the chromatic edge */
+  --g-line:rgba(205,228,255,.28);
+
+  /* Deeper shadow + stronger inner glow (the "floating glass" feel) */
+  --g-shadow:
+    0 24px 48px -22px rgba(0,8,24,.92),
+    0 8px 16px -8px rgba(0,8,24,.60),
+    inset 0 1px 0 rgba(255,255,255,.42),
+    inset 0 -1px 0 rgba(140,190,255,.12),
+    inset 0 0 32px rgba(140,190,255,.10);
+  --g-well:rgba(160,200,255,.08);
+  --g-pop:rgba(36,56,92,.55);
+
+  /* Bokeh colours — brighter for refraction through the liquid glass */
+  --g-c1:rgba(25,230,208,.70);
+  --g-c2:rgba(160,107,255,.62);
+  --g-c3:rgba(255,193,90,.60);
+  --g-c4:rgba(74,163,255,.68);
+  --g-c5:rgba(255,110,190,.45);
+  --g-c6:rgba(90,230,150,.48);
+  --g-haze:rgba(60,95,150,.42);
   --g-orb-op:1;
+
+  /* Liquid glass refraction tint — a subtle color shift on the glass
+     surface that mimics how thick glass tints light passing through */
+  --g-refraction:rgba(140,200,255,.04);
 }
+
 /* ---- tokens · light ---- */
 html.light-mode{
-  --g-card:rgba(205,228,252,.44);
+  --g-card:rgba(205,228,252,.40);
   --g-sheen:
-    linear-gradient(115deg,rgba(255,255,255,.80) 0%,rgba(255,255,255,.28) 28%,rgba(255,255,255,0) 29%),
-    linear-gradient(180deg,rgba(255,255,255,.35) 0%,rgba(255,255,255,0) 60%);
-  --g-edge-op:.95;
-  --g-line:rgba(255,255,255,.9);
-  --g-shadow:0 18px 36px -20px rgba(30,80,140,.42), 0 0 0 1px rgba(30,90,160,.10), inset 0 1px 0 #fff, inset 0 0 20px rgba(255,255,255,.35);
-  --g-well:rgba(255,255,255,.5);
-  --g-pop:rgba(228,241,255,.74);
-  --g-c1:rgba(25,200,190,.36); --g-c2:rgba(150,110,255,.30); --g-c3:rgba(255,190,90,.40);
-  --g-c4:rgba(74,163,255,.38); --g-c5:rgba(255,120,190,.26); --g-c6:rgba(90,215,150,.30);
-  --g-haze:rgba(120,170,230,.35);
+    linear-gradient(115deg,rgba(255,255,255,.90) 0%,rgba(255,255,255,.35) 22%,rgba(255,255,255,0) 23%),
+    linear-gradient(245deg,rgba(255,255,255,.45) 0%,rgba(255,255,255,.12) 18%,rgba(255,255,255,0) 19%),
+    linear-gradient(180deg,rgba(255,255,255,.40) 0%,rgba(255,255,255,0) 50%);
+  --g-edge:
+    linear-gradient(180deg,
+      rgba(255,200,180,.55) 0%,
+      rgba(255,255,255,1) 8%,
+      rgba(220,230,255,.40) 50%,
+      rgba(200,255,220,.50) 92%,
+      rgba(255,255,255,.75) 100%);
+  --g-edge-op:1;
+  --g-line:rgba(255,255,255,.95);
+  --g-shadow:
+    0 24px 44px -22px rgba(30,80,140,.48),
+    0 8px 16px -8px rgba(30,80,140,.28),
+    0 0 0 1px rgba(30,90,160,.12),
+    inset 0 1px 0 #fff,
+    inset 0 -1px 0 rgba(30,90,160,.06),
+    inset 0 0 28px rgba(255,255,255,.42);
+  --g-well:rgba(255,255,255,.55);
+  --g-pop:rgba(228,241,255,.72);
+  --g-c1:rgba(25,200,190,.42);
+  --g-c2:rgba(150,110,255,.35);
+  --g-c3:rgba(255,190,90,.48);
+  --g-c4:rgba(74,163,255,.44);
+  --g-c5:rgba(255,120,190,.30);
+  --g-c6:rgba(90,215,150,.35);
+  --g-haze:rgba(120,170,230,.40);
+  --g-refraction:rgba(255,220,180,.06);
 }
 
 /* ---- popover / tooltip tokens (Dashboard.jsx popover + .hd-tip) ---- */
 :root{
-  --glass-bg:var(--g-pop); --glass-sheen:var(--g-sheen); --glass-head:var(--g-well);
-  --glass-border:var(--g-line); --glass-blur:var(--g-pop-blur); --glass-shadow:var(--g-shadow);
+  --glass-bg:var(--g-pop);
+  --glass-sheen:var(--g-sheen);
+  --glass-head:var(--g-well);
+  --glass-border:var(--g-line);
+  --glass-blur:var(--g-pop-blur);
+  --glass-shadow:var(--g-shadow);
 }
 
 /* =====================================================================
@@ -69,7 +132,6 @@ html.light-mode{
 .hd-root::after{
   content:""; position:absolute; inset:-24px -12px 0; z-index:-1; pointer-events:none;
   background:
-    /* bokeh discs across the first screens */
     radial-gradient(circle 78px at 22% 70px,var(--g-c1),transparent 72%),
     radial-gradient(circle 64px at 31% 40px,var(--g-c2),transparent 72%),
     radial-gradient(circle 70px at 41% 95px,var(--g-c3),transparent 72%),
@@ -78,167 +140,214 @@ html.light-mode{
     radial-gradient(circle 84px at 86% 70px,var(--g-c4),transparent 72%),
     radial-gradient(circle 100px at 8% 330px,var(--g-c4),transparent 72%),
     radial-gradient(circle 88px at 48% 390px,var(--g-c1),transparent 72%),
-    radial-gradient(circle 96px at 74% 460px,var(--g-c2),transparent 72%),
-    radial-gradient(circle 110px at 94% 560px,var(--g-c3),transparent 72%),
-    radial-gradient(circle 120px at 20% 760px,var(--g-c5),transparent 72%),
-    radial-gradient(circle 100px at 60% 900px,var(--g-c4),transparent 72%),
-    radial-gradient(circle 110px at 90% 1100px,var(--g-c1),transparent 72%),
-    radial-gradient(circle 120px at 12% 1250px,var(--g-c2),transparent 72%),
-    radial-gradient(circle 110px at 52% 1450px,var(--g-c6),transparent 72%),
-    radial-gradient(circle 120px at 88% 1650px,var(--g-c3),transparent 72%),
-    radial-gradient(circle 120px at 18% 1900px,var(--g-c1),transparent 72%),
-    radial-gradient(circle 110px at 70% 2150px,var(--g-c4),transparent 72%),
-    /* dusk haze at the top */
-    linear-gradient(180deg,var(--g-haze) 0,transparent 520px);
-  opacity:var(--g-orb-op);
+    radial-gradient(circle 96px at 92% 430px,var(--g-c3),transparent 72%),
+    radial-gradient(circle 110px at 28% 620px,var(--g-c5),transparent 72%),
+    radial-gradient(circle 70px at 64% 680px,var(--g-c6),transparent 72%),
+    radial-gradient(circle 88px at 80% 760px,var(--g-c4),transparent 72%),
+    radial-gradient(circle 60px at 12% 800px,var(--g-c2),transparent 72%),
+    linear-gradient(180deg,var(--g-haze) 0%,transparent 70%);
+  opacity:var(--g-orb-op,1);
+  filter:blur(2px);
 }
 
 /* =====================================================================
-   2. GLASS CARDS
+   2. LIQUID GLASS SURFACE — the main card treatment
    ===================================================================== */
-.hd-root .hd-card,
-html .glass-scope .dash-stat-card{
+.hd-root .hd-card{
+  background:var(--g-card);
+  -webkit-backdrop-filter:var(--g-blur);
+  backdrop-filter:var(--g-blur);
+  border:1px solid transparent;
+  border-image:var(--g-edge) 1 / 1px / 0 stretch;
+  box-shadow:var(--g-shadow);
   position:relative;
-  background-color:var(--g-card);
-  background-image:var(--g-sheen);
-  -webkit-backdrop-filter:var(--g-blur); backdrop-filter:var(--g-blur);
-  border:1px solid var(--g-line);
-  box-shadow:var(--g-shadow);
-  transition:transform .22s ease, box-shadow .22s ease, background-color .3s ease;
+  isolation:isolate;
+  overflow:hidden;
 }
-/* bright edge that fades down the panel */
-.hd-root .hd-card::after,
-html .glass-scope .dash-stat-card::after{
-  content:""; position:absolute; inset:0; border-radius:inherit; padding:1px; pointer-events:none;
+
+/* The chromatic edge — a pseudo-element because border-image doesn't
+   support gradient colors well across browsers. This draws a 1px
+   rainbow-dispersion line at the top edge of the card. */
+.hd-root .hd-card::before{
+  content:"";
+  position:absolute;
+  top:0; left:10%; right:10%;
+  height:1px;
   background:var(--g-edge);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor; mask-composite:exclude;
-  opacity:var(--g-edge-op); transition:opacity .22s ease;
+  opacity:var(--g-edge-op);
+  pointer-events:none;
+  z-index:1;
 }
+
+/* The liquid sheen — diagonal gloss streaks that catch the light */
+.hd-root .hd-card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:var(--g-sheen), var(--g-refraction);
+  pointer-events:none;
+  z-index:0;
+  border-radius:inherit;
+}
+
+/* Ensure content sits above the sheen layers */
+.hd-root .hd-card > *{
+  position:relative;
+  z-index:2;
+}
+
+/* ---- hover: glass tilts + brightens (refraction intensifies) ---- */
 @media (hover:hover){
-  .hd-root .hd-card:hover,
-  html .glass-scope .dash-stat-card:hover{ transform:translateY(-2px) }
-  .hd-root .hd-card:hover::after,
-  html .glass-scope .dash-stat-card:hover::after{ opacity:1 }
+  .hd-root .hd-card{
+    transition:transform .35s cubic-bezier(.16,1,.3,1),
+               box-shadow .35s cubic-bezier(.16,1,.3,1),
+               backdrop-filter .35s ease;
+  }
+  .hd-root .hd-card:hover{
+    transform:translateY(-3px);
+    backdrop-filter:blur(28px) saturate(200%) brightness(1.08);
+    -webkit-backdrop-filter:blur(28px) saturate(200%) brightness(1.08);
+    box-shadow:
+      0 32px 60px -24px rgba(0,8,24,.95),
+      0 12px 20px -8px rgba(0,8,24,.70),
+      inset 0 1px 0 rgba(255,255,255,.50),
+      inset 0 -1px 0 rgba(140,190,255,.18),
+      inset 0 0 40px rgba(140,190,255,.14);
+  }
 }
-/* KPI: faint tone glow in the corner; icon as a glossy rounded-square chip */
-.hd-root .hd-kpi{
-  padding:15px 16px;
-  background-image:radial-gradient(120% 100% at 0% 0%,color-mix(in srgb,var(--tone,var(--hd-blue)) 22%,transparent),transparent 62%),var(--g-sheen);
-}
-.hd-root .hd-kpi-icon{
-  display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:10px;
-  color:var(--tone,var(--hd-blue));
-  background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,.04) 55%),color-mix(in srgb,var(--tone,var(--hd-blue)) 24%,transparent);
-  border:1px solid color-mix(in srgb,var(--tone,var(--hd-blue)) 45%,rgba(255,255,255,.3));
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.5), 0 4px 10px -4px rgba(0,10,30,.5);
-}
-html .glass-scope .dash-stat-icon{ box-shadow:inset 0 1px 0 rgba(255,255,255,.45) }
-.hd-root .hd-kpi.is-link:active{ transform:translateY(0) }
-.hd-root .hd-kpi:focus-visible,
-.hd-root .hd-stage button:focus-visible,
-.hd-root .hd-seg button:focus-visible,
-.hd-root .hd-chip:focus-visible{ outline:2px solid var(--tone,var(--hd-cyan)); outline-offset:2px }
 
-/* nested items sit on the glass without extra blur */
-.hd-root .hd-sub-card,
-.hd-root .hd-stage button,
-.hd-root .hd-seg,
-.hd-root .hd-chip,
-.hd-root .hd-staff-row{
-  background:var(--g-well);
-  border:1px solid var(--g-line);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.14);
-}
-.hd-root .hd-stage.sel button{ border-color:var(--tone); background:color-mix(in srgb,var(--tone) 18%,var(--g-well)) }
-.hd-root .hd-chip.off{ opacity:.45 }
-.hd-root .hd-seg button.on{
-  background:linear-gradient(180deg,rgba(255,255,255,.45),rgba(255,255,255,0) 60%),var(--hd-cyan);
-  color:#031318;
-  box-shadow:0 3px 10px -3px color-mix(in srgb,var(--hd-cyan) 70%,transparent), inset 0 1px 0 rgba(255,255,255,.55);
-}
-html.light-mode .hd-root .hd-seg button.on{ background:linear-gradient(180deg,rgba(255,255,255,.4),rgba(255,255,255,0) 60%),#0E8FA8; color:#fff }
-
-/* =====================================================================
-   3. MODULE STAT ROWS (Pharmacy, Shift Handover): local bokeh backdrop
-   ===================================================================== */
-html .glass-scope{ position:relative; isolation:isolate }
-html .glass-scope::before{
-  content:""; position:absolute; inset:-30px -12px; z-index:-1; pointer-events:none;
-  background:
-    radial-gradient(circle 70px at 10% 40%,var(--g-c1),transparent 72%),
-    radial-gradient(circle 60px at 30% 25%,var(--g-c2),transparent 72%),
-    radial-gradient(circle 80px at 52% 70%,var(--g-c3),transparent 72%),
-    radial-gradient(circle 70px at 72% 30%,var(--g-c4),transparent 72%),
-    radial-gradient(circle 80px at 92% 65%,var(--g-c1),transparent 72%);
-  opacity:var(--g-orb-op);
+/* ---- light-mode adjustments ---- */
+html.light-mode .hd-root .hd-card{
+  background:var(--g-card);
+  -webkit-backdrop-filter:var(--g-blur);
+  backdrop-filter:var(--g-blur);
 }
 
 /* =====================================================================
-   4. FLOATING: popover + chart tooltip
+   3. PULSE PANEL — liquid glass for the nested sub-cards
    ===================================================================== */
-.dash-popover-menu::after{
-  content:""; position:absolute; inset:0; border-radius:inherit; padding:1px; pointer-events:none;
+.hd-root .hd-panel{
+  position:relative;
+  background:linear-gradient(180deg, color-mix(in srgb,var(--hd-cyan) 6%,var(--g-card)) 0%, var(--g-card) 42%);
+}
+html.light-mode .hd-root .hd-panel{
+  background:linear-gradient(180deg, color-mix(in srgb,var(--hd-cyan) 5%,var(--g-card)) 0%, var(--g-card) 42%);
+}
+.hd-root .hd-panel::before{
+  content:""; position:absolute; left:14px; right:14px; top:0; height:1px;
+  pointer-events:none;
   background:var(--g-edge);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor; mask-composite:exclude; opacity:var(--g-edge-op);
-}
-.hd-tip{
-  background-color:var(--glass-bg); background-image:var(--glass-sheen);
-  -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur);
-  border:1px solid var(--glass-border); box-shadow:var(--glass-shadow);
-}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
-  .hd-tip{ background:var(--hd-card) }
-  .hd-root .hd-card,html .glass-scope .dash-stat-card{ background-color:var(--hd-card,var(--bg-card)); background-image:none }
+  opacity:var(--g-edge-op);
 }
 
 /* =====================================================================
-   5. THEME TOGGLE — Aero glass pill (sun | moon).
-      Active side: dark glass well with a glowing ring. Other side: glossy disc.
+   4. SUB-CARDS (pulse panel nested cards) — liquid glass
    ===================================================================== */
-.neu-toggle{
-  --s:34px; --pad:6px; --ring:#2DE8C8;
-  position:relative; display:inline-flex; align-items:center; gap:8px; flex:none;
-  padding:var(--pad); margin:0; cursor:pointer; border-radius:999px;
-  border:1px solid var(--g-line);
-  background-color:var(--g-card); background-image:var(--g-sheen);
-  -webkit-backdrop-filter:var(--g-blur); backdrop-filter:var(--g-blur);
+.hd-root .hd-sub-card{
+  background:var(--g-card);
+  -webkit-backdrop-filter:blur(16px) saturate(160%);
+  backdrop-filter:blur(16px) saturate(160%);
+  border:1px solid transparent;
+  border-image:var(--g-edge) 1 / 1px / 0 stretch;
   box-shadow:var(--g-shadow);
-  transition:box-shadow .25s ease, background-color .3s ease;
-  -webkit-tap-highlight-color:transparent;
+  position:relative;
+  overflow:hidden;
 }
-.neu-toggle.sm{ --s:27px; --pad:5px; gap:6px }
-.neu-toggle:focus-visible{ outline:2px solid var(--hd-cyan,#20D9E8); outline-offset:3px }
-.neu-toggle-slot{
-  position:relative; z-index:1; width:var(--s); height:var(--s); border-radius:50%;
-  display:grid; place-items:center; color:var(--muted);
-  transition:box-shadow .25s ease, background-color .25s ease;
+.hd-root .hd-sub-card::before{
+  content:""; position:absolute; top:0; left:8%; right:8%; height:1px;
+  background:var(--g-edge);
+  opacity:var(--g-edge-op);
+  pointer-events:none;
 }
-.neu-toggle-slot.raised{
-  background:linear-gradient(180deg,rgba(255,255,255,.34),rgba(255,255,255,.05) 55%),var(--g-well);
-  border:1px solid var(--g-line);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.5), 0 3px 8px -3px rgba(0,10,30,.5);
-}
-.neu-toggle-slot.well{
-  background:rgba(4,12,28,.45);
-  border:1px solid var(--g-line);
-  box-shadow:inset 0 3px 8px rgba(0,8,24,.6), inset 0 -1px 0 rgba(255,255,255,.12);
-}
-html.light-mode .neu-toggle-slot.well{ background:rgba(40,80,130,.20); box-shadow:inset 0 3px 7px rgba(20,60,110,.35), inset 0 -1px 0 rgba(255,255,255,.7) }
-.neu-toggle-ring{
-  position:relative; width:64%; height:64%; border-radius:50%;
-  border:max(2px,calc(var(--s) * .09)) solid var(--ring);
-  box-shadow:0 0 calc(var(--s) * .3) var(--ring), inset 0 0 calc(var(--s) * .2) color-mix(in srgb,var(--ring) 70%,transparent);
-  display:grid; place-items:center;
-}
-.neu-toggle-ring i{ width:20%; height:20%; border-radius:50%; background:var(--ring); box-shadow:0 0 6px var(--ring) }
-html.light-mode .neu-toggle{ --ring:#12C9AE }
 
-@media (prefers-reduced-motion:reduce){
-  .hd-root .hd-card,html .glass-scope .dash-stat-card,
-  .hd-root .hd-card::after,html .glass-scope .dash-stat-card::after,
-  .neu-toggle,.neu-toggle-slot{ transition:none }
-  .hd-root .hd-card:hover,html .glass-scope .dash-stat-card:hover,.hd-root .hd-kpi.is-link:active{ transform:none }
-  .hd-in{ animation:none }
+/* =====================================================================
+   5. GLASS-SCOPED stat cards (Pharmacy, Shift Handover, etc.)
+   ===================================================================== */
+.glass-scope{
+  position:relative;
+  isolation:isolate;
+}
+.glass-scope .dash-stat-card,
+.glass-scope .owner-stat-card,
+.glass-scope .hd-kpi,
+.glass-scope .card{
+  background:var(--g-card) !important;
+  -webkit-backdrop-filter:var(--g-blur);
+  backdrop-filter:var(--g-blur);
+  border:1px solid transparent !important;
+  border-image:var(--g-edge) 1 / 1px / 0 stretch !important;
+  box-shadow:var(--g-shadow) !important;
+  position:relative;
+  overflow:hidden;
+}
+.glass-scope .dash-stat-card::before,
+.glass-scope .owner-stat-card::before,
+.glass-scope .hd-kpi::before,
+.glass-scope .card::before{
+  content:""; position:absolute; top:0; left:10%; right:10%; height:1px;
+  background:var(--g-edge);
+  opacity:var(--g-edge-op);
+  pointer-events:none;
+  z-index:1;
+}
+
+/* =====================================================================
+   6. POPOVER + TOOLTIP — liquid glass
+   ===================================================================== */
+.dash-popover-menu,
+.hd-tip{
+  background:var(--glass-bg) !important;
+  -webkit-backdrop-filter:var(--glass-blur) !important;
+  backdrop-filter:var(--glass-blur) !important;
+  border:1px solid var(--glass-border) !important;
+  box-shadow:var(--glass-shadow) !important;
+  position:relative;
+  overflow:hidden;
+}
+.dash-popover-menu::before,
+.hd-tip::before{
+  content:""; position:absolute; top:0; left:8%; right:8%; height:1px;
+  background:var(--g-edge);
+  opacity:var(--g-edge-op);
+  pointer-events:none;
+  z-index:1;
+}
+
+/* Fallback for browsers without backdrop-filter */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .hd-root .hd-card,
+  .hd-root .hd-sub-card,
+  .glass-scope .dash-stat-card,
+  .glass-scope .owner-stat-card,
+  .glass-scope .hd-kpi,
+  .glass-scope .card,
+  .dash-popover-menu,
+  .hd-tip{
+    background:var(--bg-elevated) !important;
+  }
+}
+
+/* =====================================================================
+   7. REDUCED MOTION — disable hover transitions
+   ===================================================================== */
+@media (prefers-reduced-motion: reduce){
+  .hd-root .hd-card{
+    transition:none !important;
+  }
+  .hd-root .hd-card:hover{
+    transform:none !important;
+    backdrop-filter:var(--g-blur) !important;
+  }
+}
+
+/* =====================================================================
+   8. LIQUID GLASS refraction on the background overlay
+   (so the hospital background image is refracted through the glass
+    cards — not just blurred behind them)
+   ===================================================================== */
+.hd-root .hd-card{
+  /* The backdrop-filter already refracts the background through the card.
+     This ensures the refraction is visible even when the card is over
+     the custom hospital background image. */
+  background-blend-mode:normal;
 }
