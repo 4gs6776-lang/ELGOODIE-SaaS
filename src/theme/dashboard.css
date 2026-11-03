@@ -3,8 +3,13 @@
    Designed for the existing Dashboard.jsx and globals.css
    ========================================================= */
 
-.dash-shell{display:flex;min-height:100vh;background:var(--bg);color:var(--ivory)}
+.dash-shell{display:flex;min-height:100vh;background:var(--bg);color:var(--ivory);position:relative}
 .dash-main{flex:1;min-width:0;background:var(--bg)}
+/* When a custom hospital background is active, make .dash-main transparent
+   so the #hospital-bg-overlay div (position:fixed; z-index:0) shows through.
+   The sidebar keeps its own --sidebar-bg so it stays opaque + readable. */
+.dash-shell.has-custom-bg .dash-main{background:transparent}
+.dash-shell.has-custom-bg{background:transparent}
 .dash-sidebar{width:245px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:23px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;z-index:40}
 .dash-sidebar::-webkit-scrollbar{width:4px}.dash-sidebar::-webkit-scrollbar-thumb{background:var(--line);border-radius:10px}
 .dash-brand{display:flex;align-items:center;gap:11px;padding:5px 8px 25px;border-bottom:1px solid var(--line);margin-bottom:3px}
