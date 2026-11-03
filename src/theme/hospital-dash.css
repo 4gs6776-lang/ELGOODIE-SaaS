@@ -49,9 +49,9 @@ html.light-mode .hd-root{
 .hd-status.off i{background:var(--hd-amber); box-shadow:0 0 0 3px color-mix(in srgb,var(--hd-amber) 22%,transparent)}
 
 /* ---- 5. cards ---- */
-/* Card backgrounds, borders, and shadows are now provided by glass.css
-   (Liquid Glass effect). These rules keep the layout + transitions only. */
-.hd-card{background:transparent; border:1px solid transparent; border-radius:14px; box-shadow:none; min-width:0; transition:border-color .2s ease, transform .2s ease, box-shadow .2s ease}
+/* OPAQUE BACKGROUNDS REMOVED — glass.css provides the translucent
+   liquid glass surface via backdrop-filter. These rules keep layout only. */
+.hd-card{background:transparent !important; border:1px solid transparent !important; border-radius:14px; box-shadow:none !important; min-width:0; transition:border-color .2s ease, transform .2s ease, box-shadow .2s ease}
 @media (hover:hover){ .hd-card:hover{border-color:color-mix(in srgb,var(--tone,var(--hd-blue)) 38%,transparent); transform:translateY(-2px)} }
 .hd-in{animation:hdIn .55s cubic-bezier(.2,.7,.2,1) both; animation-delay:calc(var(--i,0) * 55ms)}
 @keyframes hdIn{from{opacity:0; transform:translateY(10px)}}
@@ -76,11 +76,9 @@ html.light-mode .hd-root{
 @media (max-width:1100px){ .hd-top,.hd-mid{grid-template-columns:minmax(0,1fr)} }
 
 /* ---- 7. pulse panel (nested sub-cards, like the reference) ---- */
-/* Pulse panel — gradient removed so Liquid Glass renders cleanly.
-   The glass.css file now provides the background via --g-card. */
-.hd-pulse{display:flex; flex-direction:column; background:transparent}
+.hd-pulse{display:flex; flex-direction:column; background:linear-gradient(180deg,var(--hd-card),var(--hd-card))}
 .hd-pulse-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; flex:1}
-.hd-sub-card{background:transparent; border:1px solid transparent; border-radius:12px; padding:12px; display:flex; flex-direction:column; justify-content:flex-end; gap:4px; min-height:176px}
+.hd-sub-card{background:var(--hd-surface); border:1px solid var(--hd-line); border-radius:12px; padding:12px; display:flex; flex-direction:column; justify-content:flex-end; gap:4px; min-height:176px}
 .hd-sub-card strong{font-size:22px; font-weight:650; letter-spacing:-.02em}
 .hd-sub-card strong small{font-size:11px; font-weight:450; color:var(--hd-mute); letter-spacing:0}
 .hd-bars{flex:1; display:flex; align-items:flex-end; gap:4px; min-height:70px; margin-bottom:8px}
@@ -237,25 +235,18 @@ html.light-mode .hd-glowline .recharts-line-curve{filter:none}
 /* better text: brighter values, labels with stronger contrast */
 .hd-root{--hd-text:#F7F8FC; --hd-mute:#A9A9B8}
 
-/* hd-kpi gradient removed — Liquid Glass (glass.css) provides the surface.
-   The previous radial-gradient tint (tone color over hd-card) was a
-   glassmorphism-era accent that competed with the liquid glass refraction. */
-.hd-root .hd-kpi{background:transparent}
-html.light-mode .hd-root .hd-kpi{background:transparent}
-/* hd-panel gradient removed — Liquid Glass (glass.css) provides the background.
-   The previous gradient (color-mix cyan tint over hd-card) was overriding
-   the glass effect. */
-.hd-root .hd-panel{position:relative; background:transparent}
-html.light-mode .hd-root .hd-panel{background:transparent}
-.hd-root .hd-panel::before{display:none}
+/* gradient on cards: a soft tint from each card's own accent colour */
+.hd-root .hd-kpi{background:radial-gradient(130% 100% at 0% 0%, color-mix(in srgb,var(--tone,var(--hd-blue)) 16%,transparent) 0%, transparent 62%), var(--hd-card)}
+html.light-mode .hd-root .hd-kpi{background:radial-gradient(130% 100% at 0% 0%, color-mix(in srgb,var(--tone,var(--hd-blue)) 9%,transparent) 0%, transparent 62%), var(--hd-card)}
+.hd-root .hd-panel{position:relative; background:linear-gradient(180deg, color-mix(in srgb,var(--hd-cyan) 6%,var(--hd-card)) 0%, var(--hd-card) 42%)}
+html.light-mode .hd-root .hd-panel{background:linear-gradient(180deg, color-mix(in srgb,var(--hd-cyan) 5%,var(--hd-card)) 0%, var(--hd-card) 42%)}
+.hd-root .hd-panel::before{content:""; position:absolute; left:14px; right:14px; top:0; height:1px; pointer-events:none;
+  background:linear-gradient(90deg, transparent, color-mix(in srgb,var(--hd-cyan) 60%,transparent), color-mix(in srgb,var(--hd-purple) 55%,transparent), color-mix(in srgb,var(--hd-pink) 45%,transparent), transparent); opacity:.75}
 
 /* gradient headings and numbers (falls back to plain text if unsupported) */
 @supports ((-webkit-background-clip:text) or (background-clip:text)){
   .hd-head h1{background:linear-gradient(95deg,var(--hd-text) 8%, var(--hd-cyan) 58%, var(--hd-blue) 100%); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; width:fit-content}
-/* hd-panel-head h3 gradient text removed — Liquid Glass provides the visual hierarchy.
-   The previous gradient (text → cyan tint) was a glassmorphism-era polish
-   that competed with the liquid glass surface. */
-  .hd-panel-head h3{color:var(--hd-text); width:fit-content}
+  .hd-panel-head h3{background:linear-gradient(90deg,var(--hd-text) 35%, color-mix(in srgb,var(--hd-cyan) 70%,var(--hd-text)) 100%); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; width:fit-content}
   .hd-kpi-value{background:linear-gradient(180deg,var(--hd-text) 30%, color-mix(in srgb,var(--tone,var(--hd-cyan)) 55%,var(--hd-text)) 100%); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; width:fit-content}
 }
 @media (prefers-reduced-motion:reduce){ .hd-halo{animation:none} }
@@ -309,33 +300,250 @@ html:not(.light-mode) .dash-stat-card:hover,
 html:not(.light-mode) .owner-stat-card:hover{border-color:rgba(32,217,232,.28)}
 
 /* =====================================================================
-   Dashboard overview — chart sizing + small helpers.
-   Neumorphic card surfaces now live in neumorph.css; the earlier
-   all-card glass / animated border / filler card styles were removed.
+   PREMIUM GLASSMORPHISM + CHART SIZING (v2 redesign)
+   =====================================================================
+   Goals:
+     1. Make chart cards taller (400px) so charts fill the card space
+     2. Apply subtle frosted-glass effect to all dashboard cards
+        (works in BOTH dark + light modes)
+     3. Add hover lift + glow border on cards
+     4. Add slow animated gradient border (8s loop)
+     5. Increase chart line thickness + add glow filter
+
+   Why this is safe:
+     - No MutationObserver, no JS feedback loop
+     - Pure CSS — no React re-renders triggered
+     - Uses backdrop-filter (supported in all modern browsers)
+     - Falls back gracefully if backdrop-filter unsupported
    ===================================================================== */
 
-/* ---- Charts fill their cards ----
-   The chart card grows to the height of its row; the chart takes all the
-   room left under the title and chips. The Recharts container is pinned to
-   the chart box so it always measures a real size. */
+/* ---- 1. TALLER CHART CARDS ---- */
+/* Was 250px — now 380px so the chart SVG fills the card body.
+   The chart itself uses ResponsiveContainer height="100%" so it
+   automatically grows to fill this. */
+.hd-chart{height:380px !important; width:100%}
+.hd-chart.short{height:280px}
+
+/* Make the chart panel itself taller so there's room for the chart
+   + title + subtitle + chips without scrolling */
 .hd-mid .hd-card,
-.hd-duo .hd-card{display:flex; flex-direction:column}
-.hd-mid .hd-card{min-height:460px}
-.hd-duo .hd-card{min-height:400px}
+.hd-duo .hd-card{min-height:480px; display:flex; flex-direction:column}
+.hd-mid .hd-panel,
+.hd-duo .hd-panel{flex:1; display:flex; flex-direction:column}
 .hd-mid .hd-chart,
-.hd-duo .hd-chart{ flex:1 1 auto; height:auto; min-height:300px; width:100%}
-.hd-chart{position:relative}
-.hd-chart-fill{position:absolute; inset:0}
+.hd-duo .hd-chart{flex:1; min-height:340px}
 
-/* ---- Chart line glow (single soft halo, dark mode only) ---- */
-.hd-glowline{filter:drop-shadow(0 0 5px currentColor)}
-html.light-mode .hd-glowline{filter:none}
-.hd-glow-cyan{color:var(--hd-cyan)} .hd-glow-blue{color:var(--hd-blue)} .hd-glow-purple{color:var(--hd-purple)}
-.hd-glow-pink{color:var(--hd-pink)} .hd-glow-amber{color:var(--hd-amber)} .hd-glow-green{color:var(--hd-green)} .hd-glow-red{color:var(--hd-red)}
+/* ---- 2. GLASSMORPHISM on all .hd-card elements ---- */
+/* Subtle frosted glass: 85% opacity + blur(8px) + soft inner highlight.
+   Dark mode: deep navy glass. Light mode: white frosted glass. */
+html:not(.light-mode) .hd-card{
+  background: rgba(11, 11, 15, 0.85) !important;
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.37),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  position: relative;
+  overflow: hidden;
+}
+html.light-mode .hd-card{
+  background: rgba(255, 255, 255, 0.75) !important;
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  box-shadow:
+    0 8px 32px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.80) !important;
+  position: relative;
+  overflow: hidden;
+}
 
-/* ---- Remaining activity cards (below the operational panels) ---- */
-.hd-filler{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-top:14px}
-.hd-filler .hd-card{min-height:220px}
+/* Subtle top-edge highlight (frosted glass specular) */
+.hd-card::before{
+  content: "";
+  position: absolute;
+  top: 0; left: 14px; right: 14px;
+  height: 1px;
+  pointer-events: none;
+  z-index: 1;
+}
+html:not(.light-mode) .hd-card::before{
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 50%,
+    transparent 100%);
+}
+html.light-mode .hd-card::before{
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 1) 50%,
+    transparent 100%);
+}
+
+/* ---- 3. HOVER LIFT + GLOW BORDER ---- */
+@media (hover: hover){
+  .hd-card{
+    transition: transform 0.28s cubic-bezier(.16, 1, .3, 1),
+                box-shadow 0.28s cubic-bezier(.16, 1, .3, 1),
+                border-color 0.28s ease !important;
+  }
+  .hd-card:hover{
+    transform: translateY(-3px) !important;
+  }
+  html:not(.light-mode) .hd-card:hover{
+    border-color: color-mix(in srgb, var(--tone, var(--hd-cyan)) 32%, rgba(255, 255, 255, 0.08)) !important;
+    box-shadow:
+      0 14px 40px rgba(0, 0, 0, 0.45),
+      0 0 0 1px color-mix(in srgb, var(--tone, var(--hd-cyan)) 22%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+  }
+  html.light-mode .hd-card:hover{
+    border-color: color-mix(in srgb, var(--tone, var(--hd-cyan)) 28%, rgba(0, 0, 0, 0.06)) !important;
+    box-shadow:
+      0 14px 40px rgba(15, 23, 42, 0.10),
+      0 0 0 1px color-mix(in srgb, var(--tone, var(--hd-cyan)) 18%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.90) !important;
+  }
+}
+
+/* ---- 4. ANIMATED GRADIENT BORDER (8s loop) ---- */
+/* A thin, slowly-shifting colored border that runs around each card.
+   Implemented as a ::after pseudo-element with a conic-gradient
+   that rotates. Very subtle (low opacity) so it doesn't distract. */
+.hd-card::after{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--hd-grad-angle, 0deg),
+    transparent 0%,
+    color-mix(in srgb, var(--tone, var(--hd-cyan)) 40%, transparent) 25%,
+    transparent 50%,
+    color-mix(in srgb, var(--tone, var(--hd-cyan)) 40%, transparent) 75%,
+    transparent 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;  /* hidden by default */
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 2;
+  animation: hd-grad-rotate 8s linear infinite;
+}
+.hd-card:hover::after{
+  opacity: 0.6;  /* visible on hover */
+}
+@property --hd-grad-angle{
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes hd-grad-rotate{
+  to { --hd-grad-angle: 360deg; }
+}
+/* Fallback for browsers without @property support — use a simple
+   border-color animation instead */
+@supports not (background: paint(something)) {
+  .hd-card::after{ display: none; }
+}
+
+/* ---- 5. CHART LINE GLOW + THICKER STROKE ---- */
+/* The chart lines themselves get a glow filter + thicker stroke.
+   Applied via the .hd-glowline class which is already on the lines. */
+.hd-glowline{
+  filter: drop-shadow(0 0 4px currentColor) drop-shadow(0 0 8px currentColor);
+  stroke-width: 3 !important;
+}
+.hd-glow-cyan{ color: var(--hd-cyan); }
+.hd-glow-blue{ color: var(--hd-blue); }
+.hd-glow-purple{ color: var(--hd-purple); }
+.hd-glow-pink{ color: var(--hd-pink); }
+.hd-glow-amber{ color: var(--hd-amber); }
+.hd-glow-green{ color: var(--hd-green); }
+.hd-glow-red{ color: var(--hd-red); }
+
+/* ---- 6. NEW FILLER CARDS SECTION (below hd-bottom) ---- */
+/* A new grid for the additional KPI + chart cards that fill the
+   voided space below the scrollbar. Same glassmorphism as the rest. */
+.hd-filler{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.hd-filler .hd-card{ min-height: 220px; }
+
+/* Mini bar chart for top meds / diagnoses / dept load */
+.hd-minibars{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.hd-minibar{
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.hd-minibar-label{
+  color: var(--hd-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hd-minibar-track{
+  width: 100px;
+  height: 6px;
+  background: var(--hd-line);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.hd-minibar-fill{
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--tone, var(--hd-cyan)), color-mix(in srgb, var(--tone, var(--hd-cyan)) 60%, transparent));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tone, var(--hd-cyan)) 50%, transparent);
+  transition: width 1s cubic-bezier(.16, 1, .3, 1);
+}
+.hd-minibar-value{
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--hd-mute);
+  font-size: 11.5px;
+}
+
+/* Donut chart for bed occupancy + demographics */
+.hd-donut{
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin: 8px auto;
+}
+.hd-donut svg{ width: 100%; height: 100%; }
+.hd-donut-center{
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.hd-donut-value{
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--hd-text);
+  line-height: 1;
+}
+.hd-donut-label{
+  font-size: 10px;
+  color: var(--hd-mute);
+  margin-top: 2px;
+}
 
 /* Staff list with role badges */
 .hd-staff-list{
@@ -402,4 +610,57 @@ html.light-mode .hd-glowline{filter:none}
   font-size: 10.5px;
   color: var(--hd-mute);
   white-space: nowrap;
+}
+
+/* KPI mini-card (revenue, wait time) */
+.hd-kpi-mini{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+}
+.hd-kpi-mini-value{
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--hd-text);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.hd-kpi-mini-label{
+  font-size: 11px;
+  color: var(--hd-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.hd-kpi-mini-trend{
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.hd-kpi-mini-trend.up{ color: var(--hd-green); }
+.hd-kpi-mini-trend.down{ color: var(--hd-red); }
+
+/* ---- 7. SUB-CARD glassmorphism (pulse panel nested cards) ---- */
+html:not(.light-mode) .hd-sub-card{
+  background: rgba(16, 16, 21, 0.65) !important;
+  backdrop-filter: blur(6px) saturate(130%);
+  -webkit-backdrop-filter: blur(6px) saturate(130%);
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+html.light-mode .hd-sub-card{
+  background: rgba(244, 246, 250, 0.65) !important;
+  backdrop-filter: blur(6px) saturate(130%);
+  -webkit-backdrop-filter: blur(6px) saturate(130%);
+  border: 1px solid rgba(0, 0, 0, 0.04) !important;
+}
+
+/* ---- 8. REDUCED MOTION FALLBACK ---- */
+@media (prefers-reduced-motion: reduce){
+  .hd-card{ transition: none !important; }
+  .hd-card:hover{ transform: none !important; }
+  .hd-card::after{ animation: none !important; }
+  .hd-glowline{ filter: none; }
 }
