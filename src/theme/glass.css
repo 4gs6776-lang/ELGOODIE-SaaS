@@ -351,3 +351,96 @@ html.light-mode .hd-root .hd-panel{
      the custom hospital background image. */
   background-blend-mode:normal;
 }
+
+/* =====================================================================
+   9. LIQUID GLASS TOGGLE — for SpringToggle component (.neu-toggle)
+   =====================================================================
+   The SpringToggle component uses .neu-toggle class names (historical
+   naming from the neumorphism era). The neumorph.css file has been
+   emptied, so we redefine the toggle here using liquid glass styling
+   that matches the rest of the dashboard.
+
+   Visual: a liquid glass pill with two slots — one raised (the active
+   icon, sun or moon) and one pressed (a well with a glowing ring).
+   The raised slot looks like a glass button floating above the surface;
+   the well looks like a recessed glass indent.
+   ===================================================================== */
+
+.neu-toggle{
+  --s:34px; --pad:6px; --ring:var(--hd-cyan, #20D9E8);
+  position:relative; display:inline-flex; align-items:center; gap:8px; flex:none;
+  padding:var(--pad); margin:0; cursor:pointer; border-radius:999px;
+  border:1px solid var(--g-line);
+  background:var(--g-card);
+  -webkit-backdrop-filter:var(--g-blur);
+  backdrop-filter:var(--g-blur);
+  box-shadow:var(--g-shadow);
+  transition:box-shadow .25s ease, background-color .3s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+.neu-toggle.sm{ --s:27px; --pad:5px; gap:6px }
+
+/* Liquid glass inner panel — a subtle refraction layer */
+.neu-toggle::before{
+  content:""; position:absolute; inset:3px; border-radius:inherit; pointer-events:none;
+  background:var(--g-sheen);
+  opacity:.6;
+}
+
+.neu-toggle:active{ box-shadow:var(--g-shadow), inset 0 2px 8px rgba(0,0,0,.20) }
+.neu-toggle:focus-visible{ outline:2px solid var(--hd-cyan,#20D9E8); outline-offset:3px }
+
+.neu-toggle-slot{
+  position:relative; z-index:1; width:var(--s); height:var(--s); border-radius:50%;
+  display:grid; place-items:center; color:var(--muted-dim);
+  transition:box-shadow .25s ease, background-color .25s ease;
+}
+
+/* Raised slot — looks like a floating glass button */
+.neu-toggle-slot.raised{
+  background:var(--g-card);
+  -webkit-backdrop-filter:blur(8px) saturate(160%);
+  backdrop-filter:blur(8px) saturate(160%);
+  border:1px solid var(--g-line);
+  box-shadow:
+    0 4px 12px -4px rgba(0,0,0,.40),
+    inset 0 1px 0 rgba(255,255,255,.30),
+    inset 0 -1px 0 rgba(0,0,0,.10);
+}
+.neu-toggle-slot.raised svg{ filter:drop-shadow(0 1px 0 rgba(255,255,255,.45)) }
+html:not(.light-mode) .neu-toggle-slot.raised svg{ filter:drop-shadow(0 -1px 0 rgba(255,255,255,.10)) }
+
+/* Well slot — looks like a recessed glass indent */
+.neu-toggle-slot.well{
+  background:rgba(0,0,0,.18);
+  box-shadow:
+    inset 0 2px 6px rgba(0,0,0,.30),
+    inset 0 -1px 0 rgba(255,255,255,.06);
+}
+html.light-mode .neu-toggle-slot.well{
+  background:rgba(0,0,0,.06);
+  box-shadow:
+    inset 0 2px 6px rgba(0,0,0,.10),
+    inset 0 -1px 0 rgba(255,255,255,.50);
+}
+
+/* Glowing ring inside the well */
+.neu-toggle-ring{
+  position:relative; width:64%; height:64%; border-radius:50%;
+  border:max(2px,calc(var(--s) * .09)) solid var(--ring);
+  box-shadow:
+    0 0 calc(var(--s) * .3) var(--ring),
+    inset 0 0 calc(var(--s) * .2) color-mix(in srgb,var(--ring) 70%,transparent);
+  display:grid; place-items:center;
+}
+.neu-toggle-ring i{
+  width:20%; height:20%; border-radius:50%;
+  background:var(--ring);
+  box-shadow:0 0 6px var(--ring);
+}
+
+html.light-mode .neu-toggle{ --ring:#3FE0A0 }
+
+@media (prefers-reduced-motion:reduce){
+  .neu-toggle,.neu-toggle-slot{ transition:none }
+}

@@ -1,0 +1,405 @@
+/* =====================================================================
+   GOODIE-MEDHUB — Hospital overview redesign (hd- prefix)
+   Dark is the default; light turns on with html.light-mode, exactly like
+   the rest of the app. Import order: after premium-global.css, before
+   mobile.css.
+   ===================================================================== */
+
+/* ---- 1. GLOBAL SURFACE TONES (dark mode only) ------------------------
+   Shifts the app's neutral surfaces to near-black so the sidebar, header
+   and dashboard match the reference. Brand teal and light mode are
+   untouched. This affects every module's background. To undo it, delete
+   this one block. */
+html:not(.light-mode){
+  --bg:#050505; --bg-elevated:#0A0A0D; --bg-card:#0B0B0F; --bg-card-hover:#101015;
+  --sidebar-bg:#080808; --header-bg:#080808; --line:#1B1B24; --line-soft:#15151C;
+  --muted:#92929D; --muted-dim:#6B6B78;
+}
+
+/* ---- 2. tokens ---- */
+.hd-root{
+  --hd-card:#0B0B0F; --hd-surface:#101015; --hd-line:#1B1B24; --hd-text:#FFFFFF; --hd-mute:#92929D;
+  --hd-blue:#4169FF; --hd-cyan:#20D9E8; --hd-purple:#9333EA; --hd-pink:#F044B8; --hd-amber:#F5C451; --hd-green:#34D399; --hd-red:#F87171;
+  --hd-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 12px 28px -18px rgba(0,0,0,.9);
+  --hd-glow:.22; --hd-atmo:.07;
+  position:relative; isolation:isolate; color:var(--hd-text); font-family:var(--font-body);
+  display:flex; flex-direction:column; gap:14px; padding-bottom:28px;
+}
+html.light-mode .hd-root{
+  --hd-card:#FFFFFF; --hd-surface:#F4F6FA; --hd-line:#E4E7EE; --hd-text:#0F172A; --hd-mute:#5E6675;
+  --hd-blue:#3052E0; --hd-cyan:#0E8FA8; --hd-purple:#7E22CE; --hd-pink:#D6258F; --hd-amber:#C98A0B; --hd-green:#0F9F6E; --hd-red:#DC2626;
+  --hd-shadow:0 1px 2px rgba(15,23,42,.05), 0 8px 24px -16px rgba(15,23,42,.18);
+  --hd-glow:.08; --hd-atmo:.05;
+}
+.hd-root [data-tone=blue]{--tone:var(--hd-blue)} .hd-root [data-tone=cyan]{--tone:var(--hd-cyan)}
+.hd-root [data-tone=purple]{--tone:var(--hd-purple)} .hd-root [data-tone=pink]{--tone:var(--hd-pink)}
+.hd-root [data-tone=amber]{--tone:var(--hd-amber)} .hd-root [data-tone=green]{--tone:var(--hd-green)} .hd-root [data-tone=red]{--tone:var(--hd-red)}
+
+/* ---- 3. atmosphere (decorative, behind everything, never clickable) ---- */
+.hd-atmo{position:absolute; inset:-24px -8px auto -8px; height:620px; z-index:-1; pointer-events:none; overflow:hidden; color:var(--hd-blue); opacity:var(--hd-atmo); filter:blur(.7px); -webkit-mask-image:linear-gradient(#000 35%,transparent); mask-image:linear-gradient(#000 35%,transparent)}
+.hd-atmo svg{width:100%; height:100%}
+.hd-root::before{content:""; position:absolute; z-index:-1; pointer-events:none; top:-70px; right:4%; width:min(540px,70%); height:320px; background:radial-gradient(closest-side,var(--hd-purple),transparent); opacity:var(--hd-glow); filter:blur(46px)}
+
+/* ---- 4. header ---- */
+.hd-head{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap}
+.hd-head h1{font-size:22px; font-weight:650; letter-spacing:-.015em; margin:0}
+.hd-head p{margin:3px 0 0; font-size:12.5px; color:var(--hd-mute)}
+.hd-status{display:inline-flex; align-items:center; gap:7px; font-size:11.5px; color:var(--hd-mute); padding:6px 11px; border:1px solid var(--hd-line); border-radius:999px; background:var(--hd-card)}
+.hd-status i{width:7px; height:7px; border-radius:50%; background:var(--hd-green); box-shadow:0 0 0 3px color-mix(in srgb,var(--hd-green) 20%,transparent)}
+.hd-status.off i{background:var(--hd-amber); box-shadow:0 0 0 3px color-mix(in srgb,var(--hd-amber) 22%,transparent)}
+
+/* ---- 5. cards ---- */
+/* Card backgrounds, borders, and shadows are now provided by glass.css
+   (Liquid Glass effect). These rules keep the layout + transitions only. */
+.hd-card{background:transparent; border:1px solid transparent; border-radius:14px; box-shadow:none; min-width:0; transition:border-color .2s ease, transform .2s ease, box-shadow .2s ease}
+@media (hover:hover){ .hd-card:hover{border-color:color-mix(in srgb,var(--tone,var(--hd-blue)) 38%,transparent); transform:translateY(-2px)} }
+.hd-in{animation:hdIn .55s cubic-bezier(.2,.7,.2,1) both; animation-delay:calc(var(--i,0) * 55ms)}
+@keyframes hdIn{from{opacity:0; transform:translateY(10px)}}
+.hd-label{font-size:11px; font-weight:500; letter-spacing:.02em; color:var(--hd-mute)}
+.hd-sub{font-size:11.5px; color:var(--hd-mute)}
+.hd-num{font-variant-numeric:tabular-nums}
+.hd-panel{padding:16px 18px}
+.hd-panel-head{display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px}
+.hd-panel-head h3{margin:0; font-size:14px; font-weight:620; letter-spacing:-.005em}
+.hd-panel-head p{margin:2px 0 0; font-size:11.5px; color:var(--hd-mute)}
+.hd-empty{padding:18px 14px; font-size:12.5px; line-height:1.5; color:var(--hd-mute); text-align:center; border:1px dashed var(--hd-line); border-radius:10px}
+.hd-foot{margin:10px 0 0; font-size:11.5px; color:var(--hd-mute)}
+
+/* ---- 6. layout ---- */
+.hd-top{display:grid; grid-template-columns:minmax(0,1.25fr) minmax(0,1fr); gap:14px; align-items:stretch}
+.hd-top > .hd-pulse:only-child{grid-column:1/-1}
+.hd-kpis{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; align-content:start}
+.hd-mid{display:grid; grid-template-columns:minmax(0,1.7fr) minmax(0,1fr); gap:14px}
+.hd-mid > :only-child{grid-column:1/-1}
+.hd-bottom{display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:14px}
+.hd-wideact{grid-column:1/-1}
+@media (max-width:1100px){ .hd-top,.hd-mid{grid-template-columns:minmax(0,1fr)} }
+
+/* ---- 7. pulse panel (nested sub-cards, like the reference) ---- */
+/* Pulse panel — gradient removed so Liquid Glass renders cleanly.
+   The glass.css file now provides the background via --g-card. */
+.hd-pulse{display:flex; flex-direction:column; background:transparent}
+.hd-pulse-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; flex:1}
+.hd-sub-card{background:transparent; border:1px solid transparent; border-radius:12px; padding:12px; display:flex; flex-direction:column; justify-content:flex-end; gap:4px; min-height:176px}
+.hd-sub-card strong{font-size:22px; font-weight:650; letter-spacing:-.02em}
+.hd-sub-card strong small{font-size:11px; font-weight:450; color:var(--hd-mute); letter-spacing:0}
+.hd-bars{flex:1; display:flex; align-items:flex-end; gap:4px; min-height:70px; margin-bottom:8px}
+.hd-bars i{flex:1; border-radius:3px; background:var(--bar); transform-origin:bottom; box-shadow:0 0 12px -2px var(--bar); animation:hdGrow .6s cubic-bezier(.2,.7,.2,1) both; animation-delay:calc(var(--i) * 22ms + 250ms)}
+html.light-mode .hd-bars i{box-shadow:none}
+@keyframes hdGrow{from{transform:scaleY(.05); opacity:0}}
+.hd-bars-empty{flex:1; display:flex; align-items:center; font-size:11.5px; color:var(--hd-mute); min-height:70px}
+.hd-bed{align-items:center; text-align:center; justify-content:center}
+.hd-bed-line{font-size:11px; color:var(--hd-mute)}
+.hd-ring{position:relative; flex:none}
+.hd-ring-track{fill:none; stroke:var(--hd-line); stroke-width:7}
+.hd-ring-val{fill:none; stroke-width:7; stroke-linecap:round; animation:hdRingIn 1s cubic-bezier(.2,.7,.2,1) .3s both}
+@keyframes hdRingIn{from{stroke-dashoffset:277}}
+.hd-ring-center{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center}
+.hd-ring-center b{font-size:21px; font-weight:650; letter-spacing:-.02em}
+.hd-ring-center span{font-size:10px; color:var(--hd-mute)}
+
+/* ---- 8. KPI cards ---- */
+.hd-kpi{padding:13px 14px; display:flex; flex-direction:column; gap:8px; text-align:left; color:inherit; font:inherit; width:100%}
+.hd-kpi.wide{grid-column:span 2}
+.hd-kpi.is-link{cursor:pointer}
+.hd-kpi-top{display:flex; justify-content:space-between; align-items:center}
+.hd-kpi-main{display:flex; align-items:flex-end; justify-content:space-between; gap:8px; min-height:34px}
+.hd-kpi-value{font-size:26px; font-weight:650; letter-spacing:-.025em; line-height:1}
+.hd-kpi-foot{display:flex; align-items:center; justify-content:space-between; gap:6px; min-height:16px}
+.hd-kpi::before{content:""; position:absolute; left:0; top:14px; bottom:14px; width:2px; border-radius:2px; background:var(--tone,var(--hd-blue)); opacity:.85}
+.hd-kpi{position:relative}
+.hd-delta{font-size:10.5px; font-weight:600; padding:2px 7px; border-radius:999px; font-variant-numeric:tabular-nums}
+.hd-delta.up{color:var(--hd-green); background:color-mix(in srgb,var(--hd-green) 14%,transparent)}
+.hd-delta.down{color:var(--hd-red); background:color-mix(in srgb,var(--hd-red) 14%,transparent)}
+.hd-spark path{stroke-dasharray:1; stroke-dashoffset:1; animation:hdDraw 1.1s ease-out .35s forwards}
+@keyframes hdDraw{to{stroke-dashoffset:0}}
+
+/* ---- 9. skeletons ---- */
+.hd-skel{display:inline-block; border-radius:6px; background:linear-gradient(90deg,var(--hd-surface),color-mix(in srgb,var(--hd-mute) 18%,var(--hd-surface)),var(--hd-surface)); background-size:200% 100%; animation:hdShimmer 1.4s linear infinite}
+@keyframes hdShimmer{to{background-position:-200% 0}}
+
+/* ---- 10. patient flow ---- */
+.hd-flow{list-style:none; margin:0; padding:0; display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:8px}
+.hd-stage{position:relative}
+.hd-stage button{width:100%; display:flex; flex-direction:column; gap:3px; align-items:flex-start; padding:11px 12px; background:var(--hd-surface); border:1px solid var(--hd-line); border-radius:11px; color:inherit; font:inherit; text-align:left; cursor:pointer; transition:border-color .2s, background .2s}
+.hd-stage button:disabled{cursor:default}
+.hd-stage button:not(:disabled):hover{border-color:color-mix(in srgb,var(--tone) 50%,var(--hd-line))}
+.hd-stage.sel button{border-color:var(--tone); background:color-mix(in srgb,var(--tone) 10%,var(--hd-surface))}
+.hd-stage-n{font-size:22px; font-weight:650; letter-spacing:-.02em; color:var(--tone); line-height:1.1}
+.hd-stage-l{font-size:11.5px; color:var(--hd-mute)}
+.hd-stage-link{position:absolute; top:50%; right:-9px; width:10px; height:1px; background:var(--hd-line)}
+.hd-stagelist{margin-top:12px; display:flex; flex-direction:column; border:1px solid var(--hd-line); border-radius:11px; overflow:hidden}
+.hd-row{display:flex; gap:10px; align-items:center; padding:9px 12px; font-size:12.5px; border-bottom:1px solid var(--hd-line)}
+.hd-row:last-child{border-bottom:0}
+.hd-row-main{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550}
+.hd-row-meta,.hd-row-time{color:var(--hd-mute); font-size:11.5px; white-space:nowrap}
+.hd-more{padding:8px 12px; font-size:11.5px; color:var(--hd-mute); background:var(--hd-surface)}
+@media (max-width:760px){ .hd-flow{grid-auto-flow:row; grid-template-columns:repeat(2,minmax(0,1fr))} .hd-stage-link{display:none} }
+
+/* ---- 11. chart ---- */
+.hd-seg{display:inline-flex; padding:3px; gap:2px; background:var(--hd-surface); border:1px solid var(--hd-line); border-radius:9px}
+.hd-seg button{border:0; background:transparent; color:var(--hd-mute); font:inherit; font-size:11.5px; font-weight:550; padding:5px 10px; border-radius:6px; cursor:pointer; min-height:28px}
+.hd-seg button.on{background:var(--hd-card); color:var(--hd-text); box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.hd-chips{display:flex; flex-wrap:wrap; gap:7px; margin-bottom:10px}
+.hd-chip{display:inline-flex; align-items:center; gap:7px; padding:5px 11px; min-height:30px; font:inherit; font-size:11.5px; color:var(--hd-text); background:var(--hd-surface); border:1px solid var(--hd-line); border-radius:999px; cursor:pointer}
+.hd-chip i{width:7px; height:7px; border-radius:50%}
+.hd-chip.off{opacity:.45}
+.hd-chart{height:250px; width:100%}
+.hd-tip{background:var(--hd-card); border:1px solid var(--hd-line); border-radius:10px; padding:9px 12px; box-shadow:0 10px 30px -10px rgba(0,0,0,.6); font-size:12px; color:var(--hd-text)}
+.hd-tip-title{font-weight:600; margin-bottom:5px}
+.hd-tip-row{display:flex; align-items:center; gap:7px; color:var(--hd-mute)}
+.hd-tip-row i{width:7px; height:7px; border-radius:50%}
+.hd-tip-row b{margin-left:auto; padding-left:14px; color:var(--hd-text)}
+
+/* ---- 12. appointments ---- */
+.hd-apt-sum{display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--hd-mute); margin-bottom:10px}
+.hd-apt-sum b{color:var(--hd-text); font-size:15px; margin-right:3px}
+.hd-timeline{list-style:none; margin:0; padding:0 0 0 2px; display:flex; flex-direction:column; gap:2px}
+.hd-timeline li{display:grid; grid-template-columns:54px 1fr; gap:10px; padding:8px 0 8px 12px; border-left:1px solid var(--hd-line); position:relative}
+.hd-timeline li::before{content:""; position:absolute; left:-4px; top:14px; width:7px; height:7px; border-radius:50%; background:var(--hd-cyan)}
+.hd-timeline time{font-size:12px; font-weight:600; font-variant-numeric:tabular-nums}
+.hd-timeline strong{display:block; font-size:12.5px; font-weight:560}
+.hd-timeline small{font-size:11px; color:var(--hd-mute)}
+
+/* ---- 13. lab / pharmacy / finance / feed ---- */
+.hd-meter{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px}
+.hd-meter li{display:grid; grid-template-columns:104px 1fr 34px; align-items:center; gap:10px; font-size:12px; color:var(--hd-mute)}
+.hd-meter i{height:6px; background:var(--hd-surface); border-radius:6px; overflow:hidden}
+.hd-meter u{display:block; height:100%; background:var(--tone); border-radius:6px; transition:width .6s ease}
+.hd-meter b{color:var(--hd-text); text-align:right; font-variant-numeric:tabular-nums}
+.hd-chipline{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px}
+.hd-chipline span{font-size:11.5px; color:var(--hd-mute); padding:4px 9px; border:1px solid var(--hd-line); border-radius:8px; background:var(--hd-surface)}
+.hd-chipline b{color:var(--tone); margin-right:3px}
+.hd-list{list-style:none; margin:0; padding:0}
+.hd-list li{display:flex; justify-content:space-between; gap:10px; padding:8px 0; font-size:12.5px; border-bottom:1px solid var(--hd-line); color:var(--hd-mute)}
+.hd-list li:last-child{border-bottom:0}
+.hd-list b{color:var(--hd-text); font-variant-numeric:tabular-nums}
+.hd-list b.bad{color:var(--hd-red)}
+.hd-fin{display:flex; justify-content:space-between; align-items:flex-end; gap:10px; margin-bottom:8px}
+.hd-fin strong{display:block; font-size:24px; font-weight:650; letter-spacing:-.02em; margin-top:4px}
+.hd-feed{list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); column-gap:24px}
+.hd-feed li{display:grid; grid-template-columns:8px 1fr auto; gap:10px; align-items:start; padding:9px 0; border-bottom:1px solid var(--hd-line)}
+.hd-feed i{width:7px; height:7px; border-radius:50%; margin-top:5px; background:var(--hd-blue)}
+.hd-feed span{display:block; font-size:12.5px; line-height:1.4}
+.hd-feed small,.hd-feed time{font-size:11px; color:var(--hd-mute)}
+
+/* ---- 14. theme toggle (sun / moon switch used in the top bar) ---- */
+.hd-theme{position:relative; display:inline-flex; align-items:center; width:58px; height:30px; padding:0; border-radius:999px; border:1px solid var(--line); background:var(--bg-elevated); cursor:pointer; color:var(--muted); flex:none}
+.hd-theme-thumb{position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:var(--teal-soft); border:1px solid var(--teal-border); transition:transform .25s cubic-bezier(.2,.7,.2,1)}
+.hd-theme[data-mode=dark] .hd-theme-thumb{transform:translateX(28px)}
+.hd-theme-ico{position:relative; z-index:1; width:29px; height:100%; display:flex; align-items:center; justify-content:center; transition:color .2s}
+.hd-theme[data-mode=light] .hd-theme-ico:first-of-type,.hd-theme[data-mode=dark] .hd-theme-ico:last-of-type{color:var(--teal-bright)}
+.hd-theme:focus-visible,.hd-chip:focus-visible,.hd-seg button:focus-visible,.hd-stage button:focus-visible,.hd-kpi:focus-visible{outline:2px solid var(--hd-blue); outline-offset:2px}
+
+/* ---- 15. reduced motion ---- */
+@media (prefers-reduced-motion:reduce){
+  .hd-in,.hd-bars i,.hd-ring-val{animation:none!important}
+  .hd-spark path{animation:none!important; stroke-dashoffset:0}
+  .hd-skel{animation:none}
+  .hd-card,.hd-theme-thumb,.hd-meter u{transition:none}
+  .hd-card:hover{transform:none}
+}
+
+/* ---- 99. Emergency Line card (sidebar) -------------------------------
+   This card sits in the sidebar, outside the dashboard wrapper, so it
+   cannot use the --hd-* tokens. It uses the app's shared surface tokens
+   (--bg-card / --line, which follow dark and light mode) plus the same
+   cyan and green accents as the new dashboard. To undo, delete this block. */
+html .dash-emergency{
+  background:var(--bg-card); border:1px solid var(--line); border-radius:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+}
+html .dash-emergency-head{color:var(--muted)}
+html .dash-emergency-head svg{color:#20D9E8}
+html .dash-emergency strong{color:#FFFFFF; font-weight:600}
+html .dash-emergency-name{color:var(--muted)}
+html .dash-emergency small{display:inline-flex; align-items:center; gap:6px; color:#34D399; font-weight:600}
+html .dash-emergency small::before{content:""; width:6px; height:6px; border-radius:50%; background:#34D399; box-shadow:0 0 0 3px rgba(52,211,153,.18)}
+html.light-mode .dash-emergency strong{color:var(--ivory)}
+html.light-mode .dash-emergency-head svg{color:#0E8FA8}
+html.light-mode .dash-emergency small{color:#0F9F6E}
+html.light-mode .dash-emergency small::before{background:#0F9F6E; box-shadow:0 0 0 3px rgba(15,159,110,.16)}
+
+/* ---- 98. Chart glow, gradients and text colour ------------------------
+   Only visual polish. Colours come from the same --hd-* tokens as the rest
+   of the dashboard, so dark and light mode keep working. */
+.hd-chart.short{height:220px}
+.hd-glowline .recharts-line-curve{transition:filter .2s ease}
+.hd-glow-cyan .recharts-line-curve{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--hd-cyan) 70%,transparent))}
+.hd-glow-blue .recharts-line-curve{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--hd-blue) 70%,transparent))}
+.hd-glow-purple .recharts-line-curve{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--hd-purple) 70%,transparent))}
+.hd-glow-pink .recharts-line-curve{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--hd-pink) 70%,transparent))}
+.hd-glow-amber .recharts-line-curve{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--hd-amber) 70%,transparent))}
+html.light-mode .hd-glowline .recharts-line-curve{filter:none}
+.hd-halo{transform-box:fill-box; transform-origin:center; animation:hdHalo 2.2s ease-out 3}
+@keyframes hdHalo{0%{transform:scale(.7); opacity:.4} 100%{transform:scale(1.7); opacity:0}}
+
+/* better text: brighter values, labels with stronger contrast */
+.hd-root{--hd-text:#F7F8FC; --hd-mute:#A9A9B8}
+
+/* hd-kpi gradient removed — Liquid Glass (glass.css) provides the surface.
+   The previous radial-gradient tint (tone color over hd-card) was a
+   glassmorphism-era accent that competed with the liquid glass refraction. */
+.hd-root .hd-kpi{background:transparent}
+html.light-mode .hd-root .hd-kpi{background:transparent}
+/* hd-panel gradient removed — Liquid Glass (glass.css) provides the background.
+   The previous gradient (color-mix cyan tint over hd-card) was overriding
+   the glass effect. */
+.hd-root .hd-panel{position:relative; background:transparent}
+html.light-mode .hd-root .hd-panel{background:transparent}
+.hd-root .hd-panel::before{display:none}
+
+/* gradient headings and numbers (falls back to plain text if unsupported) */
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  .hd-head h1{background:linear-gradient(95deg,var(--hd-text) 8%, var(--hd-cyan) 58%, var(--hd-blue) 100%); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; width:fit-content}
+/* hd-panel-head h3 gradient text removed — Liquid Glass provides the visual hierarchy.
+   The previous gradient (text → cyan tint) was a glassmorphism-era polish
+   that competed with the liquid glass surface. */
+  .hd-panel-head h3{color:var(--hd-text); width:fit-content}
+  .hd-kpi-value{background:linear-gradient(180deg,var(--hd-text) 30%, color-mix(in srgb,var(--tone,var(--hd-cyan)) 55%,var(--hd-text)) 100%); -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; width:fit-content}
+}
+@media (prefers-reduced-motion:reduce){ .hd-halo{animation:none} }
+
+/* chart dots: light centre with a coloured ring (matches the reference) */
+.hd-root{--hd-dotcore:#EAF1FF}
+html.light-mode .hd-root{--hd-dotcore:#FFFFFF}
+
+/* two charts side by side (patient growth + census) */
+.hd-duo{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px}
+.hd-duo > :only-child{grid-column:1/-1}
+@media (max-width:1100px){ .hd-duo{grid-template-columns:minmax(0,1fr)} }
+
+/* ---- 97. App-wide colours for every module (dark mode) -----------------
+   The module pages, sidebar, panels and banners read their colours from two
+   token sets: --bg-* / --teal-* (globals) and --dash-* (premium.css). The
+   first stage only changed --bg-*. This block moves the rest to the same
+   near-black surfaces and cyan accent as the new overview. Light mode is
+   not touched. To undo, delete this block. */
+html:not(.light-mode){
+  --teal:#20D9E8; --teal-bright:#5EE7F2;
+  --teal-soft:rgba(32,217,232,.11); --teal-active:rgba(32,217,232,.15); --teal-border:rgba(32,217,232,.26);
+}
+html:not(.light-mode) .dash-shell{
+  --dash-ink:#F7F8FC; --dash-muted:#A9A9B8; --dash-dim:#6B6B78;
+  --dash-bg:#050505; --dash-bg-2:#080808; --dash-panel:#0B0B0F; --dash-panel-2:#0E0E13;
+  --dash-surface:#101015; --dash-surface-2:#14141B;
+  --dash-border:#1B1B24; --dash-border-strong:#2A2A36;
+  --dash-teal:#20D9E8;
+}
+/* small hard-coded teal tints → same cyan, so nothing looks half-converted */
+html:not(.light-mode) .dash-nav-item.active{box-shadow:inset 2px 0 0 #20D9E8, inset 0 0 0 1px rgba(32,217,232,.1)}
+html:not(.light-mode) .dash-search:focus-within{border-color:rgba(32,217,232,.4); box-shadow:0 0 0 3px rgba(32,217,232,.08)}
+html:not(.light-mode) .dash-bars i{background:rgba(32,217,232,.55)}
+html:not(.light-mode) .teal-stat .dash-stat-icon{background:rgba(32,217,232,.1)}
+html:not(.light-mode) .btn-primary{box-shadow:0 7px 18px -12px rgba(32,217,232,.9)}
+html:not(.light-mode) .btn-primary:hover:not(:disabled){box-shadow:0 9px 22px -12px rgba(32,217,232,.95)}
+html:not(.light-mode) tbody tr:hover{background:rgba(32,217,232,.035)}
+
+/* ---- 96. Card gradients and text tokens used by every module ----------
+   premium-global.css paints .card / .dash-panel with a navy gradient built
+   from --card-grad-a/b. These move it to the dashboard's near-black. */
+html:not(.light-mode){
+  --card-grad-a:#0E0E14; --card-grad-b:#0B0B0F;
+  --ivory:#F7F8FC; --blue:#4169FF; --violet:#9333EA; --gold:#F5C451;
+  --card-shadow:0 10px 30px -28px rgba(0,0,0,.95), inset 0 1px 0 rgba(255,255,255,.03);
+}
+html:not(.light-mode) .card:hover,
+html:not(.light-mode) .dash-panel:hover,
+html:not(.light-mode) .dash-stat-card:hover,
+html:not(.light-mode) .owner-stat-card:hover{border-color:rgba(32,217,232,.28)}
+
+/* =====================================================================
+   Dashboard overview — chart sizing + small helpers.
+   Neumorphic card surfaces now live in neumorph.css; the earlier
+   all-card glass / animated border / filler card styles were removed.
+   ===================================================================== */
+
+/* ---- Charts fill their cards ----
+   The chart card grows to the height of its row; the chart takes all the
+   room left under the title and chips. The Recharts container is pinned to
+   the chart box so it always measures a real size. */
+.hd-mid .hd-card,
+.hd-duo .hd-card{display:flex; flex-direction:column}
+.hd-mid .hd-card{min-height:460px}
+.hd-duo .hd-card{min-height:400px}
+.hd-mid .hd-chart,
+.hd-duo .hd-chart{ flex:1 1 auto; height:auto; min-height:300px; width:100%}
+.hd-chart{position:relative}
+.hd-chart-fill{position:absolute; inset:0}
+
+/* ---- Chart line glow (single soft halo, dark mode only) ---- */
+.hd-glowline{filter:drop-shadow(0 0 5px currentColor)}
+html.light-mode .hd-glowline{filter:none}
+.hd-glow-cyan{color:var(--hd-cyan)} .hd-glow-blue{color:var(--hd-blue)} .hd-glow-purple{color:var(--hd-purple)}
+.hd-glow-pink{color:var(--hd-pink)} .hd-glow-amber{color:var(--hd-amber)} .hd-glow-green{color:var(--hd-green)} .hd-glow-red{color:var(--hd-red)}
+
+/* ---- Remaining activity cards (below the operational panels) ---- */
+.hd-filler{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-top:14px}
+.hd-filler .hd-card{min-height:220px}
+
+/* Staff list with role badges */
+.hd-staff-list{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.hd-staff-row{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--hd-surface);
+  border: 1px solid var(--hd-line);
+  font-size: 12px;
+}
+.hd-staff-badge{
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.hd-staff-badge.doctor{ background: rgba(65, 105, 255, 0.15); color: var(--hd-blue); }
+.hd-staff-badge.nurse{ background: rgba(32, 217, 232, 0.15); color: var(--hd-cyan); }
+.hd-staff-badge.pharmacist{ background: rgba(147, 51, 234, 0.15); color: var(--hd-purple); }
+.hd-staff-badge.admin{ background: rgba(245, 196, 81, 0.15); color: var(--hd-amber); }
+.hd-staff-badge.other{ background: rgba(146, 146, 157, 0.15); color: var(--hd-mute); }
+
+/* Recent activity rows (admissions/discharges) */
+.hd-recent-list{
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+.hd-recent-row{
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--hd-surface);
+  font-size: 12px;
+}
+.hd-recent-dot{
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone, var(--hd-cyan));
+  box-shadow: 0 0 6px var(--tone, var(--hd-cyan));
+}
+.hd-recent-name{
+  color: var(--hd-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hd-recent-time{
+  font-size: 10.5px;
+  color: var(--hd-mute);
+  white-space: nowrap;
+}

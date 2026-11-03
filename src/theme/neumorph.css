@@ -1,0 +1,11 @@
+/* =====================================================================
+   GOODIE-MEDHUB — neumorph.css
+   =====================================================================
+   This file previously held the neumorphism card styles. They have
+   been REMOVED so that the Liquid Glass effect (in glass.css) can
+   render cleanly without competing backgrounds, shadows, or borders.
+
+   The file is intentionally kept (but empty of rules) so that any
+   import in main.jsx doesn't break the build. If you want to fully
+   remove it, also delete the import line in src/main.jsx.
+   ===================================================================== */

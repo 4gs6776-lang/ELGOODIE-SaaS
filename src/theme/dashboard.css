@@ -1,0 +1,680 @@
+/* =========================================================
+   PREMIUM HOSPITAL HMS DASHBOARD
+   Designed for the existing Dashboard.jsx and globals.css
+   ========================================================= */
+
+.dash-shell{display:flex;min-height:100vh;background:var(--bg);color:var(--ivory);position:relative}
+.dash-main{flex:1;min-width:0;background:var(--bg)}
+/* When a custom hospital background is active, make .dash-main transparent
+   so the #hospital-bg-overlay div (position:fixed; z-index:0) shows through.
+   The sidebar keeps its own --sidebar-bg so it stays opaque + readable. */
+.dash-shell.has-custom-bg .dash-main{background:transparent}
+.dash-shell.has-custom-bg{background:transparent}
+.dash-sidebar{width:245px;flex-shrink:0;background:var(--sidebar-bg);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:23px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;z-index:40}
+.dash-sidebar::-webkit-scrollbar{width:4px}.dash-sidebar::-webkit-scrollbar-thumb{background:var(--line);border-radius:10px}
+.dash-brand{display:flex;align-items:center;gap:11px;padding:5px 8px 25px;border-bottom:1px solid var(--line);margin-bottom:3px}
+.dash-brand-mark{width:38px;height:38px;border-radius:11px;background:var(--teal-soft);border:1px solid var(--teal-border);display:flex;align-items:center;justify-content:center;color:var(--teal);flex-shrink:0}
+.dash-brand-name{font-family:var(--font-display);font-size:15px;font-weight:650;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}.dash-brand-sub{font-size:8.5px;letter-spacing:1.8px;color:var(--teal);text-transform:uppercase;margin-top:3px}
+.dash-nav{padding-top:5px}.dash-nav-label{font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted-dim);padding:0 11px;margin:16px 0 6px;font-weight:700}
+.dash-nav-item{display:flex;align-items:center;gap:11px;min-height:44px;padding:9px 11px;border-radius:11px;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:3px;border:1px solid transparent;transition:.18s}
+.dash-nav-item:hover{background:rgba(255,255,255,.03);color:var(--ivory)}.dash-nav-item.active{background:var(--teal-active);color:var(--ivory);box-shadow:inset 0 0 0 1px var(--teal-border)}.dash-nav-item.active svg{color:var(--teal)}
+.dash-emergency{margin-top:auto;padding:16px 13px;border:1px solid var(--teal-border);background:var(--teal-soft);border-radius:12px;text-align:center}
+.dash-emergency-head{display:flex;justify-content:center;gap:8px;align-items:center;color:var(--ivory);font-size:10.5px;font-weight:600}.dash-emergency-head svg{color:var(--teal)}
+.dash-emergency strong{display:block;font-family:var(--font-mono);font-size:18px;letter-spacing:.4px;margin:8px 0 3px}.dash-emergency-name{display:block;font-size:11px;color:var(--ivory);font-weight:600;margin-bottom:5px}.dash-emergency small{font-size:9.5px;color:var(--teal);font-weight:700}
+.dash-foot{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.dash-foot-user{display:flex;align-items:center;gap:9px;padding:5px 4px}.dash-foot-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:linear-gradient(145deg,#436579,#172a37);color:#fff;font-size:12px;font-weight:800;flex-shrink:0}.dash-foot-user-info{min-width:0;flex:1}.dash-foot-name{font-size:11.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash-foot-role{font-size:9.5px;color:var(--muted);margin-top:2px}.dash-foot-chevron{color:var(--muted);display:flex;align-items:center}.dash-foot-signout{width:32px!important;height:32px!important;flex-shrink:0;border:1px solid var(--line)!important}.dash-foot-signout:hover{color:var(--danger)!important;border-color:rgba(225,104,94,0.4)!important;background:var(--danger-soft)!important}
+.dash-overlay{position:fixed;inset:0;background:rgba(0,3,8,.72);backdrop-filter:blur(3px);z-index:39;display:none}.dash-overlay.show{display:block}
+
+.dash-topbar{height:78px;display:flex;align-items:center;gap:16px;padding:0 27px;border-bottom:1px solid var(--line);background:var(--header-bg);position:sticky;top:0;z-index:10;backdrop-filter:blur(16px)}
+.dash-burger{display:none;width:38px;height:38px;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:10px;color:var(--muted);cursor:pointer}.dash-search{height:38px;max-width:485px;flex:1;display:flex;align-items:center;gap:10px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg-elevated);color:var(--muted)}.dash-search input{width:100%;border:0;outline:0;background:transparent;color:var(--ivory);font:12px var(--font-body)}.dash-search input::placeholder{color:var(--muted-dim)}.dash-search kbd{font-size:10px;color:var(--muted);border:1px solid var(--line);background:var(--bg-card);border-radius:5px;padding:3px 7px;white-space:nowrap}
+.dash-top-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.dash-icon-btn{position:relative;width:36px;height:36px;border:0;background:transparent;color:var(--muted);border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer}.dash-icon-btn:hover{background:rgba(255,255,255,.04);color:var(--teal)}.dash-notify span{position:absolute;right:1px;top:0;min-width:15px;height:15px;border-radius:10px;background:var(--gold);color:#071016;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center}.dash-message span{background:var(--violet);color:#fff}.dash-hospital-selector{height:40px;min-width:0;padding:0 11px;display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;color:var(--ivory);font-size:12px;font-weight:650;margin-left:7px;cursor:pointer}.dash-hospital-selector svg{color:var(--blue)}.dash-hospital-selector span:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.dash-chevron{margin-left:auto;color:var(--muted);flex-shrink:0}
+/* Pair-1 QA: between 901px and ~1199px the topbar holds the full clock
+   (date + time), a labelled connection chip, search AND the selector —
+   the selector's nowrap name pushed the actions 89px past a 1024px
+   viewport. The hospital name is already the first thing in the sidebar
+   brand at these widths, so the selector now appears only on wide
+   screens (>=1200px). min-width:0 keeps it shrink-safe where shown. */
+@media (min-width:901px) and (max-width:1199px){
+  .dash-hospital-selector{ display:none; }
+}
+
+.dash-content{padding:18px 26px 52px;max-width:1600px;margin:0 auto}.dash-welcome{display:flex;justify-content:space-between;align-items:center;margin:0 0 22px}.dash-welcome h1{font-family:var(--font-display);font-size:27px;letter-spacing:-.6px;font-weight:700}.dash-welcome h1 span{font-size:24px}.dash-welcome p{margin-top:5px;color:var(--muted);font-size:12.5px}.dash-date-card{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--line);border-radius:9px;background:rgba(255,255,255,.012)}.dash-date-card svg{color:var(--muted)}.dash-date-card strong,.dash-date-card span{display:block;font-size:11px}.dash-date-card span{color:var(--muted);margin-top:3px}
+
+.dash-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}.premium-stat{min-height:128px;padding:17px 18px;display:block;position:relative;overflow:hidden}.premium-stat .dash-stat-top{display:flex;justify-content:space-between;align-items:center}.premium-stat .dash-stat-icon{width:43px;height:43px;border-radius:50%;display:flex;align-items:center;justify-content:center}.premium-stat .dash-stat-label{margin-top:11px}.premium-stat .dash-stat-value{font-size:22px;margin-top:3px}.premium-stat .dash-stat-delta{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:10.5px}.dash-mini-chart{width:78px;height:36px;overflow:visible}.dash-mini-chart path{fill:none;stroke-width:2;stroke-linecap:round}
+.teal-stat .dash-stat-icon{background:var(--teal-soft);color:var(--teal)}.teal-stat .dash-mini-chart path{stroke:var(--teal)}.violet-stat .dash-stat-icon{background:rgba(155,135,245,.14);color:var(--violet)}.violet-stat .dash-mini-chart path{stroke:var(--violet)}.gold-stat .dash-stat-icon{background:rgba(245,185,66,.14);color:var(--gold)}.gold-stat .dash-mini-chart path{stroke:var(--gold)}.red-stat .dash-stat-icon{background:var(--danger-soft);color:var(--danger)}.red-stat .dash-mini-chart path{stroke:var(--danger)}.money-icon{font-family:var(--font-mono);font-size:20px;font-weight:700}.positive{color:var(--success)!important}.negative{color:var(--danger)!important}
+
+.dash-main-grid{display:grid;grid-template-columns:minmax(0,1.38fr) minmax(0,1.12fr) minmax(0,1.05fr);grid-template-areas:"chart dept appt" "recent recent revenue";gap:16px}.dash-panel{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:18px;min-width:0;min-height:0;overflow:hidden;transition:border-color .18s,transform .18s}.dash-panel:hover{border-color:var(--teal-border);transform:translateY(-2px)}.dash-patient-chart{grid-area:chart;min-height:307px}.dash-department{grid-area:dept}.dash-appointments{grid-area:appt}.dash-recent{grid-area:recent}.dash-revenue{grid-area:revenue}.dash-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:15px}.dash-panel-title{font-family:var(--font-display);font-size:14px;font-weight:700}.dash-chart-legend{display:flex;gap:15px;margin-top:17px;font-size:10.5px;color:var(--muted)}.dash-chart-legend span{display:flex;align-items:center;gap:6px}.dash-chart-legend i{width:8px;height:8px;border-radius:50%}.legend-teal{background:var(--teal)}.legend-violet{background:var(--violet)}.dash-filter{height:31px;background:var(--bg-elevated);border:1px solid var(--line);color:var(--ivory);border-radius:7px;padding:0 9px;font:10.5px var(--font-body);outline:none}
+.dash-large-chart{height:220px;margin-top:2px;min-width:0;display:block;overflow:visible}.dash-large-chart svg{display:block;width:100%;height:190px;min-width:0;overflow:visible}.chart-grid-line{stroke:rgba(255,255,255,.055);stroke-width:1}.dash-large-chart text{fill:var(--muted-dim);font-size:9px}.chart-area-teal{fill:url(#tealArea)}.chart-area-violet{fill:url(#violetArea)}.chart-line-teal,.chart-line-violet{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.chart-line-teal{stroke:var(--teal)}.chart-line-violet{stroke:var(--violet)}.chart-x-labels{display:flex;justify-content:space-between;color:var(--muted-dim);font-size:9px;margin:0 3px}
+.dash-search{position:relative}
+
+.dash-dept-content{display:flex;align-items:center;gap:17px;min-height:235px}.dash-donut{width:153px;height:153px;border-radius:50%;position:relative;flex-shrink:0}.dash-donut:before{content:"";position:absolute;inset:30px;background:var(--bg-card);border-radius:50%}.dash-donut>div{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:1}.dash-donut span{font-size:10px;color:var(--muted)}.dash-donut strong{font-family:var(--font-mono);font-size:17px;margin-top:3px}.dash-dept-list{flex:1}.dash-dept-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:10.5px}.dash-dept-row span{display:flex;align-items:center;gap:7px;color:#c5d0d6}.dash-dept-row i{width:8px;height:8px;border-radius:50%}.dash-dept-row b{font-weight:500;color:var(--muted)}
+
+.dash-view-all{border:0;background:transparent;color:var(--blue);font-size:10.5px;cursor:pointer}.dash-appt-list{margin-top:-3px}.dash-appt-row{display:grid;grid-template-columns:58px 1fr auto;gap:9px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line-soft)}.dash-appt-row:last-child{border-bottom:0}.dash-appt-row>strong{font-family:var(--font-mono);font-size:10.5px;color:var(--teal)}.dash-appt-row b,.dash-appt-row span{display:block}.dash-appt-row b{font-size:11px}.dash-appt-row span{font-size:9.5px;color:var(--muted);margin-top:3px}.dash-appt-row em{font-style:normal;font-size:8.5px;font-weight:700;padding:5px 7px;border-radius:6px}.dash-appt-row em.confirmed,.dash-appt-row em.completed{background:var(--teal-soft);color:var(--teal)}.dash-appt-row em.pending,.dash-appt-row em.scheduled{background:var(--warning-soft);color:var(--warning)}.dash-appt-row em.cancelled{background:var(--danger-soft);color:var(--danger)}
+
+.dash-table-wrap{overflow-x:auto}.dash-patient-table,.dash-full-table{width:100%;border-collapse:collapse}.dash-patient-table th,.dash-full-table th{text-align:left;color:var(--muted-dim);font-size:9.5px;text-transform:none;font-weight:600;padding:9px 8px;border-bottom:1px solid var(--line)}.dash-patient-table td,.dash-full-table td{padding:10px 8px;border-bottom:1px solid var(--line-soft);font-size:10.5px;color:var(--ivory);white-space:nowrap}.dash-patient-table tr:last-child td,.dash-full-table tr:last-child td{border-bottom:0}.dash-patient-table tr,.dash-full-table tr{transition:background .15s}.dash-patient-table tr:hover,.dash-full-table tr:hover{background:var(--bg-card-hover)}.dash-patient-name{display:flex;align-items:center;gap:8px}.dash-patient-name span{width:25px;height:25px;border-radius:50%;background:var(--teal-soft);border:1px solid var(--teal-border);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--teal)}.dash-status{font-size:8.5px;font-weight:700;padding:4px 7px;border-radius:6px}.dash-status.stable{background:var(--teal-soft);color:var(--teal)}.dash-status.review{background:var(--warning-soft);color:var(--warning)}.dash-more{border:0;background:transparent;color:var(--muted);cursor:pointer}
+
+.dash-revenue-total{display:block;font-family:var(--font-mono);font-size:22px;margin-top:6px}.dash-revenue-change{display:block;color:var(--success);font-size:9.5px;margin-top:3px}.dash-bars{height:150px;display:flex;align-items:flex-end;gap:4px;border-bottom:1px solid var(--line);padding:10px 0 0}.dash-bars i{flex:1;display:block;min-width:3px;background:linear-gradient(180deg,var(--teal-bright),var(--teal));border-radius:3px 3px 0 0;opacity:.92;transition:opacity .15s}.dash-bars i:hover{opacity:1}.dash-bar-labels{display:flex;justify-content:space-between;color:var(--muted-dim);font-size:8.5px;margin-top:8px}
+
+.dash-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:26px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted-dim);font-size:11px}
+.dash-empty{text-align:center;padding:35px 10px;color:var(--muted);font-size:11.5px}.dash-sync-alert{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:10px 13px;margin-bottom:15px;border:1px solid rgba(240,79,95,.22);background:var(--danger-soft);border-radius:9px}.dash-sync-alert strong,.dash-sync-alert span{display:block}.dash-sync-alert strong{font-size:11px;color:var(--danger)}.dash-sync-alert span{font-size:10px;color:var(--muted);margin-top:2px}.dash-sync-alert button{border:1px solid rgba(240,79,95,.3);background:transparent;color:var(--danger);border-radius:6px;padding:5px 9px;font-size:10px;cursor:pointer}.dash-sync-panel{margin-bottom:15px;padding:15px;border:1px solid var(--danger);border-radius:10px;background:var(--bg-elevated)}.dash-sync-item{display:flex;justify-content:space-between;gap:15px;padding:12px 0;border-bottom:1px solid var(--line)}.dash-sync-item:last-child{border-bottom:0}.dash-sync-item strong,.dash-sync-item small,.dash-sync-item code{display:block}.dash-sync-item strong{font-size:11px}.dash-sync-item small{font-size:9.5px;color:var(--muted);margin-top:3px}.dash-sync-item code{font-size:9px;color:var(--danger);margin-top:5px}.dash-danger-btn{color:var(--danger)!important;border-color:rgba(240,79,95,.3)!important}
+
+.dash-modal-backdrop{position:fixed;inset:0;background:rgba(0,3,8,.76);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:60;padding:20px}.dash-modal{width:100%;max-width:410px;max-height:calc(100vh - 40px);display:flex;flex-direction:column;overflow:hidden}.dash-modal-title{font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:0;padding-bottom:14px;flex-shrink:0}.dash-modal-body{overflow-y:auto;padding-right:2px;min-height:0}.dash-field-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin:12px 0}.dash-field-grid .field{margin-bottom:0}.dash-modal-actions{display:flex;gap:10px;margin-top:0;padding-top:16px;flex-shrink:0}.dash-modal-actions .btn{flex:1}@media(max-width:1200px){.dash-stats{grid-template-columns:repeat(2,1fr)}.dash-main-grid{grid-template-columns:1fr 1fr;grid-template-areas:"chart chart" "dept appt" "recent recent" "revenue revenue"}}
+@media(max-width:900px){.dash-sidebar{position:fixed;left:0;top:0;transform:translateX(-105%);transition:transform .25s ease;box-shadow:20px 0 50px -20px rgba(0,0,0,.65)}.dash-sidebar.open{transform:translateX(0)}.dash-burger{display:flex}.dash-topbar{height:64px;padding:0 16px}.dash-content{padding:18px 16px 50px}.dash-hospital-selector{display:none}.dash-main-grid{grid-template-columns:1fr;grid-template-areas:"chart" "dept" "appt" "recent" "revenue"}.dash-welcome{align-items:flex-start;gap:12px}.dash-date-card{display:none}.dash-panel-head-wrap{flex-direction:column;align-items:stretch;gap:12px}.dash-panel-head-wrap .btn{width:100%}}
+@media(max-width:600px){.dash-stats{grid-template-columns:1fr 1fr;gap:10px}.premium-stat{padding:14px;min-height:124px}.premium-stat .dash-stat-value{font-size:18px}.dash-mini-chart{width:58px}.dash-welcome h1{font-size:22px}.dash-welcome p{font-size:11px}.dash-panel{padding:14px}.dash-dept-content{gap:10px}.dash-donut{width:125px;height:125px}.dash-donut:before{inset:25px}.dash-appt-row{grid-template-columns:52px 1fr auto}.dash-search{max-width:none}.dash-search kbd{display:none}}
+@media(max-width:420px){.dash-content{padding-left:11px;padding-right:11px}.dash-stats{gap:8px}.premium-stat{padding:11px}.premium-stat .dash-stat-label{font-size:9px}.premium-stat .dash-stat-value{font-size:16px}.premium-stat .dash-stat-delta{font-size:8.5px}.dash-mini-chart{display:none}.dash-dept-content{flex-direction:column}.dash-dept-list{width:100%}}
+
+
+
+/* =========================================================
+   MISSING STYLES — toast/undo notification, panel subtitle,
+   empty states, row delete button, account status screens.
+   These classes were used in the JSX but had no CSS definition,
+   so they rendered unstyled (causing the floating "removed / Undo"
+   message to overlap the header instead of floating at the bottom).
+   ========================================================= */
+
+.dash-panel-sub{font-size:11px;color:var(--muted);margin-top:3px}
+
+.dash-empty-state{text-align:center;padding:36px 12px;color:var(--muted);font-size:12px}
+
+.dash-delete{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:13px;width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;transition:.15s}
+.dash-delete:hover{background:var(--danger-soft);color:var(--danger)}
+
+.dash-toast{
+  position:fixed;
+  left:50%;
+  bottom:28px;
+  transform:translateX(-50%);
+  z-index:500;
+  background:var(--bg-elevated);
+  border:1px solid var(--line);
+  color:var(--ivory);
+  font-size:12.5px;
+  padding:12px 16px;
+  border-radius:10px;
+  box-shadow:0 14px 34px -10px rgba(0,0,0,.55);
+  max-width:calc(100vw - 32px);
+  display:flex;
+  align-items:center;
+  gap:12px;
+}
+.dash-undo-toast{border-color:rgba(240,79,95,.3)}
+.dash-undo-toast button{
+  border:0;background:transparent;color:var(--teal);font-weight:700;font-size:12.5px;cursor:pointer;white-space:nowrap;
+}
+
+.dash-account-state{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.dash-account-state .card{max-width:420px;width:100%;text-align:center}
+.dash-state-title{font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:10px}
+.dash-state-text{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:20px}
+
+
+/* =========================================================
+   LIVE CLOCK — premium header time/date display (WAT)
+   ========================================================= */
+
+.dash-live-clock{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:7px 14px 7px 11px;
+  border-radius:11px;
+  border:1px solid rgba(45,217,196,0.16);
+  background:
+    linear-gradient(145deg, rgba(45,217,196,0.10), rgba(45,217,196,0.02)),
+    rgba(255,255,255,0.015);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  box-shadow:0 1px 0 rgba(255,255,255,0.03) inset, 0 6px 16px -10px rgba(0,0,0,0.5);
+  flex-shrink:0;
+  white-space:nowrap;
+}
+
+.dash-live-clock-icon{
+  width:28px;height:28px;min-width:28px;
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--teal-soft);
+  color:var(--teal);
+}
+
+.dash-live-clock-text{ line-height:1.25; }
+
+.dash-live-clock-time{
+  font-family:var(--font-mono);
+  font-size:13.5px;
+  font-weight:600;
+  letter-spacing:0.4px;
+  color:var(--ivory);
+  font-variant-numeric:tabular-nums;
+}
+
+.dash-live-clock-date{
+  font-size:9.5px;
+  color:var(--muted);
+  margin-top:1px;
+  letter-spacing:0.2px;
+}
+
+.dash-clock-tick{
+  display:inline-block;
+  animation:dashClockTick .5s ease;
+}
+
+@keyframes dashClockTick{
+  from{ opacity:.45; transform:translateY(1px); }
+  to{ opacity:1; transform:translateY(0); }
+}
+
+@media(max-width:900px){
+  .dash-live-clock{ padding:6px 11px 6px 9px; gap:8px; }
+  .dash-live-clock-icon{ width:24px;height:24px;min-width:24px; }
+  .dash-live-clock-time{ font-size:12px; }
+  .dash-live-clock-date{ font-size:8.5px; }
+}
+
+@media(max-width:560px){
+  .dash-live-clock-date{ display:none; }
+  .dash-live-clock{ padding:6px 10px; }
+}
+
+@media(max-width:600px){
+  .dash-field-grid{grid-template-columns:1fr}
+  .dash-modal{max-width:100%}
+  .dash-toast{bottom:18px;font-size:12px;padding:10px 14px}
+}
+
+
+.appointments-summary{
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  gap:14px;
+  align-items:stretch;
+}
+
+.appointments-summary .dash-stat-card{
+  min-height:118px;
+  height:auto;
+  padding:16px;
+  display:grid;
+  grid-template-columns:42px minmax(0,1fr);
+  align-items:center;
+  column-gap:13px;
+  row-gap:0;
+  overflow:hidden;
+}
+
+.appointments-summary .dash-stat-icon{
+  width:42px !important;
+  height:42px !important;
+  min-width:42px !important;
+  max-width:42px !important;
+  min-height:42px !important;
+  max-height:42px !important;
+  border-radius:50% !important;
+  display:flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  flex-shrink:0 !important;
+}
+
+.appointments-summary .dash-stat-icon svg{
+  width:20px !important;
+  height:20px !important;
+  min-width:20px !important;
+  min-height:20px !important;
+  max-width:20px !important;
+  max-height:20px !important;
+  display:block;
+}
+
+.appointments-summary .dash-stat-label{
+  font-size:11px;
+  line-height:1.3;
+}
+
+.appointments-summary .dash-stat-value{
+  font-size:23px;
+  line-height:1.15;
+  margin-top:3px;
+}
+
+.appointments-summary .dash-stat-delta{
+  font-size:10.5px;
+  line-height:1.3;
+  margin-top:4px;
+}
+
+
+/* ================= MOBILE ================= */
+
+@media (max-width:900px){
+
+  .appointments-summary{
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:10px;
+  }
+
+  .appointments-summary .dash-stat-card{
+    min-height:94px;
+    height:auto;
+    padding:12px;
+    grid-template-columns:34px minmax(0,1fr);
+    column-gap:9px;
+  }
+
+  .appointments-summary .dash-stat-icon{
+    width:34px !important;
+    height:34px !important;
+    min-width:34px !important;
+    max-width:34px !important;
+    min-height:34px !important;
+    max-height:34px !important;
+  }
+
+  .appointments-summary .dash-stat-icon svg{
+    width:17px !important;
+    height:17px !important;
+    min-width:17px !important;
+    min-height:17px !important;
+    max-width:17px !important;
+    max-height:17px !important;
+  }
+
+  .appointments-summary .dash-stat-label{
+    font-size:10px;
+  }
+
+  .appointments-summary .dash-stat-value{
+    font-size:19px;
+    margin-top:2px;
+  }
+
+  .appointments-summary .dash-stat-delta{
+    font-size:9px;
+    margin-top:3px;
+  }
+}
+
+
+@media (max-width:560px){
+
+  .appointments-summary{
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:8px;
+    margin-bottom:14px !important;
+  }
+
+  .appointments-summary .dash-stat-card{
+    min-height:86px;
+    padding:10px;
+    grid-template-columns:30px minmax(0,1fr);
+    column-gap:8px;
+    border-radius:10px;
+  }
+
+  .appointments-summary .dash-stat-icon{
+    width:30px !important;
+    height:30px !important;
+    min-width:30px !important;
+    max-width:30px !important;
+    min-height:30px !important;
+    max-height:30px !important;
+  }
+
+  .appointments-summary .dash-stat-icon svg{
+    width:15px !important;
+    height:15px !important;
+    min-width:15px !important;
+    min-height:15px !important;
+    max-width:15px !important;
+    max-height:15px !important;
+  }
+
+  .appointments-summary .dash-stat-label{
+    font-size:9px;
+  }
+
+  .appointments-summary .dash-stat-value{
+    font-size:18px;
+  }
+
+  .appointments-summary .dash-stat-delta{
+    font-size:8.5px;
+  }
+}
+
+/* Patient Overview: preserve the full chart on narrow/embedded layouts. */
+.dash-patient-chart{min-width:0;overflow:hidden;}
+.dash-patient-chart .dash-panel-head{min-width:0;}
+.dash-patient-chart .dash-panel-head > div{min-width:0;}
+@media(max-width:900px){.dash-patient-chart{width:100%;}.dash-large-chart{width:100%;}.dash-large-chart svg{width:100%;height:190px;}}
+
+/* =========================================================
+   DASHBOARD POLISH PASS — reference fidelity + premium hierarchy
+   ========================================================= */
+.dash-content{max-width:1680px;padding-left:28px;padding-right:28px}
+.dash-welcome{margin-bottom:20px}
+.dash-welcome h1{font-size:29px;letter-spacing:-.75px}
+.dash-welcome p{font-size:13px;color:var(--muted)}
+.dash-date-card{background:var(--bg-card);border-color:rgba(137,163,178,.18);box-shadow:none}
+
+.dash-stats{gap:14px;margin-bottom:18px}
+.premium-stat{min-height:132px;padding:17px 18px;background:var(--bg-card);border-color:rgba(137,163,178,.16);box-shadow:none}
+.premium-stat:hover{transform:translateY(-2px);border-color:var(--teal-border);box-shadow:0 16px 34px -28px rgba(0,212,199,.28)}
+.premium-stat .dash-stat-value{font-size:24px;letter-spacing:-.4px}
+.premium-stat .dash-stat-delta{font-size:10px}
+.premium-stat .dash-stat-delta.positive{color:var(--success)!important}
+
+.dash-main-grid{grid-template-columns:minmax(0,1.42fr) minmax(300px,1.05fr) minmax(300px,.98fr);gap:15px}
+.dash-panel{padding:17px 18px;border-color:rgba(137,163,178,.16);background:var(--bg-card);box-shadow:none}
+.dash-panel:hover{transform:translateY(-1px);border-color:rgba(0,212,199,.25)}
+.dash-patient-chart{min-height:334px}
+.dash-panel-head{margin-bottom:12px}
+.dash-panel-title{font-size:14.5px;letter-spacing:-.15px}
+.dash-panel-sub{font-size:10px;color:var(--muted-dim)}
+.dash-chart-legend{margin-top:12px;gap:16px}
+.dash-filter{height:32px;border-color:rgba(137,163,178,.18);background:rgba(7,16,24,.68)}
+
+.dash-large-chart{height:247px;margin-top:0;position:relative;padding-top:25px}
+.dash-large-chart svg{height:202px;width:100%;min-height:202px}
+.chart-grid-line{stroke:rgba(161,175,186,.105);stroke-dasharray:2 5}
+.dash-large-chart text{font-size:8.5px;fill:var(--muted-dim)}
+.chart-line-teal,.chart-line-violet{stroke-width:2.15}
+.chart-x-labels{font-size:8.5px;margin:3px 2px 0;color:var(--muted-dim)}
+.dash-chart-summary{position:absolute;top:0;left:38px;display:flex;gap:16px;font-size:9px;color:var(--muted-dim);pointer-events:none}
+.dash-chart-summary span{display:inline-flex;gap:4px;align-items:baseline}
+.dash-chart-summary b{font-family:var(--font-mono);font-size:10px;color:var(--ivory);font-weight:600}
+
+.dash-dept-content{min-height:244px;gap:20px}
+.dash-donut{width:154px;height:154px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 10px 28px -24px rgba(0,0,0,.9)}
+.dash-donut:before{inset:31px;background:var(--bg-card)}
+.dash-donut strong{font-size:18px;color:var(--ivory)}
+.dash-dept-row{padding:6.5px 0;font-size:10.5px}
+.dash-dept-row span{color:#d1d9de}
+.dash-dept-row b{font-family:var(--font-mono);font-size:9.5px;color:var(--muted)}
+
+.dash-appointments .dash-panel-head{align-items:center}
+.dash-appt-row{padding:11.5px 0;grid-template-columns:58px minmax(0,1fr) auto}
+.dash-appt-row>strong{font-size:10px}
+.dash-appt-row b{font-size:11.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-appt-row span{font-size:9.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-appt-row em{min-width:58px;text-align:center;padding:5px 7px;border-radius:999px;font-size:8px}
+
+.dash-recent{min-height:310px}
+.dash-patient-table th{padding:9px 8px;font-size:9px}
+.dash-patient-table td{padding:11px 8px;font-size:10.5px}
+.dash-patient-name span{width:27px;height:27px}
+.dash-patient-table tr:hover{background:rgba(0,212,199,.025)}
+
+.dash-revenue{min-height:310px}
+.dash-revenue-total{font-size:23px;letter-spacing:-.3px}
+.dash-revenue-change{color:var(--success)}
+.dash-bars{height:154px;gap:4px;border-bottom-color:rgba(137,163,178,.14)}
+.dash-bars i{background:linear-gradient(180deg,rgba(39,231,218,.96),rgba(0,212,199,.64));opacity:.9}
+.dash-bars i:hover{opacity:1;filter:brightness(1.08)}
+
+@media(max-width:1200px){
+  .dash-content{padding-left:22px;padding-right:22px}
+  .dash-main-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"chart chart" "dept appt" "recent recent" "revenue revenue"}
+}
+@media(max-width:900px){
+  .dash-content{padding-left:16px;padding-right:16px}
+  .dash-welcome h1{font-size:24px}
+  .dash-main-grid{grid-template-columns:1fr;grid-template-areas:"chart" "dept" "appt" "recent" "revenue"}
+  .dash-patient-chart{min-height:315px}
+  .dash-large-chart{height:226px}
+  .dash-large-chart svg{height:184px;min-height:184px}
+}
+@media(max-width:600px){
+  .dash-content{padding-left:12px;padding-right:12px}
+  .dash-welcome h1{font-size:21px}
+  .dash-welcome p{font-size:10.5px}
+  .premium-stat{min-height:120px}
+  .premium-stat .dash-stat-value{font-size:19px}
+  .dash-patient-chart{min-height:300px}
+  .dash-large-chart{height:214px;padding-top:21px}
+  .dash-large-chart svg{height:174px;min-height:174px}
+  .dash-chart-summary{left:34px;gap:10px;font-size:8px}
+  .dash-chart-summary b{font-size:9px}
+  .dash-dept-content{min-height:0;padding:6px 0 4px}
+  .dash-donut{width:132px;height:132px}
+  .dash-donut:before{inset:27px}
+  .dash-dept-row{padding:6px 0}
+}
+@media(max-width:420px){
+  .dash-large-chart{height:204px}
+  .dash-large-chart svg{height:164px;min-height:164px}
+  .dash-chart-summary{display:none}
+}
+
+/* =========================================================
+   PAIR 1 QA PASS — Dashboard shell + Reception
+   Fixes found during the module-by-module UI/UX review:
+   missing queue board grid, undersized touch targets in the
+   queue cards, topbar overflow on phones, keyboard access.
+   ========================================================= */
+
+/* Sidebar nav is now a real <button> — keep its old look. */
+button.dash-nav-item{ background:transparent; width:100%; text-align:left; font-family:var(--font-body); }
+
+/* Patient "Attended Today" chips (Dashboard → Patients tab).
+   Real buttons now: ~40px tall so they are thumb-friendly. */
+.dash-chip-btn{
+  padding:9px 16px;
+  background:var(--bg-elevated);
+  border:1px solid var(--teal);
+  border-radius:999px;
+  cursor:pointer;
+  font-size:13px;
+  font-weight:700;
+  color:var(--teal);
+  font-family:var(--font-body);
+  transition:background .15s ease, transform .15s ease;
+}
+.dash-chip-btn:hover{ background:var(--teal-soft); }
+.dash-chip-btn:active{ transform:scale(.97); }
+
+/* Reception queue board: 4 stage columns on desktop, 2 on tablet,
+   1 on phones. align-items:start stops empty stage panels from
+   stretching to the height of the tallest column. */
+.dash-row-2b{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:16px;
+  align-items:start;
+}
+@media (max-width:1200px){
+  .dash-row-2b{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:600px){
+  .dash-row-2b{ grid-template-columns:1fr; }
+}
+
+/* Reception queue patient card — replaces the old fully inline
+   card so the controls can be given real touch targets and the
+   card can reflow on phones (info row on top, actions below). */
+.rx-queue-card{
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:10px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+  background:rgba(255,255,255,.012);
+}
+.rx-queue-info{ flex:1 1 auto; min-width:0; }
+.rx-queue-name{ font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rx-queue-time{ font-size:10.5px; color:var(--muted); }
+.rx-queue-select{
+  background:var(--bg-elevated);
+  color:var(--ivory);
+  border:1px solid var(--line);
+  border-radius:7px;
+  padding:5px 8px;
+  font-size:11px;
+  font-family:var(--font-body);
+  flex-shrink:0;
+  min-height:32px;
+  max-width:150px;
+}
+.rx-queue-remove{
+  background:transparent;
+  border:1px solid var(--line);
+  color:var(--muted);
+  border-radius:7px;
+  width:32px;
+  height:32px;
+  cursor:pointer;
+  flex-shrink:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  transition:color .15s ease, border-color .15s ease, background .15s ease;
+}
+.rx-queue-remove:hover{ color:var(--danger); border-color:rgba(240,79,95,.4); background:var(--danger-soft); }
+@media (max-width:600px){
+  /* Reflow, don't shrink: identity on its own row, actions below. */
+  .rx-queue-info{ flex:1 1 100%; }
+  .rx-queue-select{ flex:1 1 150px; max-width:none; min-height:42px; font-size:12.5px; padding:6px 10px; }
+  .rx-queue-remove{ width:42px; height:42px; }
+}
+
+/* Reception's wider registration modal (same chrome as the
+   shared dash-modal, just wider for the 2-column form). */
+.dash-modal-lg{ max-width:560px; }
+
+/* Phones: the topbar has no room for an always-open search field.
+   Collapse it to a 38px icon button; when opened it drops down as
+   a full-width search sheet pinned under the topbar. */
+@media (max-width:600px){
+  .dash-search{
+    flex:0 0 38px;
+    width:38px;
+    min-width:38px;
+    max-width:38px;
+    justify-content:center;
+    padding:0;
+    cursor:pointer;
+  }
+  .dash-search input,
+  .dash-search kbd{ display:none; }
+  .dash-search.is-open{
+    position:fixed;
+    top:66px;
+    left:10px;
+    right:10px;
+    flex:1 1 auto;
+    width:auto;
+    min-width:0;
+    max-width:none;
+    height:42px;
+    padding:0 11px;
+    justify-content:flex-start;
+    z-index:45;
+    background:var(--bg-elevated);
+    box-shadow:0 14px 34px -10px rgba(0,0,0,.55);
+  }
+  .dash-search.is-open input{ display:block; }
+
+  /* Row action buttons: comfortable touch targets. */
+  .dash-delete{ width:36px; height:36px; }
+  .dash-more{ width:34px; height:34px; }
+
+  /* Pair-1 QA (mobile 320-430px): the topbar could not hold
+     burger + search + connection chip + clock + 3 icon buttons —
+     measured 13px clip at 390px and 83px clip at 320px (theme
+     toggle, bell and messages pushed off-screen). The LiveClock
+     is decorative chrome: hide it on phones; connection state,
+     notifications and messages win the space. */
+  .dash-live-clock{ display:none; }
+  .dash-topbar{ gap:8px; }
+}
+
+/* Narrow phones: even without the clock, a "Pending sync" chip
+   plus four icon buttons overflow 320-420px. Messages is already
+   the first item in the drawer navigation, so it can yield. */
+@media (max-width:420px){
+  .dash-top-actions{ gap:6px; }
+  .dash-topbar .dash-message{ display:none; }
+}
+
+/* =====================================================================
+   Stage 2 QA — pair 1 (Reception + Appointments)
+   ===================================================================== */
+
+/* Shared modal form: the form inside .dash-modal must itself be a flex
+   column so .dash-modal-body scrolls and .dash-modal-actions stay pinned.
+   Without it, tall forms (Reception registration) clip the action row on
+   short phone viewports. */
+.dash-modal-form{ display:flex; flex-direction:column; flex:1; min-height:0; }
+
+/* ---------------- Appointments toolbar ---------------- */
+.appt-toolbar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+.appt-toggle-group{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.appt-toggle{ width:auto; background:transparent; color:var(--muted); border:1px solid var(--line); }
+.appt-toggle.is-active{ background:var(--teal); color:#00251F; border-color:var(--teal); }
+.appt-date-filter{ min-width:150px; font-size:12.5px; }
+
+/* ---------------- Appointments record cards (phones <768px) ----------------
+   Re-flow, don't shrink: time chip + identity on top, notes in the middle,
+   status + delete as full-size touch targets at the bottom. */
+.appt-list{ display:flex; flex-direction:column; gap:10px; }
+.appt-card{
+  border:1px solid var(--line); border-radius:10px;
+  background:rgba(255,255,255,.012);
+  padding:12px; display:flex; flex-direction:column; gap:10px;
+}
+.appt-card-top{ display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.appt-card-time{
+  font-family:var(--font-mono); font-size:12px; color:var(--teal);
+  background:var(--teal-soft); border-radius:7px; padding:6px 8px;
+  flex-shrink:0; min-width:64px; text-align:center; white-space:nowrap;
+}
+.appt-card-id-block{ min-width:0; flex:1; }
+.appt-card-name{ font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.appt-card-meta{ font-size:11px; color:var(--muted); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.appt-card-notes{
+  font-size:11.5px; color:var(--muted); background:var(--bg-elevated);
+  border-left:2px solid var(--line); border-radius:0 7px 7px 0; padding:7px 10px;
+}
+.appt-card-foot{ display:flex; align-items:center; gap:8px; border-top:1px solid var(--line-soft); padding-top:10px; }
+.appt-card-id{ font-family:var(--font-mono); font-size:10px; color:var(--muted-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.appt-card-foot .icon-btn-delete{ margin-left:auto; }
+
+/* Status cycle control — a real button (was a tap-the-span). Desktop keeps
+   the compact pill; touch contexts get a comfortable target. */
+.appt-status-btn{
+  font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px;
+  border:none; cursor:pointer; white-space:nowrap;
+  font-family:var(--font-body); letter-spacing:.02em;
+}
+.appt-card .appt-status-btn{ padding:8px 14px; min-height:36px; }
+
+/* ---------------- Appointments: day view (desktop/tablet rows) ---------------- */
+.appt-doctor-head{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; margin-bottom:8px; color:var(--ivory); }
+.appt-doctor-count{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--muted);
+  border:1px solid var(--line); border-radius:999px; padding:1px 8px;
+}
+.appt-day-row{
+  display:flex; align-items:center; gap:12px;
+  border:1px solid var(--line); border-radius:10px; padding:10px;
+  background:rgba(255,255,255,.012);
+}
+.appt-day-time{ font-family:var(--font-mono); font-size:12px; color:var(--muted); width:70px; flex-shrink:0; }
+.appt-day-name{ flex:1; min-width:0; font-weight:700; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+@media (max-width:600px){
+  /* Toolbar controls stack cleanly instead of squeezing mid-word. */
+  .appt-toolbar{ align-items:stretch; }
+  .appt-toggle-group{ width:100%; }
+  .appt-toggle{ flex:1 1 auto; min-height:44px; }
+  .appt-date-filter{ width:100%; min-height:44px; }
+
+  /* Day view rows re-flow: time + name on top, actions underneath. */
+  .appt-day-row{ flex-wrap:wrap; row-gap:10px; }
+  .appt-day-time{ width:auto; }
+  .appt-day-name{ flex:1 1 0; }
+  .appt-day-row .appt-status-btn{ padding:8px 14px; min-height:36px; }
+  .appt-day-row .icon-btn-delete{ width:36px; height:36px; }
+}

@@ -1,0 +1,449 @@
+/*
+ * GOODIE MEDHUB — Ultra-Premium Clinical SaaS layer
+ * Global visual system. This file intentionally styles shared primitives
+ * instead of rewriting each HMS module, preserving existing data/workflows.
+ */
+
+:root {
+  --bg: #070F14;
+  --bg-elevated: #0A131A;
+  --bg-card: #0C151D;
+  --bg-card-hover: #101D26;
+  --sidebar-bg: #071016;
+  --header-bg: rgba(8, 17, 24, 0.92);
+  --line: #17252F;
+  --line-soft: #1B2B35;
+  --teal: #00C7C7;
+  --teal-bright: #00E0D0;
+  --teal-soft: rgba(0, 199, 199, 0.12);
+  --teal-active: rgba(0, 199, 199, 0.16);
+  --teal-border: rgba(0, 199, 199, 0.25);
+  --gold: #E8B82E;
+  --violet: #7657E8;
+  --blue: #3B82F6;
+  --ivory: #F1F6FA;
+  --muted: #9AAAB7;
+  --muted-dim: #667784;
+  --danger: #F04F5F;
+  --danger-soft: rgba(240, 79, 95, 0.15);
+  --success: #18D99B;
+  --success-soft: rgba(24, 217, 155, 0.12);
+  --warning: #F4B62A;
+  --warning-soft: rgba(244, 182, 42, 0.15);
+  --radius: 12px;
+  --card-grad-a: #101D2A;
+  --card-grad-b: #0A131A;
+  --card-shadow: 0 10px 30px -28px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.018);
+  --card-shadow-hover: 0 18px 40px -22px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.03);
+  --font-display: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html.light-mode {
+  --bg: #F3F7F8;
+  --bg-elevated: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #F7FAFA;
+  --sidebar-bg: #FFFFFF;
+  --header-bg: rgba(255,255,255,.92);
+  --line: rgba(15, 23, 42, .10);
+  --line-soft: rgba(15, 23, 42, .07);
+  --teal: #00A6A6;
+  --teal-bright: #00BFB5;
+  --teal-soft: rgba(0, 166, 166, .09);
+  --teal-active: rgba(0, 166, 166, .12);
+  --teal-border: rgba(0, 166, 166, .22);
+  --gold: #B78109;
+  --violet: #6244C4;
+  --blue: #2563EB;
+  --ivory: #0F1B24;
+  --muted: #5D6C78;
+  --muted-dim: #8A98A3;
+  --danger: #D63D4B;
+  --danger-soft: rgba(214, 61, 75, .09);
+  --card-grad-a: #FFFFFF;
+  --card-grad-b: #FBFCFE;
+  --card-shadow: 0 1px 2px rgba(15,23,42,.04), 0 12px 28px -20px rgba(15,23,42,.14);
+  --card-shadow-hover: 0 2px 4px rgba(15,23,42,.05), 0 20px 38px -18px rgba(15,23,42,.18);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background:
+    radial-gradient(900px 520px at 100% -10%, rgba(0,199,199,.045), transparent 58%),
+    linear-gradient(160deg, #0D1F2C 0%, #070F14 45%, #030608 100%);
+  background-attachment: fixed;
+  letter-spacing: -0.005em;
+}
+
+button, input, select, textarea { font: inherit; }
+button { -webkit-appearance: none; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+/* Shared surfaces — gradient removed so Liquid Glass (glass.css) renders cleanly.
+   The glass effect provides its own background, border, and shadow. */
+.card,
+.dash-panel,
+.dash-stat-card,
+.premium-stat,
+.owner-panel,
+.owner-stat-card,
+.auth-card,
+.dash-modal {
+  background: var(--bg-card);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.card:hover,
+.dash-panel:hover,
+.dash-stat-card:hover,
+.owner-stat-card:hover {
+  border-color: rgba(0,199,199,.17);
+  box-shadow: none;
+}
+
+.btn {
+  min-height: 40px;
+  border-radius: 9px;
+  padding: 10px 15px;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.btn:hover:not(:disabled) { transform: translateY(-1px); }
+.btn-primary {
+  background: var(--teal);
+  color: #03201D;
+  box-shadow: 0 7px 18px -12px rgba(0,199,199,.9);
+}
+.btn-primary:hover:not(:disabled) { background: var(--teal-bright); box-shadow: 0 9px 22px -12px rgba(0,199,199,.95); }
+.btn-ghost { background: rgba(255,255,255,.015); border-color: var(--line); color: var(--muted); }
+.btn-ghost:hover:not(:disabled) { background: rgba(255,255,255,.035); border-color: var(--teal-border); color: var(--ivory); }
+
+/* Shared delete/trash icon button — same look everywhere in the app:
+   Owner Dashboard, Reception, Laboratory, Pharmacy, Inventory, etc. */
+.icon-btn-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.icon-btn-delete:hover {
+  color: var(--danger);
+  border-color: rgba(225,104,94,0.4);
+  background: var(--danger-soft);
+}
+
+input, select, textarea,
+.field input, .field select, .field textarea {
+  background: rgba(255,255,255,.018);
+  border-color: var(--line);
+  color: var(--ivory);
+  min-height: 40px;
+}
+input:hover, select:hover, textarea:hover { border-color: rgba(148,163,184,.22); }
+input:focus, select:focus, textarea:focus,
+.field input:focus, .field select:focus, .field textarea:focus {
+  border-color: var(--teal-border);
+  box-shadow: 0 0 0 3px rgba(0,199,199,.07);
+}
+
+/* Global tables — preserve native structure, improve readability */
+table { border-collapse: separate; border-spacing: 0; }
+thead th {
+  color: var(--muted-dim);
+  font-size: 10px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  font-weight: 750;
+  background: rgba(255,255,255,.012);
+}
+tbody tr { transition: background .14s ease; }
+tbody tr:hover { background: rgba(0,199,199,.025); }
+tbody td { border-color: var(--line-soft); }
+
+/* Shared chips/statuses */
+[class*="status"], [class*="badge"], [class*="pill"] { transition: background .15s ease, border-color .15s ease; }
+
+/* Top-level dashboard chrome */
+.dash-sidebar {
+  background: linear-gradient(180deg, rgba(0,199,199,.018), transparent 28%), var(--sidebar-bg);
+  border-right-color: var(--line);
+}
+.dash-brand { border-bottom-color: var(--line); }
+.dash-brand-mark { background: var(--teal-soft); border-color: var(--teal-border); }
+.dash-nav-item { min-height: 42px; border-radius: 9px; }
+.dash-nav-item:hover { background: rgba(255,255,255,.028); }
+.dash-nav-item.active { background: var(--teal-active); box-shadow: inset 2px 0 0 var(--teal), inset 0 0 0 1px rgba(0,199,199,.08); }
+.dash-topbar {
+  background: var(--header-bg);
+  border-bottom-color: var(--line);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.dash-search { background: rgba(255,255,255,.018); border-color: var(--line); }
+.dash-icon-btn { width: 38px; height: 38px; }
+.dash-content { max-width: 1680px; }
+.dash-welcome h1 { letter-spacing: -.035em; }
+.dash-date-card { background: rgba(255,255,255,.014); }
+
+/* Prevent SVGs and icon containers from becoming giant on any route. */
+.dash-shell svg,
+.owner-shell svg,
+.auth-shell svg,
+.btn svg,
+.dash-icon-btn svg,
+.dash-nav-item svg,
+.dash-stat-icon svg,
+.dash-brand-mark svg,
+.billing-header-badge svg {
+  width: 20px;
+  height: 20px;
+  max-width: 20px;
+  max-height: 20px;
+  flex: 0 0 auto;
+}
+.dash-stat-icon svg { width: 21px; height: 21px; max-width:21px; max-height:21px; }
+
+/* Auth/login */
+.auth-shell { background: var(--bg); }
+.auth-shell::before {
+  background:
+    radial-gradient(620px 420px at 85% -10%, rgba(0,199,199,.075), transparent 62%),
+    radial-gradient(520px 380px at -10% 95%, rgba(139,92,246,.035), transparent 62%);
+}
+.auth-card {
+  max-width: 430px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 30px;
+}
+.auth-brand-mark { background: var(--teal-soft); color: var(--teal); border: 1px solid var(--teal-border); }
+.auth-title { font-weight: 750; letter-spacing: -.025em; }
+
+/* Modal/popup hierarchy */
+.dash-modal-backdrop { background: rgba(1,5,9,.76); backdrop-filter: blur(5px); }
+.dash-modal { border-color: var(--line); border-radius: 14px; box-shadow: 0 30px 90px -35px rgba(0,0,0,.95); }
+.dash-popover-menu { background: var(--bg-elevated); border-color: var(--line); box-shadow: 0 20px 55px -30px rgba(0,0,0,.95); }
+
+/* Owner portal follows the same product language while retaining its gold identity. */
+.owner-shell { background: var(--bg); }
+.owner-topbar { background: var(--header-bg); border-bottom-color: var(--line); }
+.owner-panel, .owner-stat-card { border-color: var(--line); }
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: rgba(148,163,184,.18) transparent; }
+*::-webkit-scrollbar { width: 7px; height: 7px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(148,163,184,.18); border-radius: 99px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(0,199,199,.32); }
+
+/* Mobile: deliberate layout rather than compressed desktop */
+@media (max-width: 900px) {
+  .dash-sidebar { box-shadow: 24px 0 70px -32px rgba(0,0,0,.95); }
+  .dash-content { padding-left: 16px; padding-right: 16px; }
+  .dash-topbar { height: 68px; }
+  .dash-search { max-width: 430px; }
+}
+
+@media (max-width: 600px) {
+  .dash-content { padding-left: 12px; padding-right: 12px; }
+  .dash-topbar { height: 62px; padding: 0 11px; gap: 7px; }
+  .dash-icon-btn { width: 36px; height: 36px; }
+  .dash-welcome { align-items: flex-start; gap: 12px; }
+  .dash-welcome h1 { font-size: 21px !important; }
+  .dash-date-card { padding: 8px 10px; }
+  .dash-date-card strong { font-size: 10px; }
+  .dash-date-card span { font-size: 9px; }
+  .card, .dash-panel { border-radius: 11px; }
+  .auth-shell { padding: 14px; }
+  .auth-card { padding: 22px 18px; border-radius: 14px; }
+  .field input, .field select, .field textarea, input, select, textarea, .btn { min-height: 44px; }
+}
+
+@media (max-width: 420px) {
+  .dash-content { padding-left: 10px; padding-right: 10px; }
+  .dash-topbar { padding: 0 8px; }
+  .dash-hospital-selector { min-width: 0; width: 38px; padding: 0; justify-content: center; }
+  .dash-hospital-selector span:nth-child(2), .dash-hospital-selector .dash-chevron { display: none; }
+  .dash-search { min-width: 0; }
+  .dash-search kbd { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* ============================================================
+   Premium polish pass — stat cards, panels, donut chart
+   ============================================================ */
+
+/* Stat cards: rounder, deeper shadow — shadow removed so Liquid Glass provides the depth */
+.dash-stat-card,
+.premium-stat {
+  border-radius: 16px;
+  border: 1px solid rgba(148,163,184,.10);
+  box-shadow: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.dash-stat-card:hover,
+.premium-stat:hover {
+  transform: translateY(-3px);
+  box-shadow: none;
+}
+
+/* Icon badges: flat tinted circle, no glow ring — matches reference screenshot */
+.premium-stat .dash-stat-icon {
+  border-radius: 50%;
+}
+
+/* Typography hierarchy: kicker-style label, bolder tabular value */
+.premium-stat .dash-stat-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted-dim);
+}
+.premium-stat .dash-stat-value {
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+  color: var(--ivory);
+}
+
+/* Delta row: plain colored text with icon, no pill background — matches reference */
+.premium-stat .dash-stat-delta {
+  display: inline-flex;
+  width: fit-content;
+}
+
+.dash-mini-chart path { stroke-width: 2; }
+
+/* Panels: rounder corners, deeper shadow, calmer hover */
+.dash-panel {
+  border-radius: 16px;
+  border-color: rgba(148,163,184,.10);
+  box-shadow: 0 20px 48px -32px rgba(0,0,0,.75), inset 0 1px 0 rgba(255,255,255,.02);
+}
+.dash-panel:hover {
+  border-color: rgba(0,199,199,.22);
+  box-shadow: 0 24px 54px -30px rgba(0,0,0,.85), inset 0 1px 0 rgba(255,255,255,.03);
+}
+.dash-panel-title {
+  letter-spacing: -.01em;
+}
+
+/* Donut: gradient ring + a soft glow instead of a flat color disc */
+.dash-donut {
+  background: conic-gradient(from -90deg, var(--teal) 0deg, var(--violet) 180deg, rgba(148,163,184,.14) 180deg 360deg);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.03), 0 18px 40px -26px rgba(0,199,199,.35);
+}
+.dash-donut:before {
+  background: var(--bg-card);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+}
+.dash-donut strong {
+  font-weight: 750;
+  letter-spacing: -.02em;
+}
+
+/* Richer empty states: icon + message + optional CTA, instead of bare text */
+.dash-empty-state-rich {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 30px 16px;
+  color: var(--muted-dim);
+}
+.dash-empty-state-rich svg {
+  opacity: .5;
+}
+.dash-empty-state-rich p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+.dash-empty-cta {
+  margin-top: 2px;
+  padding: 7px 14px;
+  font-size: 11.5px;
+  min-height: 32px;
+}
+
+/* Global search results dropdown — gradient removed for Liquid Glass compatibility */
+.dash-search-results {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: none;
+  padding: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+  z-index: 40;
+}
+.dash-search-group + .dash-search-group {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+.dash-search-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted-dim);
+  padding: 6px 8px 4px;
+}
+.dash-search-result {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--ivory);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.dash-search-result:hover { background: rgba(0,199,199,.08); }
+.dash-search-result svg { color: var(--teal); flex: 0 0 auto; }
+.dash-search-result-meta {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted-dim);
+}
+.dash-search-empty {
+  padding: 16px 10px;
+  font-size: 12px;
+  color: var(--muted-dim);
+  text-align: center;
+}
