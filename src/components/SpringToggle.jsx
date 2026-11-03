@@ -2,11 +2,11 @@ import { Sun, Moon } from 'lucide-react'
 import { useTheme } from '../context/ThemeContext'
 
 // =====================================================================
-// SpringToggle — neumorphic light/dark switch (sun | moon)
+// SpringToggle — Aero-glass light/dark switch (sun | moon)
 //
-// Raised pill holding two round positions. The active mode is shown as a
-// pressed well with a glowing ring; the inactive mode is a raised disc with
-// an embossed icon. Visuals live in theme/neumorph.css (.neu-toggle).
+// Glass pill holding two round positions. The active mode is shown as a
+// dark well with a glowing ring; the inactive mode is a glossy disc with
+// an icon. Visuals live in theme/glass.css (.neu-toggle).
 //
 // Behaviour is unchanged: reads isDark + toggleMode from useTheme(),
 // role="switch", native button so Space/Enter work, no <html> observers.

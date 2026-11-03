@@ -2,7 +2,7 @@ import SpringToggle from './SpringToggle'
 import AppIcon from './icons'
 
 // =====================================================================
-// AppearanceSettings — Light/dark mode toggle (glassmorphic SpringToggle)
+// AppearanceSettings — Light/dark mode toggle (Aero-glass SpringToggle)
 // =====================================================================
 //
 // This is a much simpler panel than the previous version (which had
@@ -64,7 +64,7 @@ export default function AppearanceSettings() {
         fontSize: 11.5, color: 'var(--teal)', lineHeight: 1.5,
       }}>
         <AppIcon name="info" size={13} />{' '}
-        The Iridescent Rainbow Glass style applies to the dashboard cards,
+        The Classic Aero Glass style applies to the dashboard cards,
         notification panel and chart tooltips in both dark and light mode.
       </div>
     </div>
