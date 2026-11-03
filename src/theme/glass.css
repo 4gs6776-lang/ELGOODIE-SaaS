@@ -1,21 +1,17 @@
 /* =====================================================================
-   GOODIE-MEDHUB — Glassmorphism (no neumorphism on cards)
+   GOODIE-MEDHUB — Iridescent Rainbow Glass (glassmorphism only on cards)
 
-   Three selectable glass styles, switched by <html data-glass="...">:
-     iridescent  (default)  pearly rainbow edge + soft prismatic sheen
-     rainbow                saturated multicolour tint and edge
-     aero                   classic Windows-Aero: sky-blue, glossy top half
-   Chosen in Settings > Appearance (stored in localStorage "medhub-glass").
-   Dark / light follow the existing html.light-mode switch.
+   Pearly translucent cards with a soft prismatic sheen and a thin rainbow
+   edge. Dark / light follow the existing html.light-mode switch.
 
-   Where it applies:  dashboard cards (.hd-root .hd-card), stat cards of
-   Pharmacy and Shift Handover (.glass-scope), notification popover,
-   chart tooltip.  The sun/moon toggle keeps its own raised style (section 5).
+   Where it applies: dashboard cards (.hd-root .hd-card), stat cards of
+   Pharmacy and Shift Handover (.glass-scope), notification popover, chart
+   tooltip. The sun/moon toggle keeps its own raised style (section 5).
 
-   Glass only reads as glass when there is something colourful behind it, so
-   the dashboard gets a soft static colour backdrop (.hd-root::after) and the
-   two module stat rows get a small local one. Both are decorative, static,
-   pointer-events:none.  To undo: remove the import in main.jsx.
+   Glass only reads as glass with colour behind it, so the dashboard gets a
+   soft static colour backdrop (.hd-root::after) and the two module stat rows
+   a small local one. Both are decorative, static, pointer-events:none.
+   To undo: remove the import in main.jsx.
    ===================================================================== */
 
 /* ---- shared tokens ---- */
@@ -24,7 +20,7 @@
   --g-pop-blur:blur(24px) saturate(180%);
 }
 
-/* ---- IRIDESCENT (default) · dark ---- */
+/* ---- dark ---- */
 :root{
   --g-card:rgba(20,22,36,.46);
   --g-sheen:
@@ -40,7 +36,7 @@
   --g-c4:rgba(147,51,234,.48); --g-c5:rgba(52,211,153,.36); --g-c6:rgba(245,196,81,.30);
   --g-orb-op:.9;
 }
-/* iridescent · light */
+/* ---- light ---- */
 html.light-mode{
   --g-card:rgba(255,255,255,.50);
   --g-sheen:
@@ -54,59 +50,6 @@ html.light-mode{
   --g-c1:rgba(240,68,184,.38); --g-c2:rgba(65,105,255,.36); --g-c3:rgba(32,217,232,.34);
   --g-c4:rgba(147,51,234,.30); --g-c5:rgba(52,211,153,.30); --g-c6:rgba(245,196,81,.34);
   --g-orb-op:.85;
-}
-
-/* ---- RAINBOW · dark ---- */
-html[data-glass="rainbow"]{
-  --g-card:rgba(18,20,32,.42);
-  --g-sheen:
-    linear-gradient(115deg,rgba(255,80,160,.24),rgba(255,190,60,.16) 25%,rgba(70,230,150,.16) 50%,rgba(60,170,255,.20) 75%,rgba(170,90,255,.24)),
-    linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,0) 55%);
-  --g-edge:linear-gradient(115deg,#ff4fa3,#ffb13b,#4fe39a,#3fa9ff,#a45bff);
-  --g-edge-op:.95;
-  --g-line:rgba(255,255,255,.12);
-  --g-c1:rgba(255,60,160,.70); --g-c2:rgba(60,120,255,.70); --g-c3:rgba(40,230,200,.55);
-  --g-c4:rgba(170,80,255,.62); --g-c5:rgba(70,230,140,.50); --g-c6:rgba(255,190,50,.48);
-  --g-orb-op:1;
-}
-html.light-mode[data-glass="rainbow"]{
-  --g-card:rgba(255,255,255,.44);
-  --g-sheen:
-    linear-gradient(115deg,rgba(255,80,160,.20),rgba(255,190,60,.16) 25%,rgba(70,230,150,.15) 50%,rgba(60,170,255,.18) 75%,rgba(170,90,255,.20)),
-    linear-gradient(180deg,rgba(255,255,255,.55),rgba(255,255,255,0) 55%);
-  --g-line:rgba(255,255,255,.8);
-  --g-c1:rgba(255,60,160,.45); --g-c2:rgba(60,120,255,.42); --g-c3:rgba(40,230,200,.40);
-  --g-c4:rgba(170,80,255,.38); --g-c5:rgba(70,230,140,.36); --g-c6:rgba(255,190,50,.42);
-}
-
-/* ---- CLASSIC AERO · dark ---- */
-html[data-glass="aero"]{
-  --g-card:rgba(70,120,180,.20);
-  --g-sheen:
-    linear-gradient(180deg,rgba(255,255,255,.30) 0%,rgba(255,255,255,.08) 47%,rgba(255,255,255,0) 50%),
-    linear-gradient(135deg,rgba(150,210,255,.16),rgba(150,210,255,.02));
-  --g-edge:linear-gradient(180deg,rgba(255,255,255,.95),rgba(190,225,255,.35) 60%,rgba(255,255,255,.6));
-  --g-edge-op:.85;
-  --g-line:rgba(200,230,255,.30);
-  --g-shadow:0 16px 36px -18px rgba(0,10,30,.8), inset 0 1px 0 rgba(255,255,255,.55), inset 0 0 18px rgba(130,190,255,.10);
-  --g-well:rgba(150,200,255,.10);
-  --g-pop:rgba(40,80,130,.55);
-  --g-blur:blur(14px) saturate(160%);
-  --g-c1:rgba(70,160,255,.60); --g-c2:rgba(40,210,230,.50); --g-c3:rgba(110,230,170,.38);
-  --g-c4:rgba(80,120,255,.50); --g-c5:rgba(40,190,240,.45); --g-c6:rgba(180,230,255,.30);
-  --g-orb-op:1;
-}
-html.light-mode[data-glass="aero"]{
-  --g-card:rgba(200,228,252,.42);
-  --g-sheen:
-    linear-gradient(180deg,rgba(255,255,255,.75) 0%,rgba(255,255,255,.22) 47%,rgba(255,255,255,0) 50%),
-    linear-gradient(135deg,rgba(255,255,255,.45),rgba(190,225,255,.08));
-  --g-line:rgba(255,255,255,.9);
-  --g-shadow:0 16px 34px -18px rgba(30,80,140,.40), 0 0 0 1px rgba(30,90,160,.12), inset 0 1px 0 #fff, inset 0 0 18px rgba(255,255,255,.35);
-  --g-well:rgba(255,255,255,.5);
-  --g-pop:rgba(225,240,255,.72);
-  --g-c1:rgba(70,160,255,.40); --g-c2:rgba(40,210,230,.34); --g-c3:rgba(110,230,170,.30);
-  --g-c4:rgba(80,120,255,.32); --g-c5:rgba(40,190,240,.32); --g-c6:rgba(200,235,255,.45);
 }
 
 /* ---- popover / tooltip tokens (consumed by Dashboard.jsx popover + .hd-tip) ---- */
