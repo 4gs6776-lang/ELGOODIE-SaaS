@@ -57,8 +57,6 @@ try {
   html.setAttribute('data-theme', 'midnight')
   html.setAttribute('data-mode', mode)
   html.classList.toggle('light-mode', mode === 'light')
-  const glass = localStorage.getItem('medhub-glass')
-  html.setAttribute('data-glass', ['iridescent', 'rainbow', 'aero'].includes(glass) ? glass : 'iridescent')
 } catch {}
 
 registerSW({ immediate: true })
