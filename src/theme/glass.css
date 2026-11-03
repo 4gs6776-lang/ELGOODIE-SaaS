@@ -1,151 +1,164 @@
-
 /* =====================================================================
-   NUCLEAR OVERRIDE — Force ALL card backgrounds to transparent.
-   =====================================================================
-   This block is the FINAL word on card backgrounds. It overrides
-   EVERY opaque background set in hospital-dash.css, dashboard.css,
-   premium-global.css, and components.css using !important + high
-   specificity selectors.
-
-   After this block, the ONLY thing providing a card's background is
-   the Liquid Glass effect (backdrop-filter + --g-card translucent
-   background) defined earlier in this file.
-
-   The background image (hospital branding) will now be visible
-   THROUGH every card — exactly like the reference image.
+   G-MEDHUB — APPLE-INSPIRED LIQUID GLASS
+   Scoped to the live hospital overview only. Keeps the existing data,
+   permissions, charts and workflows untouched; this is a visual layer.
    ===================================================================== */
 
-/* ---- Dashboard cards (.hd-card, .hd-sub-card, .hd-panel, .hd-kpi) ---- */
-.hd-card,
+.hd-root {
+  --hd-card: rgba(9, 22, 43, .58);
+  --hd-surface: rgba(14, 34, 62, .48);
+  --hd-line: rgba(190, 220, 255, .19);
+  --hd-text: #f5f8ff;
+  --hd-mute: #b4c4dc;
+  --hd-shadow: 0 22px 55px rgba(0, 7, 24, .32),
+    0 5px 16px rgba(0, 8, 30, .22),
+    inset 0 1px 0 rgba(255,255,255,.28),
+    inset 0 -1px 0 rgba(255,255,255,.04);
+}
+
+/* Ambient colour behind the panels: cool blue glass with restrained violet. */
+.hd-root::before {
+  top: -90px;
+  right: -2%;
+  width: min(760px, 85%);
+  height: 470px;
+  opacity: .28;
+  filter: blur(72px);
+  background: radial-gradient(ellipse at 25% 35%, rgba(0,174,255,.52), transparent 58%),
+              radial-gradient(ellipse at 78% 22%, rgba(133,75,255,.34), transparent 54%);
+}
+.hd-atmo { opacity: .13; color: #49bfff; }
+
+/* Main cards and panels. Layered highlights emulate Apple's liquid glass. */
 .hd-root .hd-card,
-.hd-sub-card,
-.hd-root .hd-sub-card,
-.hd-root .hd-panel,
-html.light-mode .hd-root .hd-panel,
-.hd-root .hd-kpi,
-html.light-mode .hd-root .hd-kpi,
-.hd-pulse,
-.hd-root .hd-pulse {
-  background: transparent !important;
-  background-image: none !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
+.hd-root .hd-sub-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--hd-text);
+  background:
+    radial-gradient(130% 115% at 4% 0%, rgba(94,190,255,.19), transparent 52%),
+    linear-gradient(145deg, rgba(30,67,111,.52), rgba(7,20,41,.66) 55%, rgba(31,36,83,.42)) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  backdrop-filter: blur(30px) saturate(190%);
+  border: 1px solid rgba(190,224,255,.30) !important;
+  border-radius: 20px;
+  box-shadow: var(--hd-shadow) !important;
 }
 
-/* ---- Dashboard panels (.dash-panel, .premium-stat, .dash-stat-card) ---- */
-.dash-panel,
-.premium-stat,
-.dash-stat-card,
-.dash-date-card,
-.dash-search-results,
-.dash-donut::before {
-  background: transparent !important;
-  background-image: none !important;
-  box-shadow: none !important;
+.hd-root .hd-card::before,
+.hd-root .hd-sub-card::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(118deg, rgba(255,255,255,.20), transparent 23%, transparent 70%, rgba(94,163,255,.09)),
+    radial-gradient(90% 55% at 50% -10%, rgba(255,255,255,.18), transparent 70%);
 }
 
-/* ---- Generic .card class ---- */
-.card,
-.owner-panel,
-.owner-stat-card,
-.auth-card,
-.dash-modal {
-  background: transparent !important;
-  background-image: none !important;
-  box-shadow: none !important;
+.hd-root .hd-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(125deg, rgba(255,255,255,.48), rgba(115,190,255,.10) 28%, transparent 54%, rgba(148,117,255,.24) 82%, rgba(255,255,255,.18));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: .68;
 }
 
-/* ---- Make .dash-main transparent so background image shows through ---- */
-.dash-main,
-.dash-shell.has-custom-bg .dash-main,
-.dash-shell .dash-main {
-  background: transparent !important;
+/* Nested panel contents retain the same material without becoming opaque. */
+.hd-root .hd-panel { background: transparent !important; }
+.hd-root .hd-pulse { background: transparent !important; }
+.hd-root .hd-sub-card {
+  background:
+    linear-gradient(145deg, rgba(43,91,139,.34), rgba(7,24,48,.42)) !important;
+  border-color: rgba(196,225,255,.20) !important;
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 12px 30px rgba(0,8,28,.18) !important;
 }
 
-/* ---- The glass effect itself (re-applied here with !important so it wins) ---- */
-.hd-root .hd-card,
-.glass-scope .dash-stat-card,
-.glass-scope .owner-stat-card,
-.glass-scope .hd-kpi,
-.glass-scope .card {
-  background: var(--g-card) !important;
-  -webkit-backdrop-filter: var(--g-blur) !important;
-  backdrop-filter: var(--g-blur) !important;
-  border: 1px solid var(--g-line) !important;
-  box-shadow: var(--g-shadow) !important;
+/* Make interactive controls look like small floating glass capsules. */
+.hd-root .hd-status,
+.hd-root .hd-seg,
+.hd-root .hd-chip,
+.hd-root .hd-tip,
+.hd-root .hd-stage button,
+.hd-root .hd-more {
+  color: #eaf4ff;
+  background: rgba(113,165,220,.13) !important;
+  border: 1px solid rgba(195,224,255,.20);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.13);
 }
+.hd-root .hd-seg button.on {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(0,142,255,.82), rgba(103,83,255,.72)) !important;
+  border: 1px solid rgba(211,237,255,.35);
+  box-shadow: 0 5px 18px rgba(0,125,255,.28), inset 0 1px 0 rgba(255,255,255,.30);
+}
+.hd-root .hd-tip { background: rgba(8,24,48,.88) !important; }
+.hd-root .hd-stage button { color: var(--hd-text); }
 
-/* Also apply to .dash-panel and .premium-stat (non-hd-root scope) */
-.dash-panel,
-.premium-stat,
-.dash-stat-card,
-.card,
-.owner-panel,
-.owner-stat-card {
-  background: var(--g-card) !important;
-  -webkit-backdrop-filter: var(--g-blur) !important;
-  backdrop-filter: var(--g-blur) !important;
-  border: 1px solid var(--g-line) !important;
-  box-shadow: var(--g-shadow) !important;
-}
+/* Sharper typography and luminous chart/panel accents. */
+.hd-root .hd-head h1 { text-shadow: 0 2px 24px rgba(49,151,255,.18); }
+.hd-root .hd-kpi-value { text-shadow: 0 3px 22px rgba(64,166,255,.16); }
+.hd-root .hd-panel-head h3 { color: #f5f8ff; }
+.hd-root .hd-label,
+.hd-root .hd-sub,
+.hd-root .hd-panel-head p,
+.hd-root .hd-foot { color: #b9cbe3; }
 
-/* ---- Sub-cards inside the pulse panel ---- */
-.hd-sub-card {
-  background: var(--g-card) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
-  backdrop-filter: blur(16px) saturate(160%) !important;
-  border: 1px solid var(--g-line) !important;
-  box-shadow: var(--g-shadow) !important;
-}
-
-/* ---- Panel inner (the content area inside .hd-card) ---- */
-.hd-panel {
-  background: transparent !important;
-}
-
-/* ---- Donut chart center hole ---- */
-.dash-donut::before {
-  background: transparent !important;
-}
-
-/* ---- Inner elements that had opaque backgrounds ---- */
-.hd-status,
-.hd-tip,
-.hd-seg,
-.hd-chip,
-.hd-stage button,
-.hd-more,
-.hd-meter i,
-.hd-chipline span,
-.hd-skel {
-  background: transparent !important;
-  background-image: none !important;
-}
-
-/* Re-apply translucent backgrounds to small interactive elements */
-.hd-status,
-.hd-tip,
-.hd-seg,
-.hd-chip {
-  background: rgba(255,255,255,0.06) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
-  backdrop-filter: blur(8px) !important;
-}
-html.light-mode .hd-status,
-html.light-mode .hd-tip,
-html.light-mode .hd-seg,
-html.light-mode .hd-chip {
-  background: rgba(255,255,255,0.15) !important;
-}
-
-/* ---- Hover: glass brightens ---- */
-@media (hover:hover) {
-  .hd-root .hd-card:hover,
-  .dash-panel:hover,
-  .premium-stat:hover,
-  .dash-stat-card:hover,
-  .card:hover {
-    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.08) !important;
-    backdrop-filter: blur(28px) saturate(200%) brightness(1.08) !important;
+@media (hover:hover) and (prefers-reduced-motion:no-preference) {
+  .hd-root .hd-card { transition: transform .28s cubic-bezier(.2,.8,.2,1), border-color .28s ease, box-shadow .28s ease, backdrop-filter .28s ease; }
+  .hd-root .hd-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(177,222,255,.48) !important;
+    -webkit-backdrop-filter: blur(34px) saturate(205%) brightness(1.10);
+    backdrop-filter: blur(34px) saturate(205%) brightness(1.10);
+    box-shadow: 0 26px 62px rgba(0,8,28,.40), 0 0 0 1px rgba(77,174,255,.13), inset 0 1px 0 rgba(255,255,255,.34) !important;
   }
+}
+
+/* Light mode uses milky translucent glass and retains readable contrast. */
+html.light-mode .hd-root {
+  --hd-text: #10223d;
+  --hd-mute: #536783;
+  --hd-shadow: 0 18px 45px rgba(43,75,115,.12), inset 0 1px 0 rgba(255,255,255,.92);
+}
+html.light-mode .hd-root .hd-card,
+html.light-mode .hd-root .hd-sub-card {
+  color: #10223d;
+  background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(228,241,255,.60) 58%, rgba(239,233,255,.52)) !important;
+  border-color: rgba(255,255,255,.88) !important;
+}
+html.light-mode .hd-root .hd-panel-head h3 { color: #10223d; }
+html.light-mode .hd-root .hd-label,
+html.light-mode .hd-root .hd-sub,
+html.light-mode .hd-root .hd-panel-head p,
+html.light-mode .hd-root .hd-foot { color: #536783; }
+html.light-mode .hd-root .hd-status,
+html.light-mode .hd-root .hd-seg,
+html.light-mode .hd-root .hd-chip,
+html.light-mode .hd-root .hd-more { color: #183456; background: rgba(255,255,255,.52) !important; }
+html.light-mode .hd-root .hd-tip { color: #f5f8ff; background: rgba(13,31,57,.92) !important; }
+
+/* Keep the material efficient and legible on phones and reduced-motion devices. */
+@media (max-width: 700px) {
+  .hd-root .hd-card, .hd-root .hd-sub-card {
+    -webkit-backdrop-filter: blur(18px) saturate(165%);
+    backdrop-filter: blur(18px) saturate(165%);
+    border-radius: 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hd-root .hd-card { transition: none !important; }
 }
