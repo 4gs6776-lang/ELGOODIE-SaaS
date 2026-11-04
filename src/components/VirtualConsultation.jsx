@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient'
 import { useOfflineTable } from '../lib/useOfflineTable'
 import { useWebRTC } from '../lib/useWebRTC'
 import { writeAudit } from '../lib/audit'
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Send, X, MessageSquare, Maximize2 } from 'lucide-react'
+import { Video, VideoOff, Mic, MicOff, PhoneOff, Send, X, MessageSquare, Maximize2, Circle, Square } from 'lucide-react'
 
 // =====================================================================
 // VirtualConsultation — video + text chat consultation component
@@ -44,6 +44,9 @@ export default function VirtualConsultation({ patient, hospital, consultationId,
   const [callDuration, setCallDuration] = useState(0)
   const [summary, setSummary] = useState('')
   const [showSummary, setShowSummary] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
+  const mediaRecorderRef = useRef(null)
+  const recordedChunksRef = useRef([])
   const messagesEndRef = useRef(null)
   const callTimerRef = useRef(null)
 
@@ -78,6 +81,11 @@ export default function VirtualConsultation({ patient, hospital, consultationId,
 
   // Handle end call
   const handleEndCall = useCallback(async () => {
+    // Stop recording if active
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop()
+    }
+
     webrtc.endCall()
 
     if (consultationId) {
@@ -85,7 +93,20 @@ export default function VirtualConsultation({ patient, hospital, consultationId,
         status: 'completed',
         actual_end: new Date().toISOString(),
         duration_seconds: callDuration,
+        is_recorded: isRecording,
       })
+
+      // Upload recording if any chunks were captured
+      if (recordedChunksRef.current.length > 0) {
+        try {
+          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' })
+          const recordingPath = `${hospital.id}/virtual-consultations/${consultationId}.webm`
+          await supabase.storage.from('hospital-logos').upload(recordingPath, blob, { upsert: true, contentType: 'video/webm' })
+          await updateConsultation(consultationId, { recording_path: recordingPath })
+        } catch (err) {
+          console.warn('Could not upload recording:', err.message)
+        }
+      }
 
       writeAudit({
         hospitalId: hospital.id, actor: profile,
@@ -125,6 +146,53 @@ export default function VirtualConsultation({ patient, hospital, consultationId,
     }
     onClose()
   }, [consultationId, updateConsultation, summary, onClose])
+
+  // Toggle recording — uses MediaRecorder API to capture the local + remote
+  // audio/video. The recording is uploaded to Supabase Storage when the
+  // call ends (in handleEndCall).
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      // Stop recording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop()
+      }
+      setIsRecording(false)
+    } else {
+      // Start recording — combine local + remote streams
+      try {
+        const combinedStream = new MediaStream()
+        // Add remote tracks (patient video/audio)
+        if (webrtc.remoteStream) {
+          webrtc.remoteStream.getTracks().forEach(t => combinedStream.addTrack(t))
+        }
+        // Add local tracks (doctor audio — skip local video to save space)
+        if (webrtc.localStream) {
+          webrtc.localStream.getAudioTracks().forEach(t => combinedStream.addTrack(t))
+        }
+
+        const recorder = new MediaRecorder(combinedStream, { mimeType: 'video/webm;codecs=vp8,opus' })
+        recordedChunksRef.current = []
+
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunksRef.current.push(e.data)
+        }
+
+        recorder.start(1000) // collect data every 1 second
+        mediaRecorderRef.current = recorder
+        setIsRecording(true)
+
+        writeAudit({
+          hospitalId: hospital.id, actor: profile,
+          action: 'telemedicine.recording_started',
+          entityType: 'virtual_consultations', entityId: consultationId,
+          patientId: patient?.id,
+          summary: `Started recording virtual consultation with ${patient?.full_name || 'patient'}`,
+        })
+      } catch (err) {
+        console.error('Could not start recording:', err.message)
+      }
+    }
+  }, [isRecording, webrtc.remoteStream, webrtc.localStream, hospital, profile, consultationId, patient])
 
   const formatDuration = (seconds) => {
     const m = Math.floor(seconds / 60)
@@ -316,6 +384,21 @@ export default function VirtualConsultation({ patient, hospital, consultationId,
           }} title={webrtc.audioEnabled ? 'Mute microphone' : 'Unmute microphone'}>
             {webrtc.audioEnabled ? <Mic size={18} /> : <MicOff size={18} />}
           </button>
+          {/* Recording toggle */}
+          <button onClick={toggleRecording} style={{
+            width: 44, height: 44, borderRadius: '50%', border: 'none',
+            background: isRecording ? 'rgba(240,79,95,0.4)' : 'rgba(255,255,255,0.15)',
+            color: isRecording ? '#fff' : 'rgba(255,255,255,0.7)',
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }} title={isRecording ? 'Stop recording' : 'Start recording'}>
+            {isRecording ? <Square size={16} /> : <Circle size={18} />}
+          </button>
+          {isRecording && (
+            <span style={{ color: 'var(--danger)', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)', animation: 'pulse 1.5s infinite' }} />
+              REC
+            </span>
+          )}
           <button onClick={handleEndCall} style={{
             width: 52, height: 52, borderRadius: '50%', border: 'none',
             background: 'var(--danger)', color: '#fff',
