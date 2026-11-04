@@ -16,6 +16,7 @@ import AdmissionRequestModal from '../../components/AdmissionRequestModal'
 import LabTestPicker from '../../components/LabTestPicker'
 import { useBillingCatalog, formatMoney } from '../../lib/billingService'
 import AiDiagnostics from './AiDiagnostics'
+import CodeSuggestionPanel from '../../components/ai/CodeSuggestionPanel'
 
 // NEW: Global Medication Reference List (allows searching even if hospital has 0 stock)
 const GLOBAL_MEDICATIONS = [
@@ -61,6 +62,7 @@ export default function DoctorWorkbench() {
   
   const [showAdmissionModal, setShowAdmissionModal] = useState(false)
   const [showAiDiagnostics, setShowAiDiagnostics] = useState(false)
+  const [showCodePanel, setShowCodePanel] = useState(false)
   const loading = loadingPatients || loadingVitals || loadingLabOrders || loadingPrescriptions
   const [activeVitalsId, setActiveVitalsId] = useState(null)
   const [toast, setToast] = useState(null)
@@ -840,6 +842,9 @@ export default function DoctorWorkbench() {
                     <button type="button" className="btn btn-primary" style={{ width: 'auto', background: 'var(--violet)', color: '#fff' }} onClick={() => setShowAiDiagnostics(true)} disabled={!activePatient} title="Get AI-assisted differential diagnosis and recommendations">
                       AI Assist
                     </button>
+                    <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--violet)', borderColor: 'rgba(118,87,232,0.3)' }} onClick={() => setShowCodePanel(s => !s)} disabled={!activeVitals} title="Get AI-suggested ICD-10 codes + discharge summary">
+                      AI Codes
+                    </button>
                   </div>
                   {showPreview && <div style={{ marginTop: 16, padding: 16, borderRadius: 10, background: 'var(--bg-elevated)' }}><ol style={{ paddingLeft: 20 }}>{medications.map(m => <li key={m.localId} style={{ fontSize: 13.5, marginBottom: 8 }}><strong>{m.drugName}</strong> - {m.dose} {m.route} {m.frequency}</li>)}</ol></div>}
                 </div>
@@ -975,6 +980,15 @@ export default function DoctorWorkbench() {
           encounterId={activeVitals?.id || null}
           assessmentType="consultation"
           onClose={() => setShowAiDiagnostics(false)}
+        />
+      )}
+
+      {/* AI Code Suggestion Panel — ICD-10 + procedure codes + discharge summary */}
+      {showCodePanel && activeVitals && activePatient && (
+        <CodeSuggestionPanel
+          activeVitals={activeVitals}
+          activePatient={activePatient}
+          onClose={() => setShowCodePanel(false)}
         />
       )}
     </>
