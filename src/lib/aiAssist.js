@@ -258,3 +258,214 @@ function friendlyEdgeError(error) {
 
   return msg || 'The AI service could not complete the request.'
 }
+
+// =====================================================================
+// AI CODE SUGGESTION + DISCHARGE SUMMARY (Feature 10)
+// =====================================================================
+// Two new functions that extend the existing ai-assist Edge Function:
+//   4. suggestCodes()          — suggest ICD-10 + procedure codes from notes
+//   5. generateDischargeSummary() — draft a structured discharge summary
+//
+// Both call the same edge function with a different `action` parameter.
+// The edge function uses a different Gemini prompt per action.
+// =====================================================================
+
+// ---------------------------------------------------------------------
+// suggestCodes
+//
+// Sends consultation notes to the AI and gets back suggested ICD-10
+// codes, procedure codes, and a brief rationale.
+//
+// Inputs:
+//   { consultationId, hospitalId, profile, notes }
+//     - consultationId: uuid of the patient_vitals row
+//     - hospitalId:     uuid (from useAuth().hospital.id)
+//     - profile:        the auth profile object
+//     - notes:          object with consultation fields (chief_complaints,
+//                       diagnosis, clinical_notes, examination_findings, etc.)
+//
+// Returns:
+//   { success: true, suggestions: { icd10: [...], procedures: [...], rationale: '...' } }
+//   { success: false, error: '...' }
+// ---------------------------------------------------------------------
+export async function suggestCodes({
+  consultationId,
+  hospitalId,
+  profile,
+  notes,
+}) {
+  if (!consultationId || !hospitalId || !profile) {
+    return { success: false, error: 'Missing required fields.' }
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('ai-assist', {
+      body: {
+        action: 'coding',
+        patientId: notes.patient_id || null,
+        encounterId: consultationId,
+        assessmentType: 'coding',
+        hospitalId,
+        profile: { id: profile.id, full_name: profile.full_name, role: profile.role },
+        // Pass the consultation context inline (the edge function will
+        // also fetch it from the DB for verification)
+        consultation_context: {
+          chief_complaints: notes.chief_complaints || '',
+          diagnosis: notes.diagnosis || '',
+          clinical_notes: notes.clinical_notes || '',
+          examination_findings: notes.examination_findings || '',
+          treatment_plan: notes.treatment_plan || '',
+          history_presenting_complaint: notes.history_presenting_complaint || '',
+          past_medical_history: notes.past_medical_history || '',
+          drug_history: notes.drug_history || '',
+          allergy_history: notes.allergy_history || '',
+        },
+      },
+    })
+
+    if (error) {
+      return { success: false, error: friendlyError(error) }
+    }
+
+    if (!data || !data.ok) {
+      return { success: false, error: data?.error || 'The AI service did not return suggestions.' }
+    }
+
+    return {
+      success: true,
+      suggestions: {
+        icd10: data.suggestions?.icd10 || [],
+        procedures: data.suggestions?.procedures || [],
+        rationale: data.suggestions?.rationale || '',
+      },
+      assessmentId: data.assessmentId || null,
+    }
+  } catch (err) {
+    return { success: false, error: friendlyError(err) }
+  }
+}
+
+// ---------------------------------------------------------------------
+// generateDischargeSummary
+//
+// Generates a structured discharge summary from the consultation data.
+//
+// Inputs:
+//   { consultationId, hospitalId, profile, patient, notes }
+//
+// Returns:
+//   { success: true, summary: { admission: '...', diagnosis: '...', treatment: '...', medications: '...', followUp: '...' } }
+//   { success: false, error: '...' }
+// ---------------------------------------------------------------------
+export async function generateDischargeSummary({
+  consultationId,
+  hospitalId,
+  profile,
+  patient,
+  notes,
+}) {
+  if (!consultationId || !hospitalId || !profile) {
+    return { success: false, error: 'Missing required fields.' }
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('ai-assist', {
+      body: {
+        action: 'documentation',
+        patientId: patient?.id || notes.patient_id || null,
+        encounterId: consultationId,
+        assessmentType: 'documentation',
+        hospitalId,
+        profile: { id: profile.id, full_name: profile.full_name, role: profile.role },
+        consultation_context: {
+          patient_name: patient?.full_name || '',
+          patient_age: patient?.age || '',
+          patient_gender: patient?.gender || '',
+          chief_complaints: notes.chief_complaints || '',
+          diagnosis: notes.diagnosis || '',
+          clinical_notes: notes.clinical_notes || '',
+          examination_findings: notes.examination_findings || '',
+          treatment_plan: notes.treatment_plan || '',
+          history_presenting_complaint: notes.history_presenting_complaint || '',
+          past_medical_history: notes.past_medical_history || '',
+          drug_history: notes.drug_history || '',
+          allergy_history: notes.allergy_history || '',
+          follow_up_notes: notes.follow_up_notes || '',
+        },
+      },
+    })
+
+    if (error) {
+      return { success: false, error: friendlyError(error) }
+    }
+
+    if (!data || !data.ok) {
+      return { success: false, error: data?.error || 'The AI service did not return a summary.' }
+    }
+
+    return {
+      success: true,
+      summary: {
+        admission: data.summary?.admission || '',
+        diagnosis: data.summary?.diagnosis || '',
+        treatment: data.summary?.treatment || '',
+        medications: data.summary?.medications || '',
+        followUp: data.summary?.followUp || '',
+        full_text: data.summary?.full_text || '',
+      },
+      assessmentId: data.assessmentId || null,
+    }
+  } catch (err) {
+    return { success: false, error: friendlyError(err) }
+  }
+}
+
+// ---------------------------------------------------------------------
+// saveConsultationCode
+//
+// Saves an accepted/rejected code suggestion to the consultation_codes
+// table. Called when the doctor clicks Accept or Reject on a suggestion.
+//
+// Inputs:
+//   { hospitalId, patientId, consultationId, codeType, code, description, isAiSuggested, isAccepted, profile }
+//
+// Returns:
+//   { success: true } on success
+//   { success: false, error: '...' } on failure
+// ---------------------------------------------------------------------
+export async function saveConsultationCode({
+  hospitalId,
+  patientId,
+  consultationId,
+  codeType,
+  code,
+  description,
+  isAiSuggested = false,
+  isAccepted = false,
+  profile,
+}) {
+  if (!hospitalId || !patientId || !consultationId || !codeType || !code) {
+    return { success: false, error: 'Missing required fields.' }
+  }
+
+  try {
+    const { error } = await supabase.from('consultation_codes').insert({
+      hospital_id: hospitalId,
+      patient_id: patientId,
+      consultation_id: consultationId,
+      code_type: codeType,
+      code,
+      code_description: description || null,
+      is_ai_suggested: isAiSuggested,
+      is_accepted: isAccepted,
+      accepted_by: isAccepted ? profile.id : null,
+      accepted_at: isAccepted ? new Date().toISOString() : null,
+    })
+
+    if (error) throw error
+
+    return { success: true }
+  } catch (err) {
+    return { success: false, error: err.message || 'Could not save the code.' }
+  }
+}
