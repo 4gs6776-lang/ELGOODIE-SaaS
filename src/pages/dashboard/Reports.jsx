@@ -13,6 +13,7 @@ import {
   CLAIM_STATUSES,
 } from '../../lib/billingService'
 import { formatDateTime, getTimezone } from '../../lib/datetime'
+import RegulatoryReports from '../../components/RegulatoryReports'
 
 // =====================================================================
 // GOODIE-MEDHUB — Reports module (Phase 4 full rewrite)
@@ -35,6 +36,7 @@ const REPORTS = [
   { key: 'lab_report',       label: 'Lab Report',       icon: 'reports',  description: 'Lab test counts, individual vs order counts, completed tests, lab revenue' },
   { key: 'patient_statements', label: 'Patient Statements', icon: 'users', description: 'Generate patient account statements' },
   { key: 'expense_revenue', label: 'P&L Overview',      icon: 'billing', description: 'Profit & loss: revenue vs expenses with margin' },
+  { key: 'regulatory',       label: 'Regulatory',        icon: 'reports',  description: 'Public health / regulatory reports — disease surveillance, maternal mortality, notifiable diseases, immunization, birth/death registration, inpatient/outpatient statistics' },
 ]
 
 export default function Reports(){
@@ -614,6 +616,11 @@ export default function Reports(){
                 ))}
               </div>
             </div>
+          )}
+
+          {/* ---- Regulatory Reports ---- */}
+          {activeReport === 'regulatory' && (
+            <RegulatoryReports periodFrom={periodFrom} periodTo={periodTo} />
           )}
         </>
       )}
