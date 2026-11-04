@@ -10,6 +10,10 @@ import { assertWriteAllowed } from '../../lib/subscriptionLock'
 import { assertWithinPlanLimit } from '../../lib/planEntitlements'
 import { usePagination } from '../../lib/usePagination'
 import Pagination from '../../components/common/Pagination'
+import StaffCredentialManager from '../../components/StaffCredentialManager'
+import StaffCMEManager from '../../components/StaffCMEManager'
+import StaffIncidentReport from '../../components/StaffIncidentReport'
+import StaffPerformanceDashboard from '../../components/StaffPerformanceDashboard'
 
 const FN_CREATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-staff`
 const FN_UPDATE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/update-staff-login`
@@ -25,6 +29,7 @@ export default function Staff(){
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [activeTab, setActiveTab] = useState('directory')
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [fullName, setFullName] = useState('')
@@ -182,6 +187,60 @@ export default function Staff(){
 
   return (
     <>
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+        {[
+          { key: 'overview', label: 'Overview', adminOnly: true },
+          { key: 'directory', label: 'Directory' },
+          { key: 'credentials', label: 'Credentials' },
+          { key: 'cme', label: 'CME' },
+          { key: 'incidents', label: 'Incidents' },
+        ].filter(t => !t.adminOnly || canManageStaff).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: '10px 18px', fontSize: 13, fontWeight: 600,
+              border: 'none', borderBottom: activeTab === t.key ? '2px solid var(--teal)' : '2px solid transparent',
+              background: 'transparent', color: activeTab === t.key ? 'var(--teal)' : 'var(--muted)',
+              cursor: 'pointer', transition: 'color .2s ease', marginBottom: -1,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Overview tab — admin only */}
+      {activeTab === 'overview' && canManageStaff && (
+        <div className="dash-panel" style={{ marginBottom: 16 }}>
+          <StaffPerformanceDashboard staffMembers={staff} />
+        </div>
+      )}
+
+      {/* Credentials tab */}
+      {activeTab === 'credentials' && (
+        <div className="dash-panel" style={{ marginBottom: 16 }}>
+          <StaffCredentialManager staffMembers={staff} />
+        </div>
+      )}
+
+      {/* CME tab */}
+      {activeTab === 'cme' && (
+        <div className="dash-panel" style={{ marginBottom: 16 }}>
+          <StaffCMEManager staffMembers={staff} />
+        </div>
+      )}
+
+      {/* Incidents tab */}
+      {activeTab === 'incidents' && (
+        <div className="dash-panel" style={{ marginBottom: 16 }}>
+          <StaffIncidentReport staffMembers={staff} />
+        </div>
+      )}
+
+      {/* Directory tab (original staff list) */}
+      {activeTab === 'directory' && (
       <div className="dash-panel">
         <div className="dash-panel-head">
           <div>
@@ -264,6 +323,7 @@ export default function Staff(){
           </>
         )}
       </div>
+      )}
 
       {showAddModal && (
         /* Shared modal chrome → bottom sheet with pinned actions on phones */
