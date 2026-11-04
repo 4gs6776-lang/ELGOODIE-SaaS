@@ -79,6 +79,17 @@ export default function Nursing(){
   useRealtimeAlert('patient_vitals', hospital?.id, () => {})
   useRealtimeAlert('prescriptions', hospital?.id, () => {})
 
+  // ---- Radiology "ready for printing" notification ----
+  // When a doctor sends a radiology report to the nurse, the scan status
+  // changes to 'ready_for_printing' and sent_to_nurse = true. This
+  // realtime listener fires + shows a toast so the nurse knows a report
+  // is waiting to be printed.
+  useRealtimeAlert('radiology_scans', hospital?.id, (row) => {
+    if (row.status === 'ready_for_printing' && row.sent_to_nurse) {
+      showToast(`🖨️ Radiology report ready for printing: ${row.patient_name} (${row.modality} — ${row.body_part})`)
+    }
+  }, { event: 'UPDATE' })
+
   // ---- Polling safety net (every 30s) ----
   useEffect(() => {
     if (!hospital?.id) return
@@ -567,6 +578,39 @@ export default function Nursing(){
         )}
       </div>
 
+      {/* ---- Radiology Print Queue ---- */}
+      {/* Shows scans that have been sent to the nurse for printing.
+          The doctor clicks "Send to Nurse" in the Radiology report form →
+          the scan status changes to 'ready_for_printing' → it appears here. */}
+      <RadiologyPrintQueue hospitalId={hospital?.id} onPrint={(scan) => {
+        // Open the report in a new window for printing
+        const reportText = [
+          `${hospital?.name || 'GOODIE-MEDHUB'}`,
+          `Patient: ${scan.patient_name}`,
+          `Modality: ${scan.modality}`,
+          `Body Part: ${scan.body_part}`,
+          `Date: ${new Date(scan.requested_at).toLocaleDateString()}`,
+          '',
+          'FINDINGS:',
+          scan.findings || scan.report || '—',
+          '',
+          'IMPRESSION:',
+          scan.impression || '—',
+          '',
+          'RECOMMENDATION:',
+          scan.recommendation || '—',
+          '',
+          `Reported by: ${scan.reported_by_name || '—'}`,
+          `Date reported: ${scan.reported_at ? new Date(scan.reported_at).toLocaleDateString() : '—'}`,
+        ].join('\n')
+        const w = window.open('', '_blank')
+        if (w) {
+          w.document.write(`<pre style="font-family:monospace;font-size:14px;padding:40px;white-space:pre-wrap;">${reportText.replace(/</g, '&lt;')}</pre>`)
+          w.document.close()
+          w.print()
+        }
+      }} />
+
       {toast && (
         <div style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
@@ -654,5 +698,49 @@ export default function Nursing(){
         </div>
       )}
     </>
+  )
+}
+
+// =====================================================================
+// RadiologyPrintQueue — shows scans ready for printing in Nursing
+// =====================================================================
+import { useOfflineTable as useOfflineTableRPC } from '../../lib/useOfflineTable'
+import { Printer, FileText } from 'lucide-react'
+
+function RadiologyPrintQueue({ hospitalId, onPrint }) {
+  const { records: scans } = useOfflineTableRPC('radiology_scans', hospitalId, { realtime: true })
+  const readyScans = (scans || []).filter(s => s.status === 'ready_for_printing' && s.sent_to_nurse)
+
+  if (readyScans.length === 0) return null
+
+  return (
+    <div className="dash-panel" style={{ marginTop: 16, borderColor: 'var(--teal-border)' }}>
+      <div className="dash-panel-head">
+        <div>
+          <div className="dash-panel-title" style={{ color: 'var(--teal)' }}>🖨️ Radiology Print Queue</div>
+          <div className="dash-panel-sub">{readyScans.length} report{readyScans.length !== 1 ? 's' : ''} ready for printing</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {readyScans.map(scan => (
+          <div key={scan.id} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+            padding: '10px 14px', borderRadius: 8, background: 'var(--bg-elevated)',
+            border: '1px solid var(--teal-border)',
+          }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{scan.patient_name}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                {scan.modality} — {scan.body_part}
+                {scan.findings && ` · Findings: ${scan.findings.slice(0, 60)}${scan.findings.length > 60 ? '…' : ''}`}
+              </div>
+            </div>
+            <button onClick={() => onPrint(scan)} className="btn btn-ghost" style={{ width: 'auto', padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, color: 'var(--teal)', borderColor: 'var(--teal-border)' }}>
+              <Printer size={14} /> Print
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
