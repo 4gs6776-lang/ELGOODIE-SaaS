@@ -7,7 +7,9 @@ import Pagination from '../../components/common/Pagination'
 import SearchInput from '../../components/common/SearchInput'
 import TrashIcon from '../../components/icons/TrashIcon'
 import ModuleHistoryButton from '../../components/ModuleHistoryButton'
+import RadiologyReportForm from '../../components/RadiologyReportForm'
 import { writeAudit } from '../../lib/audit'
+import { FileText, Printer } from 'lucide-react'
 
 const MODALITIES = ['X-Ray', 'CT Scan', 'MRI', 'Ultrasound', 'Mammography', 'Fluoroscopy']
 
@@ -15,6 +17,7 @@ export default function Radiology(){
   const { profile, hospital } = useAuth()
   const { records: scans, loading, isOnline, pendingCount, addRecord, deleteRecord, updateRecord } = useOfflineTable('radiology_scans', hospital?.id)
   const [showModal, setShowModal] = useState(false)
+  const [showReportForm, setShowReportForm] = useState(null) // holds the scan object when the report form is open
   const [toast, setToast] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
 
@@ -73,7 +76,7 @@ export default function Radiology(){
         action: 'radiology_scan.requested',
         entityType: 'radiology_scan', entityId: saved?.id || null,
         patientId: saved?.patient_id || null,
-        summary: `Requested ${modality} scan — ${body_part_label(bodyPart)} for ${patientName}`,
+        summary: `Requested ${modality} scan — ${bodyPart} for ${patientName}`,
         metadata: { patient_name: patientName, modality, body_part: bodyPart, status: 'requested' },
       })
       setShowModal(false)
@@ -92,54 +95,27 @@ export default function Radiology(){
     showToast(isOnline ? 'Marked in progress' : 'Marked in progress — will sync when back online')
   }
 
-  async function handleComplete(scan){
-    const report = prompt(`Enter findings / report for ${scan.modality} — ${scan.body_part} (${scan.patient_name}):`, scan.report || '')
-    if (report === null) return
-    await updateRecord(scan.id, { status: 'completed', report })
-    writeAudit({
-      hospitalId: hospital?.id, actor: profile,
-      action: 'radiology_scan.completed',
-      entityType: 'radiology_scan', entityId: scan.id,
-      patientId: scan.patient_id || null,
-      summary: `Completed scan — ${scan.modality} (${scan.body_part}) for ${scan.patient_name}`,
-      metadata: {
-        modality: scan.modality, body_part: scan.body_part,
-        status_change: 'in_progress → completed',
-        report_preview: report ? (report.length > 100 ? report.slice(0, 100) + '…' : report) : null,
-        report_length: report ? report.length : 0,
-      },
-    })
-    showToast(isOnline ? 'Marked completed' : 'Marked completed — will sync when back online')
-  }
+  // The old handleComplete used prompt() — now replaced by the
+  // RadiologyReportForm modal (opened via the "Report" button).
+  // The form handles saving findings, impression, etc. and optionally
+  // sending to the nurse.
 
   async function handleReopen(scan){
     const previousStatus = scan.status
-    await updateRecord(scan.id, { status: 'requested' })
+    await updateRecord(scan.id, { status: 'requested', sent_to_nurse: false })
     writeAudit({
       hospitalId: hospital?.id, actor: profile,
       action: 'radiology_scan.reopened',
       entityType: 'radiology_scan', entityId: scan.id,
       patientId: scan.patient_id || null,
       summary: `Reopened scan — ${scan.modality} (${scan.body_part}) for ${scan.patient_name}`,
-      metadata: {
-        modality: scan.modality, body_part: scan.body_part,
-        status_change: `${previousStatus} → requested`,
-      },
+      metadata: { modality: scan.modality, body_part: scan.body_part, status_change: `${previousStatus} → requested` },
     })
     showToast(isOnline ? 'Marked requested' : 'Marked requested — will sync when back online')
   }
 
-  // Tiny helper so handleAdd's audit summary reads naturally — "Chest"
-  // is friendlier than lowercase "chest" in the audit log.
   function body_part_label(s){ return (s || '').trim() }
 
-  // Renamed from "handleDelete" to make clear this is an archive, not a
-  // destructive delete. useOfflineTable.js already routes radiology_scans
-  // through its soft-delete path (SOFT_DELETE_TABLES), so this has ALWAYS
-  // safely stamped deleted_at and hidden the record rather than erasing
-  // it — only the button/dialog wording was misleading before. Also adds
-  // an audit trail entry, which this action previously did not have at
-  // all (Laboratory's equivalent action already logged one).
   async function handleArchive(scan){
     if (!confirm(`Archive this scan request for ${scan.patient_name} (${scan.modality} — ${scan.body_part})?\n\nIt will be hidden from this list, but the record is kept for the clinical history — nothing is permanently erased.`)) return
     await deleteRecord(scan.id)
@@ -148,27 +124,34 @@ export default function Radiology(){
   }
 
   function statusMeta(status){
+    if (status === 'ready_for_printing') return { label: 'Ready for Printing', bg: 'rgba(0,199,199,0.12)', color: 'var(--teal)' }
     if (status === 'completed') return { label: 'Completed', bg: 'var(--teal-soft)', color: 'var(--teal)' }
     if (status === 'in_progress') return { label: 'In Progress', bg: 'rgba(139,124,246,0.14)', color: 'var(--violet)' }
     return { label: 'Requested', bg: 'rgba(201,169,97,0.14)', color: 'var(--gold)' }
   }
 
-  function nextAction(scan){
-    if (scan.status === 'requested') return () => handleStart(scan)
-    if (scan.status === 'in_progress') return () => handleComplete(scan)
-    return () => handleReopen(scan)
+  function nextActionLabel(scan){
+    if (scan.status === 'requested') return 'Start'
+    if (scan.status === 'in_progress') return 'Report'
+    if (scan.status === 'completed') return 'Edit Report'
+    if (scan.status === 'ready_for_printing') return 'View Report'
+    return 'Reopen'
+  }
+
+  function handleNextAction(scan){
+    if (scan.status === 'requested') return handleStart(scan)
+    // For in_progress, completed, ready_for_printing → open the report form
+    return setShowReportForm(scan)
   }
 
   const sorted = [...scans].sort((a, b) => new Date(b.requested_at) - new Date(a.requested_at))
   const radiologySearch = searchTerm.trim().toLowerCase()
-  const visibleSorted = radiologySearch ? sorted.filter(s => [s.patient_name, s.patient_id, s.modality, s.body_area, s.request_number, s.status, s.report].some(v => String(v || '').toLowerCase().includes(radiologySearch))) : sorted
+  const visibleSorted = radiologySearch ? sorted.filter(s => [s.patient_name, s.patient_id, s.modality, s.body_part, s.request_number, s.status, s.report, s.findings, s.impression].some(v => String(v || '').toLowerCase().includes(radiologySearch))) : sorted
   const requestedCount = scans.filter(s => s.status === 'requested').length
   const inProgressCount = scans.filter(s => s.status === 'in_progress').length
-  const completedCount = scans.filter(s => s.status === 'completed').length
+  const completedCount = scans.filter(s => s.status === 'completed' || s.status === 'ready_for_printing').length
+  const readyForPrintingCount = scans.filter(s => s.status === 'ready_for_printing').length
 
-  // Global Pagination Rule — the full radiology_scans table for this
-  // hospital already lives in the browser (offline cache), so we only
-  // render one page of it at a time instead of the whole list.
   const {
     pageItems: pagedScans, currentPage, setCurrentPage, pageSize, setPageSize,
     totalPages, totalItems, startIndex, endIndex,
@@ -176,7 +159,7 @@ export default function Radiology(){
 
   return (
     <>
-      <div className="dash-stats" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 20 }}>
+      <div className="dash-stats" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 20 }}>
         <div className="dash-stat-card">
           <div className="dash-stat-icon" style={{ background: 'rgba(201,169,97,0.14)', color: 'var(--gold)' }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
@@ -204,7 +187,17 @@ export default function Radiology(){
           <div>
             <div className="dash-stat-label">Completed</div>
             <div className="dash-stat-value">{completedCount}</div>
-            <div className="dash-stat-delta">reports ready</div>
+            <div className="dash-stat-delta">reports done</div>
+          </div>
+        </div>
+        <div className="dash-stat-card">
+          <div className="dash-stat-icon" style={{ background: 'rgba(0,199,199,0.12)', color: 'var(--teal)' }}>
+            <Printer size={20} />
+          </div>
+          <div>
+            <div className="dash-stat-label">Ready for Print</div>
+            <div className="dash-stat-value">{readyForPrintingCount}</div>
+            <div className="dash-stat-delta" style={{ color: 'var(--teal)' }}>sent to nurse</div>
           </div>
         </div>
       </div>
@@ -218,7 +211,7 @@ export default function Radiology(){
               {isOnline ? 'Online' : 'Offline'}{pendingCount > 0 ? ` · ${pendingCount} syncing` : ''}
             </div>
           </div>
-          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search patient, scan or request number" style={{ minWidth: 260, maxWidth: 420 }} />
+          <SearchInput value={searchTerm} onChange={setSearchTerm} placeholder="Search patient, scan, findings or impression" style={{ minWidth: 260, maxWidth: 420 }} />
           <ModuleHistoryButton moduleKey="radiology" />
           <button className="btn btn-primary" style={{ width: 'auto' }} onClick={() => setShowModal(true)}>+ New Scan Request</button>
         </div>
@@ -232,7 +225,7 @@ export default function Radiology(){
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  {['Patient', 'Modality', 'Area', 'Status', 'Report', ''].map(h => (
+                  {['Patient', 'Modality', 'Area', 'Status', 'Findings', 'Actions'].map(h => (
                     <th key={h} style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>{h}</th>
                   ))}
                 </tr>
@@ -242,30 +235,51 @@ export default function Radiology(){
                   const meta = statusMeta(scan.status)
                   return (
                     <tr key={scan.id} style={{ borderTop: '1px solid var(--line-soft)' }}>
-                      <td style={{ padding: 12, fontWeight: 700 }}>{scan.patient_name}</td>
+                      <td style={{ padding: 12, fontWeight: 700, fontSize: 13 }}>{scan.patient_name}</td>
                       <td style={{ padding: 12, color: 'var(--muted)', fontSize: 12.5 }}>{scan.modality}</td>
                       <td style={{ padding: 12, color: 'var(--muted)', fontSize: 12.5 }}>{scan.body_part}</td>
                       <td style={{ padding: 12 }}>
                         <span
-                          onClick={nextAction(scan)}
+                          onClick={() => handleNextAction(scan)}
                           style={{
                             fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, cursor: 'pointer',
                             background: meta.bg, color: meta.color,
                           }}
-                          title="Tap to change"
+                          title="Click to open report form"
                         >
                           {meta.label}
                         </span>
                       </td>
                       <td style={{ padding: 12, fontSize: 12, color: 'var(--muted)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {scan.report || '—'}
+                        {scan.findings || scan.report || '—'}
                       </td>
                       <td style={{ padding: 12 }}>
-                        <button
-                          onClick={() => handleArchive(scan)}
-                          className="icon-btn-delete"
-                          title="Archive"
-                        ><TrashIcon size={14}/></button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {/* Report button — opens the detailed RadiologyReportForm */}
+                          <button
+                            onClick={() => setShowReportForm(scan)}
+                            className="btn btn-ghost"
+                            style={{ width: 'auto', padding: '4px 10px', fontSize: 11, color: 'var(--teal)', borderColor: 'var(--teal-border)', display: 'flex', alignItems: 'center', gap: 4 }}
+                            title="Open report form"
+                          >
+                            <FileText size={12} /> {nextActionLabel(scan)}
+                          </button>
+                          {scan.status === 'ready_for_printing' && (
+                            <button
+                              onClick={() => window.print()}
+                              className="btn btn-ghost"
+                              style={{ width: 'auto', padding: '4px 8px', fontSize: 11, color: 'var(--muted)' }}
+                              title="Print report"
+                            >
+                              <Printer size={12} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleArchive(scan)}
+                            className="icon-btn-delete"
+                            title="Archive"
+                          ><TrashIcon size={14}/></button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -288,33 +302,45 @@ export default function Radiology(){
         )}
       </div>
 
+      {/* New Scan Request Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,3,26,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 400 }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 19, marginBottom: 18 }}>New Scan Request</div>
+        <div className="dash-modal-backdrop">
+          <div className="card dash-modal" style={{ maxWidth: 400 }}>
+            <div className="dash-modal-title">New Scan Request</div>
             {formError && <div className="error-box">{formError}</div>}
             <form onSubmit={handleAdd}>
-              <div className="field">
-                <label>Patient Name</label>
-                <input value={patientName} onChange={e => setPatientName(e.target.value)} placeholder="e.g. Chinedu Okafor" />
+              <div className="dash-modal-body">
+                <div className="field">
+                  <label>Patient Name</label>
+                  <input value={patientName} onChange={e => setPatientName(e.target.value)} placeholder="e.g. Chinedu Okafor" />
+                </div>
+                <div className="field">
+                  <label>Modality</label>
+                  <select value={modality} onChange={e => setModality(e.target.value)}>
+                    {MODALITIES.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Body Part / Area</label>
+                  <input value={bodyPart} onChange={e => setBodyPart(e.target.value)} placeholder="e.g. Chest, Left Knee" />
+                </div>
               </div>
-              <div className="field">
-                <label>Modality</label>
-                <select value={modality} onChange={e => setModality(e.target.value)}>
-                  {MODALITIES.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div className="field">
-                <label>Body Part / Area</label>
-                <input value={bodyPart} onChange={e => setBodyPart(e.target.value)} placeholder="e.g. Chest, Left Knee" />
-              </div>
-              <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+              <div className="dash-modal-actions">
                 <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Request'}</button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {/* Radiology Report Form Modal */}
+      {showReportForm && (
+        <RadiologyReportForm
+          scan={showReportForm}
+          onClose={() => setShowReportForm(null)}
+          onUpdate={() => setShowReportForm(null)}
+        />
       )}
 
       {toast && (
