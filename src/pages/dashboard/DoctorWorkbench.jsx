@@ -71,19 +71,45 @@ export default function DoctorWorkbench() {
   const [toast, setToast] = useState(null)
   const [completing, setCompleting] = useState(false)
 
-  const [chiefComplaints, setChiefComplaints] = useState('')
-  const [historyPresenting, setHistoryPresenting] = useState('')
-  const [pastMedicalHistory, setPastMedicalHistory] = useState('')
-  const [pastSurgicalHistory, setPastSurgicalHistory] = useState('')
-  const [drugHistory, setDrugHistory] = useState('')
-  const [allergyHistory, setAllergyHistory] = useState('')
-  const [familySocialHistory, setFamilySocialHistory] = useState('')
-  const [examinationFindings, setExaminationFindings] = useState('')
-  const [clinicalNotes, setClinicalNotes] = useState('')
-  const [treatmentPlan, setTreatmentPlan] = useState('')
-  const [followUpNotes, setFollowUpNotes] = useState('')
-  const [symptoms, setSymptoms] = useState([])
-  const [diagnoses, setDiagnoses] = useState([])
+  const [chiefComplaints, setChiefComplaints] = useState(() => {
+    try { return sessionStorage.getItem('dw_chiefComplaints') || '' } catch { return '' }
+  })
+  const [historyPresenting, setHistoryPresenting] = useState(() => {
+    try { return sessionStorage.getItem('dw_historyPresenting') || '' } catch { return '' }
+  })
+  const [pastMedicalHistory, setPastMedicalHistory] = useState(() => {
+    try { return sessionStorage.getItem('dw_pastMedicalHistory') || '' } catch { return '' }
+  })
+  const [pastSurgicalHistory, setPastSurgicalHistory] = useState(() => {
+    try { return sessionStorage.getItem('dw_pastSurgicalHistory') || '' } catch { return '' }
+  })
+  const [drugHistory, setDrugHistory] = useState(() => {
+    try { return sessionStorage.getItem('dw_drugHistory') || '' } catch { return '' }
+  })
+  const [allergyHistory, setAllergyHistory] = useState(() => {
+    try { return sessionStorage.getItem('dw_allergyHistory') || '' } catch { return '' }
+  })
+  const [familySocialHistory, setFamilySocialHistory] = useState(() => {
+    try { return sessionStorage.getItem('dw_familySocialHistory') || '' } catch { return '' }
+  })
+  const [examinationFindings, setExaminationFindings] = useState(() => {
+    try { return sessionStorage.getItem('dw_examinationFindings') || '' } catch { return '' }
+  })
+  const [clinicalNotes, setClinicalNotes] = useState(() => {
+    try { return sessionStorage.getItem('dw_clinicalNotes') || '' } catch { return '' }
+  })
+  const [treatmentPlan, setTreatmentPlan] = useState(() => {
+    try { return sessionStorage.getItem('dw_treatmentPlan') || '' } catch { return '' }
+  })
+  const [followUpNotes, setFollowUpNotes] = useState(() => {
+    try { return sessionStorage.getItem('dw_followUpNotes') || '' } catch { return '' }
+  })
+  const [symptoms, setSymptoms] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('dw_symptoms') || '[]') } catch { return [] }
+  })
+  const [diagnoses, setDiagnoses] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('dw_diagnoses') || '[]') } catch { return [] }
+  })
 
   const [selectedLabTests, setSelectedLabTests] = useState([])
   const [otherLabTests, setOtherLabTests] = useState('')
@@ -171,7 +197,33 @@ export default function DoctorWorkbench() {
     syncPatients()
   }, { event: 'UPDATE' })
 
-  // Safety net when realtime is unavailable (no migration 008 yet,
+  // ---- Auto-save consultation draft to sessionStorage ----
+  // This prevents data loss when the doctor accidentally clicks away,
+  // the system goes to sleep, or the browser tab is refreshed.
+  // The draft is cleared when the consultation is completed (in handleCompleteConsultation)
+  // or when the doctor opens a new patient (in openConsultation).
+  useEffect(() => {
+    const fields = {
+      dw_chiefComplaints: chiefComplaints,
+      dw_historyPresenting: historyPresenting,
+      dw_pastMedicalHistory: pastMedicalHistory,
+      dw_pastSurgicalHistory: pastSurgicalHistory,
+      dw_drugHistory: drugHistory,
+      dw_allergyHistory: allergyHistory,
+      dw_familySocialHistory: familySocialHistory,
+      dw_examinationFindings: examinationFindings,
+      dw_clinicalNotes: clinicalNotes,
+      dw_treatmentPlan: treatmentPlan,
+      dw_followUpNotes: followUpNotes,
+    }
+    try {
+      Object.entries(fields).forEach(([k, v]) => sessionStorage.setItem(k, v || ''))
+      sessionStorage.setItem('dw_symptoms', JSON.stringify(symptoms || []))
+      sessionStorage.setItem('dw_diagnoses', JSON.stringify(diagnoses || []))
+    } catch {}
+  }, [chiefComplaints, historyPresenting, pastMedicalHistory, pastSurgicalHistory, drugHistory, allergyHistory, familySocialHistory, examinationFindings, clinicalNotes, treatmentPlan, followUpNotes, symptoms, diagnoses])
+
+  // ---- Safety net when realtime is unavailable ----
   // flaky connection): poll quietly while a consultation is open.
   // Also polls vitals + prescriptions so the doctor's queue refreshes
   // even if the realtime subscription fails.
@@ -351,6 +403,10 @@ export default function DoctorWorkbench() {
     setDrugHistory(''); setAllergyHistory(''); setFamilySocialHistory(''); setExaminationFindings(''); setClinicalNotes('')
     setTreatmentPlan(''); setFollowUpNotes(''); setSymptoms([]); setDiagnoses([]); setSelectedLabTests([]); setOtherLabTests(''); setLabPriority('routine'); setLabNotes('')
     setMedications([]); resetMedBuilder(); setSelectedTemplateId(''); setShowPreview(false)
+    // Clear the auto-saved draft from sessionStorage so the next consultation starts fresh
+    try {
+      ['dw_chiefComplaints','dw_historyPresenting','dw_pastMedicalHistory','dw_pastSurgicalHistory','dw_drugHistory','dw_allergyHistory','dw_familySocialHistory','dw_examinationFindings','dw_clinicalNotes','dw_treatmentPlan','dw_followUpNotes','dw_symptoms','dw_diagnoses'].forEach(k => sessionStorage.removeItem(k))
+    } catch {}
   }
 
   function resetMedBuilder() { setMedBuilder(EMPTY_MED); setEditingMedLocalId(null) }
@@ -679,6 +735,49 @@ export default function DoctorWorkbench() {
             <div className="field"><label>Follow-up Notes</label><textarea rows={2} value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Return in 1 week, sooner if symptoms worsen" /></div>
           </div>
 
+          {/* CONSULTATION ACTION TOOLBAR — always visible when a patient is selected.
+              These buttons used to be buried inside the prescription section (which
+              only rendered when activeVitals was set). Now they're at the top level
+              so the doctor can access AI Assist, AI Codes, and Virtual Consult
+              without needing to add a medication first. */}
+          {activePatient && (
+            <div className="dash-panel" style={{ marginTop: 20, padding: 14 }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 8 }}>
+                  Quick Actions
+                </div>
+                <button type="button" className="btn btn-primary" style={{ width: 'auto', background: 'var(--violet)', color: '#fff', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setShowAiDiagnostics(true)} disabled={!activePatient} title="Get AI-assisted differential diagnosis and recommendations">
+                  AI Assist
+                </button>
+                <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--violet)', borderColor: 'rgba(118,87,232,0.3)' }} onClick={() => setShowCodePanel(s => !s)} disabled={!activeVitals} title="Get AI-suggested ICD-10 codes + discharge summary">
+                  AI Codes
+                </button>
+                <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--teal)', borderColor: 'var(--teal-border)' }} onClick={async () => {
+                  if (!activePatient) return
+                  const roomId = `vc-${activePatient.id}-${Date.now()}`
+                  const { data, error } = await supabase.from('virtual_consultations').insert({
+                    hospital_id: hospital.id,
+                    patient_id: activePatient.id,
+                    patient_name: activePatient.full_name,
+                    doctor_id: profile.id,
+                    doctor_name: profile.full_name,
+                    status: 'scheduled',
+                    room_id: roomId,
+                    scheduled_start: new Date().toISOString(),
+                  }).select().single()
+                  if (!error && data) {
+                    setVirtualConsultData({ consultationId: data.id, roomId })
+                    setShowVirtualConsult(true)
+                  } else {
+                    setToast('Could not start virtual consultation')
+                  }
+                }} disabled={!activePatient} title="Start a video consultation with this patient">
+                  Virtual Consult
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="dash-row dash-row-2" style={{ marginTop: 20 }}>
             <div className="dash-panel" data-lab-panel>
               <div className="dash-panel-head">
@@ -842,34 +941,6 @@ export default function DoctorWorkbench() {
                     <button type="button" className="btn btn-primary" style={{ width: 'auto' }} onClick={() => handleSavePrescriptions('active')} disabled={savingPrescriptions}>Finalize</button>
                     <button type="button" className="btn btn-ghost" style={{ width: 'auto' }} onClick={handlePrint}>Print</button>
                     <button type="button" className="btn btn-ghost" style={{ width: 'auto' }} onClick={handleSaveAsTemplate}>Save as Template</button>
-                    <button type="button" className="btn btn-primary" style={{ width: 'auto', background: 'var(--violet)', color: '#fff' }} onClick={() => setShowAiDiagnostics(true)} disabled={!activePatient} title="Get AI-assisted differential diagnosis and recommendations">
-                      AI Assist
-                    </button>
-                    <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--violet)', borderColor: 'rgba(118,87,232,0.3)' }} onClick={() => setShowCodePanel(s => !s)} disabled={!activeVitals} title="Get AI-suggested ICD-10 codes + discharge summary">
-                      AI Codes
-                    </button>
-                    <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--teal)', borderColor: 'var(--teal-border)' }} onClick={async () => {
-                      if (!activePatient) return
-                      const roomId = `vc-${activePatient.id}-${Date.now()}`
-                      const { data, error } = await supabase.from('virtual_consultations').insert({
-                        hospital_id: hospital.id,
-                        patient_id: activePatient.id,
-                        patient_name: activePatient.full_name,
-                        doctor_id: profile.id,
-                        doctor_name: profile.full_name,
-                        status: 'scheduled',
-                        room_id: roomId,
-                        scheduled_start: new Date().toISOString(),
-                      }).select().single()
-                      if (!error && data) {
-                        setVirtualConsultData({ consultationId: data.id, roomId })
-                        setShowVirtualConsult(true)
-                      } else {
-                        setToast('Could not start virtual consultation')
-                      }
-                    }} disabled={!activePatient} title="Start a video consultation with this patient">
-                      Virtual Consult
-                    </button>
                   </div>
                   {showPreview && <div style={{ marginTop: 16, padding: 16, borderRadius: 10, background: 'var(--bg-elevated)' }}><ol style={{ paddingLeft: 20 }}>{medications.map(m => <li key={m.localId} style={{ fontSize: 13.5, marginBottom: 8 }}><strong>{m.drugName}</strong> - {m.dose} {m.route} {m.frequency}</li>)}</ol></div>}
                 </div>
