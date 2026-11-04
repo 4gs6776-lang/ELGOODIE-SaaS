@@ -40,69 +40,220 @@
 export const RULES = [
   // ────────────────────────────────────────────────────────────────
   // DRAFT RULES — DISABLED, PENDING CLINICAL APPROVAL
-  // Uncomment and set `enabled: true` ONLY after a qualified clinical
-  // lead has reviewed and approved the threshold for your jurisdiction.
+  // These are implemented but `enabled: false`. A clinical lead must
+  // review each threshold + set `enabled: true` before they fire.
   // ────────────────────────────────────────────────────────────────
 
-  // {
-  //   id: 'draft-critical-hyperkalemia',
-  //   enabled: false,
-  //   status: 'draft',
-  //   description: 'Critical hyperkalemia — serum potassium > 6.5 mmol/L',
-  //   reviewer: 'pending clinical lead approval',
-  //   evaluate: (ctx) => {
-  //     const kLab = ctx.lab_results?.find(l =>
-  //       /potassium|k\+|k\b/i.test(l.test_name || '') &&
-  //       l.status === 'completed' &&
-  //       l.result != null
-  //     )
-  //     if (!kLab) return null
-  //     const value = parseFloat(kLab.result)
-  //     if (isNaN(value) || value <= 6.5) return null
-  //     return {
-  //       finding: `Critical hyperkalemia: K+ = ${value} ${kLab.result_unit || 'mmol/L'}`,
-  //       severity: 'critical',
-  //       source_data: { test_name: kLab.test_name, value, unit: kLab.result_unit, resulted_at: kLab.resulted_at },
-  //       recommendation: 'Escalate immediately per hospital protocol. Consider cardiac monitoring.',
-  //     }
-  //   },
-  // },
+  {
+    id: 'draft-critical-hypertension',
+    enabled: false,
+    status: 'draft',
+    description: 'Critical hypertension — systolic BP ≥ 180 or diastolic BP ≥ 120',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const sys = parseInt(v.blood_pressure?.split('/')[0])
+      const dia = parseInt(v.blood_pressure?.split('/')[1])
+      if (isNaN(sys) || isNaN(dia)) return null
+      if (sys < 180 && dia < 120) return null
+      return {
+        finding: `Critical hypertension: BP ${sys}/${dia} mmHg`,
+        severity: 'critical',
+        source_data: { systolic: sys, diastolic: dia, recorded_at: v.recorded_at },
+        recommendation: 'Initiate hypertensive emergency protocol. Consider IV antihypertensive. Monitor for end-organ damage.',
+      }
+    },
+  },
 
-  // {
-  //   id: 'draft-suspected-sepsis-sirs',
-  //   enabled: false,
-  //   status: 'draft',
-  //   description: 'SIRS criteria — suspected sepsis screening (2+ of 4 criteria)',
-  //   reviewer: 'pending clinical lead approval',
-  //   evaluate: (ctx) => { /* ... */ },
-  // },
+  {
+    id: 'draft-hypotension-shock',
+    enabled: false,
+    status: 'draft',
+    description: 'Hypotension — systolic BP < 90 mmHg (possible shock)',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const sys = parseInt(v.blood_pressure?.split('/')[0])
+      if (isNaN(sys) || sys >= 90) return null
+      return {
+        finding: `Hypotension: systolic BP ${sys} mmHg`,
+        severity: 'critical',
+        source_data: { systolic: sys, recorded_at: v.recorded_at },
+        recommendation: 'Assess for shock. Consider IV fluids, position change, and urgent physician review.',
+      }
+    },
+  },
 
-  // {
-  //   id: 'draft-shock-index',
-  //   enabled: false,
-  //   status: 'draft',
-  //   description: 'Shock index (HR/SBP) > 1.0 — possible hypovolemic or septic shock',
-  //   reviewer: 'pending clinical lead approval',
-  //   evaluate: (ctx) => { /* ... */ },
-  // },
+  {
+    id: 'draft-shock-index',
+    enabled: false,
+    status: 'draft',
+    description: 'Shock index (HR/SBP) > 1.0 — possible hypovolemic or septic shock',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const sys = parseInt(v.blood_pressure?.split('/')[0])
+      const hr = parseInt(v.pulse_rate)
+      if (isNaN(sys) || isNaN(hr) || sys === 0) return null
+      const shockIndex = hr / sys
+      if (shockIndex <= 1.0) return null
+      return {
+        finding: `Elevated shock index: ${shockIndex.toFixed(2)} (HR ${hr} / SBP ${sys})`,
+        severity: 'critical',
+        source_data: { heart_rate: hr, systolic: sys, shock_index: shockIndex },
+        recommendation: 'Shock index > 1.0 suggests significant blood loss or sepsis. Urgent assessment required.',
+      }
+    },
+  },
 
-  // {
-  //   id: 'draft-anaphylaxis-pattern',
-  //   enabled: false,
-  //   status: 'draft',
-  //   description: 'Suspected anaphylaxis — acute rash + respiratory compromise + hypotension',
-  //   reviewer: 'pending clinical lead approval',
-  //   evaluate: (ctx) => { /* ... */ },
-  // },
+  {
+    id: 'draft-severe-hypoxia',
+    enabled: false,
+    status: 'draft',
+    description: 'Severe hypoxia — SpO2 < 90%',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const spo2 = parseFloat(v.spo2)
+      if (isNaN(spo2) || spo2 >= 90) return null
+      return {
+        finding: `Severe hypoxia: SpO2 ${spo2}%`,
+        severity: 'critical',
+        source_data: { spo2, recorded_at: v.recorded_at },
+        recommendation: 'Immediate oxygen supplementation. Consider non-rebreather mask. Assess for respiratory distress.',
+      }
+    },
+  },
 
-  // {
-  //   id: 'draft-stroke-fast-positive',
-  //   enabled: false,
-  //   status: 'draft',
-  //   description: 'Suspected stroke — FAST-positive presentation',
-  //   reviewer: 'pending clinical lead approval',
-  //   evaluate: (ctx) => { /* ... */ },
-  // },
+  {
+    id: 'draft-severe-tachycardia',
+    enabled: false,
+    status: 'draft',
+    description: 'Severe tachycardia — heart rate > 130 bpm',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const hr = parseInt(v.pulse_rate)
+      if (isNaN(hr) || hr <= 130) return null
+      return {
+        finding: `Severe tachycardia: HR ${hr} bpm`,
+        severity: 'urgent',
+        source_data: { heart_rate: hr, recorded_at: v.recorded_at },
+        recommendation: 'Assess for arrhythmia, dehydration, sepsis, or anxiety. Consider ECG.',
+      }
+    },
+  },
+
+  {
+    id: 'draft-severe-bradycardia',
+    enabled: false,
+    status: 'draft',
+    description: 'Severe bradycardia — heart rate < 40 bpm',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const hr = parseInt(v.pulse_rate)
+      if (isNaN(hr) || hr >= 40) return null
+      return {
+        finding: `Severe bradycardia: HR ${hr} bpm`,
+        severity: 'critical',
+        source_data: { heart_rate: hr, recorded_at: v.recorded_at },
+        recommendation: 'Assess for heart block, drug effects, or underlying cardiac condition. Consider atropine per protocol.',
+      }
+    },
+  },
+
+  {
+    id: 'draft-high-fever',
+    enabled: false,
+    status: 'draft',
+    description: 'High fever — temperature ≥ 39.5°C (possible sepsis)',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const temp = parseFloat(v.temperature)
+      if (isNaN(temp) || temp < 39.5) return null
+      return {
+        finding: `High fever: ${temp}°C`,
+        severity: 'urgent',
+        source_data: { temperature: temp, recorded_at: v.recorded_at },
+        recommendation: 'Consider sepsis screening (qSOFA). Antipyretics, cooling measures, and blood cultures per protocol.',
+      }
+    },
+  },
+
+  {
+    id: 'draft-suspected-sepsis-sirs',
+    enabled: false,
+    status: 'draft',
+    description: 'SIRS criteria — suspected sepsis (2+ of: temp >38 or <36, HR >90, RR >20, WBC abnormal)',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const v = ctx.vitals || {}
+      const temp = parseFloat(v.temperature)
+      const hr = parseInt(v.pulse_rate)
+      const rr = parseInt(v.respiratory_rate)
+      let criteria = 0
+      const findings = []
+
+      if (!isNaN(temp) && (temp > 38 || temp < 36)) { criteria++; findings.push(`temp ${temp}°C`) }
+      if (!isNaN(hr) && hr > 90) { criteria++; findings.push(`HR ${hr}`) }
+      if (!isNaN(rr) && rr > 20) { criteria++; findings.push(`RR ${rr}`) }
+      // WBC would come from lab results — check for it
+      const wbcLab = ctx.lab_results?.find(l => /wbc|white.*blood.*count|leucocyt/i.test(l.test_name || '') && l.status === 'completed' && l.result != null)
+      if (wbcLab) {
+        const wbc = parseFloat(wbcLab.result)
+        if (!isNaN(wbc) && (wbc > 12 || wbc < 4)) { criteria++; findings.push(`WBC ${wbc}`) }
+      }
+
+      if (criteria < 2) return null
+      return {
+        finding: `SIRS criteria positive (${criteria}/4): ${findings.join(', ')}`,
+        severity: 'critical',
+        source_data: { criteria_count: criteria, findings },
+        recommendation: 'Suspected sepsis — initiate sepsis bundle: blood cultures, broad-spectrum antibiotics, lactate, IV fluids. Time-critical.',
+      }
+    },
+  },
+
+  {
+    id: 'draft-pediatric-flag',
+    enabled: false,
+    status: 'draft',
+    description: 'Pediatric patient — age < 13 years (AI scope limitation)',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const age = ctx.patient?.age != null ? parseInt(ctx.patient.age) : null
+      if (age === null || age >= 13) return null
+      return {
+        finding: `Pediatric patient: ${age} year(s) old`,
+        severity: 'urgent',
+        source_data: { age },
+        recommendation: 'Pediatric dosing required. AI assessment may not be calibrated for pediatric patients — consult pediatrician.',
+      }
+    },
+  },
+
+  {
+    id: 'draft-pregnancy-flag',
+    enabled: false,
+    status: 'draft',
+    description: 'Pregnancy flagged — medication safety review required',
+    reviewer: 'pending clinical lead approval',
+    evaluate: (ctx) => {
+      const pmh = (ctx.past_medical_history || '').toLowerCase()
+      const fsh = (ctx.family_social_history || '').toLowerCase()
+      const hpc = (ctx.history_presenting_complaint || '').toLowerCase()
+      const isPregnant = /pregnan|gravid|antenatal|anc|expected.*date.*delivery|edd|lmp/i.test(pmh + fsh + hpc)
+      if (!isPregnant) return null
+      return {
+        finding: 'Patient flagged as pregnant',
+        severity: 'urgent',
+        source_data: { source: 'history_text_match' },
+        recommendation: 'Pregnancy status detected from history. All medications must be checked for pregnancy category. AI may not adjust dosing for pregnancy.',
+      }
+    },
+  },
 ]
 
 // ---------------------------------------------------------------------
@@ -113,7 +264,7 @@ export const RULES = [
 // Bump this whenever a rule is added, removed, or its threshold changed.
 // ---------------------------------------------------------------------
 
-export const RULES_VERSION = 'empty-v1'
+export const RULES_VERSION = 'draft-v2-10-rules'
 
 // ---------------------------------------------------------------------
 // evaluateCriticalRules
