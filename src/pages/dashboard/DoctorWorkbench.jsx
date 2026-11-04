@@ -753,23 +753,31 @@ export default function DoctorWorkbench() {
                   AI Codes
                 </button>
                 <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--teal)', borderColor: 'var(--teal-border)' }} onClick={async () => {
-                  if (!activePatient) return
-                  const roomId = `vc-${activePatient.id}-${Date.now()}`
-                  const { data, error } = await supabase.from('virtual_consultations').insert({
-                    hospital_id: hospital.id,
-                    patient_id: activePatient.id,
-                    patient_name: activePatient.full_name,
-                    doctor_id: profile.id,
-                    doctor_name: profile.full_name,
-                    status: 'scheduled',
-                    room_id: roomId,
-                    scheduled_start: new Date().toISOString(),
-                  }).select().single()
-                  if (!error && data) {
-                    setVirtualConsultData({ consultationId: data.id, roomId })
-                    setShowVirtualConsult(true)
-                  } else {
-                    setToast('Could not start virtual consultation')
+                  if (!activePatient) {
+                    setToast('Select a patient from the queue first')
+                    setTimeout(() => setToast(null), 3000)
+                    return
+                  }
+                  try {
+                    const roomId = `vc-${activePatient.id}-${Date.now()}`
+                    const { data, error } = await supabase.from('virtual_consultations').insert({
+                      hospital_id: hospital.id,
+                      patient_id: activePatient.id,
+                      patient_name: activePatient.full_name,
+                      doctor_id: profile.id,
+                      doctor_name: profile.full_name,
+                      status: 'scheduled',
+                      room_id: roomId,
+                      scheduled_start: new Date().toISOString(),
+                    }).select().single()
+                    if (error) throw error
+                    if (data) {
+                      setVirtualConsultData({ consultationId: data.id, roomId })
+                      setShowVirtualConsult(true)
+                    }
+                  } catch (err) {
+                    setToast('Could not start virtual consultation: ' + (err.message || 'Unknown error'))
+                    setTimeout(() => setToast(null), 5000)
                   }
                 }} disabled={!activePatient} title="Start a video consultation with this patient">
                   Virtual Consult
@@ -1089,7 +1097,7 @@ export default function DoctorWorkbench() {
       )}
 
       {/* Virtual Consultation — full-screen video call overlay */}
-      {showVirtualConsult && virtualConsultData && activePatient && (
+      {showVirtualConsult && virtualConsultData && (
         <VirtualConsultation
           patient={activePatient}
           hospital={hospital}

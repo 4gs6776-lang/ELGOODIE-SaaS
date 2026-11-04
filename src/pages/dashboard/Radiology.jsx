@@ -5,6 +5,7 @@ import { useRealtimeAlert } from '../../lib/useRealtimeAlert'
 import { usePagination } from '../../lib/usePagination'
 import Pagination from '../../components/common/Pagination'
 import SearchInput from '../../components/common/SearchInput'
+import PatientAutocomplete from '../../components/common/PatientAutocomplete'
 import TrashIcon from '../../components/icons/TrashIcon'
 import ModuleHistoryButton from '../../components/ModuleHistoryButton'
 import RadiologyReportForm from '../../components/RadiologyReportForm'
@@ -16,12 +17,13 @@ const MODALITIES = ['X-Ray', 'CT Scan', 'MRI', 'Ultrasound', 'Mammography', 'Flu
 export default function Radiology(){
   const { profile, hospital } = useAuth()
   const { records: scans, loading, isOnline, pendingCount, addRecord, deleteRecord, updateRecord } = useOfflineTable('radiology_scans', hospital?.id)
+  const { records: patients, loading: loadingPatients } = useOfflineTable('patients', hospital?.id)
   const [showModal, setShowModal] = useState(false)
   const [showReportForm, setShowReportForm] = useState(null) // holds the scan object when the report form is open
   const [toast, setToast] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
 
-  const [patientName, setPatientName] = useState('')
+  const [selectedPatient, setSelectedPatient] = useState(null) // the patient object from PatientAutocomplete
   const [modality, setModality] = useState(MODALITIES[0])
   const [bodyPart, setBodyPart] = useState('')
   const [saving, setSaving] = useState(false)
@@ -52,8 +54,12 @@ export default function Radiology(){
   async function handleAdd(e){
     e.preventDefault()
     setFormError('')
-    if (!patientName || !bodyPart) {
-      setFormError('Patient name and body part / area are required.')
+    if (!selectedPatient) {
+      setFormError('Please select a patient from the list.')
+      return
+    }
+    if (!bodyPart) {
+      setFormError('Body part / area is required.')
       return
     }
     if (!hospital || !profile) {
@@ -63,7 +69,8 @@ export default function Radiology(){
     setSaving(true)
     try {
       const saved = await addRecord({
-        patient_name: patientName,
+        patient_id: selectedPatient.id,
+        patient_name: selectedPatient.full_name,
         modality,
         body_part: bodyPart,
         status: 'requested',
@@ -75,12 +82,12 @@ export default function Radiology(){
         hospitalId: hospital?.id, actor: profile,
         action: 'radiology_scan.requested',
         entityType: 'radiology_scan', entityId: saved?.id || null,
-        patientId: saved?.patient_id || null,
-        summary: `Requested ${modality} scan — ${bodyPart} for ${patientName}`,
-        metadata: { patient_name: patientName, modality, body_part: bodyPart, status: 'requested' },
+        patientId: selectedPatient.id,
+        summary: `Requested ${modality} scan — ${bodyPart} for ${selectedPatient.full_name}`,
+        metadata: { patient_id: selectedPatient.id, patient_name: selectedPatient.full_name, modality, body_part: bodyPart, status: 'requested' },
       })
       setShowModal(false)
-      setPatientName(''); setModality(MODALITIES[0]); setBodyPart('')
+      setSelectedPatient(null); setModality(MODALITIES[0]); setBodyPart('')
       showToast(isOnline ? 'Scan requested' : 'Scan requested — will sync when back online')
     } catch (err) {
       setFormError(err.message || 'Could not save scan request')
@@ -311,8 +318,21 @@ export default function Radiology(){
             <form onSubmit={handleAdd}>
               <div className="dash-modal-body">
                 <div className="field">
-                  <label>Patient Name</label>
-                  <input value={patientName} onChange={e => setPatientName(e.target.value)} placeholder="e.g. Chinedu Okafor" />
+                  <label>Patient *</label>
+                  <PatientAutocomplete
+                    patients={patients}
+                    value={null}
+                    onChange={(option) => setSelectedPatient(option?.patient || null)}
+                    loading={loadingPatients}
+                    placeholder="Search patient by name, ID or phone…"
+                  />
+                  {selectedPatient && (
+                    <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 4, fontWeight: 600 }}>
+                      ✓ Selected: {selectedPatient.full_name}
+                      {selectedPatient.hospital_number && ` · MRN: ${selectedPatient.hospital_number}`}
+                      {selectedPatient.phone && ` · ${selectedPatient.phone}`}
+                    </div>
+                  )}
                 </div>
                 <div className="field">
                   <label>Modality</label>
