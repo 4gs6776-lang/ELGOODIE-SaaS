@@ -7,6 +7,7 @@ import { formatDateTime, formatDateOnly, todayKeyInZone, getTimezone } from '../
 import { usePagination } from '../../lib/usePagination'
 import Pagination from '../../components/common/Pagination'
 import { writeAudit } from '../../lib/audit'
+import { generateHandoverSummary, calculateMEWS, mewsRiskLevel } from '../../lib/handoverSummary'
 
 // ============================================================
 // Shift Handover module
@@ -638,6 +639,106 @@ export default function ShiftHandover() {
             </div>
           </div>
 
+          {/* ---- AUTO-GENERATED CLINICAL SUMMARY (SBAR auto-pull) ---- */}
+          {/* Shows critical patients, pending labs, abnormal results,
+              pending discharges, and unresolved tasks — pulled
+              automatically from the database. */}
+          {(() => {
+            const summary = generateHandoverSummary({
+              vitals, labOrders: labTests, labTests, patients,
+              vitalsAlerts: [], handoverTasks: hoTasks,
+            })
+            if (summary.stats.totalCritical === 0 && summary.stats.totalPendingLabs === 0 &&
+                summary.stats.totalAbnormal === 0 && summary.stats.totalPendingDischarges === 0 &&
+                summary.stats.totalUnresolvedTasks === 0) return null
+
+            return (
+              <div className="dash-panel" style={{ marginTop: 16, borderColor: 'var(--teal-border)' }}>
+                <div className="dash-panel-head">
+                  <div>
+                    <div className="dash-panel-title" style={{ color: 'var(--teal)' }}>📋 Auto-Generated Clinical Summary</div>
+                    <div className="dash-panel-sub">Pulled automatically from vitals alerts, lab orders, and patient queue</div>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
+                  <SummaryStat label="Critical" value={summary.stats.totalCritical} color="var(--danger)" />
+                  <SummaryStat label="Pending Labs" value={summary.stats.totalPendingLabs} color="var(--gold)" />
+                  <SummaryStat label="Abnormal Results" value={summary.stats.totalAbnormal} color="var(--violet)" />
+                  <SummaryStat label="Pending Discharges" value={summary.stats.totalPendingDischarges} color="var(--teal)" />
+                  <SummaryStat label="Unresolved Tasks" value={summary.stats.totalUnresolvedTasks} color="var(--muted)" />
+                </div>
+
+                {/* Critical patients list */}
+                {summary.criticalPatients.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>⚠️ Critical Patients (MEWS-based)</div>
+                    {summary.criticalPatients.slice(0, 10).map(p => (
+                      <div key={p.patient_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', borderRadius: 8, background: 'rgba(240,79,95,0.06)', border: '1px solid rgba(240,79,95,0.15)', marginBottom: 4, fontSize: 12 }}>
+                        <div>
+                          <strong style={{ color: 'var(--ivory)' }}>{p.patient_name}</strong>
+                          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 11 }}>MEWS: {p.mewsScore} · {p.riskLabel}</span>
+                        </div>
+                        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+                          BP {p.latestBP || '—'} · HR {p.latestHR || '—'} · SpO₂ {p.latestSpO2 || '—'}
+                        </span>
+                      </div>
+                    ))}
+                    {summary.criticalPatients.length > 10 && <div style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 10 }}>+ {summary.criticalPatients.length - 10} more</div>}
+                  </div>
+                )}
+
+                {/* Pending labs */}
+                {summary.pendingLabs.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>🔬 Pending Investigations ({summary.pendingLabs.length})</div>
+                    {summary.pendingLabs.slice(0, 8).map((lab, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 10px', fontSize: 11.5, color: 'var(--muted)' }}>
+                        <span><strong style={{ color: 'var(--ivory)' }}>{lab.patient_name}</strong> — {lab.test}</span>
+                        <span>{lab.status}</span>
+                      </div>
+                    ))}
+                    {summary.pendingLabs.length > 8 && <div style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 10 }}>+ {summary.pendingLabs.length - 8} more</div>}
+                  </div>
+                )}
+
+                {/* Abnormal results */}
+                {summary.abnormalResults.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--violet)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>🧪 Abnormal Lab Results ({summary.abnormalResults.length})</div>
+                    {summary.abnormalResults.slice(0, 8).map((lab, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 10px', fontSize: 11.5 }}>
+                        <span><strong style={{ color: 'var(--ivory)' }}>{lab.patient_name}</strong> — {lab.test}</span>
+                        <span style={{ color: 'var(--danger)' }}>{lab.result}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Pending discharges */}
+                {summary.pendingDischarges.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>🏥 Pending Discharges ({summary.pendingDischarges.length})</div>
+                    {summary.pendingDischarges.slice(0, 8).map((p, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 10px', fontSize: 11.5, color: 'var(--muted)' }}>
+                        <span><strong style={{ color: 'var(--ivory)' }}>{p.patient_name}</strong></span>
+                        <span>{p.note || p.queue_status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* ---- SBAR fields (shift-level, not per-patient) ---- */}
+          <div className="dash-panel" style={{ marginTop: 16 }}>
+            <div className="dash-panel-head"><div><div className="dash-panel-title">SBAR Handover Summary</div><div className="dash-panel-sub">Situation · Background · Assessment · Recommendation</div></div></div>
+            <div className="field"><label>S — Situation</label><textarea rows={2} value={generalNotes} onChange={e => setGeneralNotes(e.target.value)} placeholder="e.g. Busy night shift, 3 admissions, 1 critical patient in Bed 3 with suspected sepsis" style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elevated)', color: 'var(--ivory)', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} /></div>
+            <div className="field"><label>B — Background</label><textarea rows={2} value={medicationNotes} onChange={e => setMedicationNotes(e.target.value)} placeholder="e.g. 2 overnight admissions via ER — one appendicitis, one pneumonia" style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elevated)', color: 'var(--ivory)', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} /></div>
+            <div className="field"><label>A — Assessment</label><textarea rows={2} value={investigationNotes} onChange={e => setInvestigationNotes(e.target.value)} placeholder="e.g. Patient in Bed 3 deteriorating — needs ICU transfer. Bed 5 stable for discharge" style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elevated)', color: 'var(--ivory)', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} /></div>
+            <div className="field"><label>R — Recommendation</label><textarea rows={2} value={(incidents[0] && incidents[0].description) || ''} onChange={e => setIncidents(e.target.value ? [{ description: e.target.value }] : [])} placeholder="e.g. Monitor Bed 3 closely, chase lab results for Bed 1, discharge Bed 5 by 10am" style={{ width: '100%', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elevated)', color: 'var(--ivory)', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }} /></div>
+          </div>
+
           <div className="dash-field-grid" style={{ marginBottom: 20 }}>
             <div className="field"><label>Ward</label>
               <select value={ward} onChange={e => { setWard(e.target.value); setDraftId(null); setPatientData({}) }}>
@@ -961,3 +1062,15 @@ export default function ShiftHandover() {
 // (The old local Icon24 copy was removed — every icon now comes from the
 // unified AppIcon system, which gained "clipboard" and "mic" entries for
 // this module. One icon vocabulary across the whole app, req. #12.)
+
+// =====================================================================
+// SummaryStat — small KPI card for the auto-generated summary
+// =====================================================================
+function SummaryStat({ label, value, color }) {
+  return (
+    <div style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--line)', textAlign: 'center' }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+      <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+    </div>
+  )
+}
