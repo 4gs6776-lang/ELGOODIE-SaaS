@@ -18,6 +18,8 @@ import { useBillingCatalog, formatMoney } from '../../lib/billingService'
 import AiDiagnostics from './AiDiagnostics'
 import CodeSuggestionPanel from '../../components/ai/CodeSuggestionPanel'
 import VirtualConsultation from '../../components/VirtualConsultation'
+import MedicationSafetyAlert from '../../components/MedicationSafetyAlert'
+import { checkMedicationSafety } from '../../lib/drugInteractionEngine'
 
 // NEW: Global Medication Reference List (allows searching even if hospital has 0 stock)
 const GLOBAL_MEDICATIONS = [
@@ -66,6 +68,7 @@ export default function DoctorWorkbench() {
   const [showCodePanel, setShowCodePanel] = useState(false)
   const [showVirtualConsult, setShowVirtualConsult] = useState(false)
   const [virtualConsultData, setVirtualConsultData] = useState(null)
+  const [medicationAlerts, setMedicationAlerts] = useState(null)
   const loading = loadingPatients || loadingVitals || loadingLabOrders || loadingPrescriptions
   const [activeVitalsId, setActiveVitalsId] = useState(null)
   const [toast, setToast] = useState(null)
@@ -130,6 +133,13 @@ export default function DoctorWorkbench() {
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [showPreview, setShowPreview] = useState(false)
   const [savingPrescriptions, setSavingPrescriptions] = useState(false)
+
+  // ---- Drug Interaction Engine reference data ----
+  // These are shared reference tables (not hospital-scoped) — loaded
+  // once per session and cached in IndexedDB via useOfflineTable.
+  // Pass null as hospitalId since they're reference data.
+  const { records: drugInteractionData } = useOfflineTable('drug_interactions', null)
+  const { records: allergyClassData } = useOfflineTable('drug_allergy_classes', null)
 
   // Lab Result Viewer (shared with the Laboratory module)
   const [viewRow, setViewRow] = useState(null)
@@ -516,13 +526,94 @@ export default function DoctorWorkbench() {
   function handleAddOrUpdateMedToDraft() {
     if (!medBuilder.drugName.trim() || !medBuilder.dose.trim()) return showToast('Drug name and dose are required')
     if (medBuilder.availability_status === 'UNAVAILABLE' && !medBuilder.accepted_unavailable) return showToast('Please choose whether to continue prescribing or remove the unavailable medication.')
-    
+
+    // ---- DRUG INTERACTION ENGINE ----
+    // Run safety checks before adding the medication to the prescription.
+    // If alerts are found, show them in the MedicationSafetyAlert component.
+    // The doctor can override (with a reason for hard alerts) or cancel.
+    if (activePatient && !medicationAlerts) {
+      const patientCtx = {
+        patient: activePatient,
+        allergyHistory,
+        pastMedicalHistory,
+        familySocialHistory,
+        drugHistory,
+      }
+      const alerts = checkMedicationSafety({
+        drugName: medBuilder.drugName,
+        patientCtx,
+        activeMeds: medications,
+        labOrders: activePatientLabOrders,
+        drugInteractions: drugInteractionData || [],
+        allergyClasses: allergyClassData || [],
+      })
+      if (alerts.length > 0) {
+        setMedicationAlerts(alerts)
+        return // Don't add the medication yet — wait for the doctor's decision
+      }
+    }
+
+    // If we get here (no alerts or override was processed), add the medication
     if (editingMedLocalId) {
       setMedications(meds => meds.map(m => m.localId === editingMedLocalId ? { ...m, ...medBuilder, localId: m.localId, dbId: m.dbId } : m))
     } else {
       setMedications(meds => [...meds, { ...medBuilder, localId: crypto.randomUUID(), dbId: null }])
     }
     resetMedBuilder()
+  }
+
+  // Handle the doctor's override decision from MedicationSafetyAlert
+  async function handleMedicationOverride(alerts, reason) {
+    // Log all alerts to the medication_safety_alerts table
+    for (const alert of alerts) {
+      try {
+        await supabase.from('medication_safety_alerts').insert({
+          hospital_id: hospital.id,
+          patient_id: activePatient.id,
+          consultation_id: activeVitals?.id || null,
+          alert_type: alert.type,
+          severity: alert.severity,
+          drug_name: alert.drugName,
+          interacting_with: alert.interactingWith,
+          mechanism: alert.mechanism,
+          recommendation: alert.recommendation,
+          was_overridden: true,
+          override_reason: reason,
+          overridden_by: profile.id,
+          overridden_at: new Date().toISOString(),
+        })
+      } catch (e) {
+        console.warn('Could not log medication safety alert:', e.message)
+      }
+    }
+
+    writeAudit({
+      hospitalId: hospital.id, actor: profile,
+      action: 'medication.override',
+      entityType: 'patient_vitals', entityId: activeVitals?.id || null,
+      patientId: activePatient?.id,
+      summary: `Overrode ${alerts.length} medication safety alert(s) for ${medBuilder.drugName}: ${reason}`,
+      metadata: {
+        drug_name: medBuilder.drugName,
+        alert_count: alerts.length,
+        alert_types: alerts.map(a => a.type),
+        override_reason: reason,
+      },
+    })
+
+    // Clear the alerts + add the medication
+    setMedicationAlerts(null)
+    if (editingMedLocalId) {
+      setMedications(meds => meds.map(m => m.localId === editingMedLocalId ? { ...m, ...medBuilder, localId: m.localId, dbId: m.dbId } : m))
+    } else {
+      setMedications(meds => [...meds, { ...medBuilder, localId: crypto.randomUUID(), dbId: null }])
+    }
+    resetMedBuilder()
+  }
+
+  function handleMedicationAbort() {
+    setMedicationAlerts(null)
+    showToast('Medication not added — safety alert not overridden')
   }
 
   function getActiveAdmissionRequest(patientId) {
@@ -920,6 +1011,15 @@ export default function DoctorWorkbench() {
                 <div className="field"><label>Instructions</label><input value={medBuilder.instructions} onChange={e => setMedBuilder(b => ({ ...b, instructions: e.target.value }))} placeholder="e.g. Take 1 tablet after meals" /></div>
                 <button type="button" className="btn btn-primary" onClick={handleAddOrUpdateMedToDraft}>{editingMedLocalId ? 'Update Medication' : '+ Add Medication'}</button>
                 {editingMedLocalId && <button type="button" className="btn btn-ghost" style={{ marginTop: 8 }} onClick={resetMedBuilder}>Cancel Edit</button>}
+
+                {/* Drug Interaction Engine — shows alerts when the engine finds issues */}
+                {medicationAlerts && medicationAlerts.length > 0 && (
+                  <MedicationSafetyAlert
+                    alerts={medicationAlerts}
+                    onOverride={handleMedicationOverride}
+                    onAbort={handleMedicationAbort}
+                  />
+                )}
               </div>
 
               {medications.length > 0 && (
