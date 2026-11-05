@@ -1,88 +1,50 @@
-import { useState, useEffect } from 'react'
-import { syncStatus } from '../lib/conflictResolver'
-import { Wifi, WifiOff, RefreshCw, CheckCircle, Cloud, CloudOff, AlertTriangle } from 'lucide-react'
+import React, { useState, useEffect } from 'react';
+import { useSyncHealth } from '../lib/useOfflineTable.syncPatch';
+import './OfflineFirst.css';
 
-// =====================================================================
-// SyncStatusIndicator — shows sync status in the dashboard header
-// =====================================================================
-// Shows:
-//   - Online/Offline status (wifi icon)
-//   - Pending records count (if > 0)
-//   - Last sync time (if synced)
-//   - Conflict warning (if conflicts exist)
-//
-// Mount this once in the dashboard layout (next to the LiveClock).
-// =====================================================================
+export default function SyncStatusIndicator({ hospitalId, onOpenQueue, onOpenConflicts }) {
+  const { pendingCount, conflictCount, lastSyncedAt, isOnline } = useSyncHealth(hospitalId);
+  const [now, setNow] = useState(Date.now());
 
-export default function SyncStatusIndicator() {
-  const [status, setStatus] = useState({
-    pendingCount: 0,
-    isOnline: navigator.onLine,
-    lastSyncAt: null,
-    conflicts: [],
-  })
-
+  // Re-render every 30s so the "synced Xs ago" label stays fresh
   useEffect(() => {
-    const unsubscribe = syncStatus.subscribe(setStatus)
-    return unsubscribe
-  }, [])
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
-  const isSynced = status.isOnline && status.pendingCount === 0 && status.conflicts.length === 0
-  const hasPending = status.pendingCount > 0
-  const hasConflicts = status.conflicts.length > 0
+  const status = !isOnline
+    ? { kind: 'offline', label: 'Offline', pulse: true }
+    : conflictCount > 0
+    ? { kind: 'conflict', label: `${conflictCount} conflict${conflictCount > 1 ? 's' : ''}`, pulse: true }
+    : pendingCount > 0
+    ? { kind: 'syncing', label: `Syncing ${pendingCount}…`, pulse: true }
+    : { kind: 'synced', label: 'Synced', pulse: false };
 
-  // Determine display state
-  let icon, color, label, bg
-  if (!status.isOnline) {
-    icon = <CloudOff size={14} />
-    color = 'var(--gold)'
-    bg = 'rgba(232,184,46,0.10)'
-    label = hasPending ? `Offline · ${status.pendingCount} queued` : 'Offline'
-  } else if (hasConflicts) {
-    icon = <AlertTriangle size={14} />
-    color = 'var(--danger)'
-    bg = 'rgba(240,79,95,0.10)'
-    label = `${status.conflicts.length} conflict${status.conflicts.length !== 1 ? 's' : ''}`
-  } else if (hasPending) {
-    icon = <RefreshCw size={14} className="animate-spin" />
-    color = 'var(--teal)'
-    bg = 'var(--teal-soft)'
-    label = `Syncing ${status.pendingCount}…`
-  } else if (isSynced) {
-    icon = <CheckCircle size={14} />
-    color = 'var(--success)'
-    bg = 'var(--success-soft)'
-    label = status.lastSyncAt ? `Synced ${formatRelative(status.lastSyncAt)}` : 'Synced'
-  } else {
-    icon = <Cloud size={14} />
-    color = 'var(--muted)'
-    bg = 'transparent'
-    label = '—'
-  }
+  const lastSyncLabel = formatLastSync(lastSyncedAt, now);
 
   return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '5px 10px', borderRadius: 999,
-      background: bg, color,
-      fontSize: 11, fontWeight: 600,
-      transition: 'all .3s ease',
-      border: `1px solid ${color}33`,
-    }} title={label}>
-      {icon}
-      <span>{label}</span>
+    <div className="sync-status-wrap" onClick={() => {
+      if (conflictCount > 0 && onOpenConflicts) onOpenConflicts();
+      else if (pendingCount > 0 && onOpenQueue) onOpenQueue();
+    }}>
+      <div className={`sync-pill sync-pill-${status.kind}`}>
+        <span className={`sync-dot ${status.pulse ? 'sync-dot-pulse' : ''}`} />
+        <span className="sync-label">{status.label}</span>
+      </div>
+      {lastSyncLabel && (
+        <span className="sync-meta">{lastSyncLabel}</span>
+      )}
     </div>
-  )
+  );
 }
 
-function formatRelative(isoString) {
-  if (!isoString) return ''
-  const diff = Date.now() - new Date(isoString).getTime()
-  const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return new Date(isoString).toLocaleDateString()
+function formatLastSync(iso, nowMs) {
+  if (!iso) return null;
+  const ts = new Date(iso).getTime();
+  if (isNaN(ts)) return null;
+  const sec = Math.floor((nowMs - ts) / 1000);
+  if (sec < 60) return `just now`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
 }
