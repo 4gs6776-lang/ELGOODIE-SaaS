@@ -1,12 +1,21 @@
-// src/lib/revenueCycle.js
-// Revenue Cycle helpers: aging buckets, write-off policy, HMO claim builder,
-// payment plan calculations, and reminder template composition.
+// src/lib/revenueCycle.js (v2 — fixes all FK/column-name issues)
+//
+// FIXES FROM v1:
+//   1. fetchOutstandingInvoices: removed nested `patient:patients(...)` select
+//      (no FK between invoices and patients exists). Now does 2 separate
+//      queries and joins them in JS.
+//   2. All references to invoice.total_amount → invoice.amount (project uses
+//      `amount` not `total_amount`).
+//   3. All references to invoice.invoice_number → keep as-is (verified correct).
+//   4. All references to patient.hmo_policy_no → patient.hmo_number
+//      (project uses `hmo_number` not `hmo_policy_no`).
+//   5. All references to patient.hmo_member_id → patient.hmo_id_code
+//      (project uses `hmo_id_code` not `hmo_member_id`).
+
 import { supabase } from './supabaseClient';
 
 // ============================================================
 // AGING BUCKETS
-// Standard medical-billing aging buckets.
-// Returns the bucket label for a given overdue date.
 // ============================================================
 export const AGING_BUCKETS = [
   { id: 'current',      label: 'Current',       min: -Infinity, max: 0,        color: '#10B981' },
@@ -31,7 +40,6 @@ export function calcDaysOverdue(dueDate) {
 
 // ============================================================
 // AGING DASHBOARD DATA
-// Groups outstanding invoices by bucket and computes totals.
 // ============================================================
 export function buildAgingReport(invoices) {
   if (!Array.isArray(invoices)) return { buckets: [], totalOutstanding: 0 };
@@ -46,11 +54,12 @@ export function buildAgingReport(invoices) {
   let totalOutstanding = 0;
 
   for (const inv of invoices) {
-    const outstanding = (inv.total_amount || inv.totalAmount || 0)
-      - (inv.amount_paid || inv.amountPaid || 0);
+    // FIX: project uses `amount` (or `grand_total`), NOT `total_amount`
+    const outstanding = (inv.grand_total || inv.amount || inv.total_amount || 0)
+      - (inv.amount_paid || 0);
     if (outstanding <= 0) continue;
 
-    const dueDate = inv.due_date || inv.dueDate;
+    const dueDate = inv.due_date;
     const days = calcDaysOverdue(dueDate);
     const bucket = getAgingBucket(days);
 
@@ -117,8 +126,6 @@ export function getPlanProgress(plan, installments = []) {
 
 // ============================================================
 // WRITE-OFF POLICY
-// Auto-decides whether admin approval is needed based on amount
-// and write-off type.
 // ============================================================
 export const WRITEOFF_TYPES = [
   { id: 'bad_debt',            label: 'Bad Debt',              threshold: 50000,  needsApproval: true  },
@@ -134,23 +141,24 @@ export function getWriteoffPolicy(amount, type) {
   return {
     ...def,
     amount,
-    requiresApproval,
+    requiresApproval: needsApproval,
     autoApprovable: !needsApproval,
   };
 }
 
 // ============================================================
 // HMO CLAIM BUILDER
-// Builds a draft claim from an invoice + encounter.
 // ============================================================
 export function buildClaimFromInvoice(invoice, patient, encounter, lineItems) {
   const claim = {
     patient_id: patient.id,
     invoice_id: invoice.id,
     encounter_id: encounter?.id || null,
-    hmo_provider: patient.hmo_provider || patient.insurance_provider || '',
-    hmo_policy_no: patient.hmo_policy_no || patient.policy_number || '',
-    hmo_member_id: patient.hmo_member_id || patient.member_number || '',
+    // FIX: patient.hmo_provider is correct; hmo_policy_no → hmo_number;
+    // hmo_member_id → hmo_id_code
+    hmo_provider: patient.hmo_provider || '',
+    hmo_policy_no: patient.hmo_number || '',
+    hmo_member_id: patient.hmo_id_code || '',
     claim_type: encounter?.admission_date ? 'inpatient' : 'outpatient',
     date_of_service: encounter?.encounter_date || invoice.created_at,
     admission_date: encounter?.admission_date || null,
@@ -167,7 +175,6 @@ export function buildClaimFromInvoice(invoice, patient, encounter, lineItems) {
 
 // ============================================================
 // REMINDER TEMPLATES
-// Placeholder substitution.
 // ============================================================
 export function fillReminderTemplate(template, vars) {
   if (!template) return '';
@@ -200,19 +207,45 @@ export function formatCurrency(amount, currency = 'NGN') {
 // SUPABASE CALLS
 // ============================================================
 
-// Fetch all outstanding invoices for the hospital
+// FIX: Removed nested `patient:patients(...)` select because there's no
+// FK between invoices and patients. We do 2 separate queries and join in JS.
 export async function fetchOutstandingInvoices(hospitalId) {
-  const { data, error } = await supabase
+  // 1. Fetch invoices
+  const { data: invoices, error: invErr } = await supabase
     .from('invoices')
     .select(`
-      id, invoice_number, total_amount, amount_paid,
-      due_date, created_at, status,
-      patient:patients(id, full_name, hospital_number, phone, hmo_provider)
+      id, invoice_number, amount, grand_total, amount_paid,
+      due_date, created_at, status, patient_id, patient_name
     `)
     .eq('hospital_id', hospitalId)
     .order('due_date', { ascending: true, nullsFirst: false });
-  if (error) throw error;
-  return data || [];
+  if (invErr) throw invErr;
+  if (!invoices || invoices.length === 0) return [];
+
+  // 2. Fetch all patients for this hospital (one query, then join in JS)
+  const patientIds = [...new Set(invoices.map(i => i.patient_id).filter(Boolean))];
+  let patientsMap = {};
+  if (patientIds.length > 0) {
+    const { data: patients, error: patErr } = await supabase
+      .from('patients')
+      .select('id, full_name, hospital_number, phone, hmo_provider, hmo_number, hmo_id_code')
+      .in('id', patientIds);
+    if (patErr) throw patErr;
+    patientsMap = (patients || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
+  }
+
+  // 3. Join
+  return invoices.map(inv => ({
+    ...inv,
+    // Normalise: expose `total_amount` for the buildAgingReport function
+    total_amount: inv.grand_total || inv.amount,
+    patient: patientsMap[inv.patient_id] || {
+      full_name: inv.patient_name || 'Unknown',
+      hospital_number: '—',
+      phone: '',
+      hmo_provider: '',
+    },
+  }));
 }
 
 // Create a payment plan via RPC
@@ -233,7 +266,7 @@ export async function createPaymentPlan(payload) {
   return data;
 }
 
-// Request a write-off via RPC (auto-approval handled server-side)
+// Request a write-off via RPC (v4 signature — all params have defaults)
 export async function requestWriteoff(payload) {
   const { data, error } = await supabase.rpc('request_writeoff', {
     p_hospital_id: payload.hospital_id,
