@@ -10,6 +10,14 @@ import {
 } from '../lib/revenueCycle';
 import './RevenueCycle.css';
 
+// FIX: This version no longer uses the v_pending_writeoffs view.
+// The view was flagged by Supabase's security advisor as CRITICAL
+// because PostgreSQL views are SECURITY DEFINER by default (run with
+// the owner's permissions, bypassing RLS). We now do a direct 2-step
+// fetch for BOTH the pending and processed tabs — query invoice_writeoffs
+// directly, then fetch patients + profiles in separate queries and join
+// in JavaScript. This is RLS-safe and avoids the security warning.
+
 export default function WriteOffManager({ prefill }) {
   const { hospitalId, userId, userRole } = useCurrentHospital();
   const [writeoffs, setWriteoffs] = useState([]);
@@ -49,59 +57,59 @@ export default function WriteOffManager({ prefill }) {
     }
   }, [prefill]);
 
-  // FIX: 2-step fetch — no nested select on `users` (which doesn't exist)
-  // The component was using `requester:users!requested_by(full_name)` which
-  // fails because the project uses `profiles`, not `users`. The v_pending_writeoffs
-  // view already joins profiles correctly, so we can use it for the pending tab.
-  // For the processed tab, we do a 2-step fetch.
+  // FIX: Unified 2-step fetch for both tabs — no view, no nested select,
+  // no SECURITY DEFINER warning. RLS policies on invoice_writeoffs,
+  // patients, and profiles apply normally.
   async function loadWriteoffs() {
     setLoading(true);
     try {
+      // Step 1: fetch writeoffs directly (RLS applies — user only sees their hospital's rows)
+      let query = supabase
+        .from('invoice_writeoffs')
+        .select('*')
+        .eq('hospital_id', hospitalId);
+
       if (tab === 'pending') {
-        // Use the v_pending_writeoffs view which already joins profiles
-        const { data, error } = await supabase
-          .from('v_pending_writeoffs')
-          .select('*')
-          .eq('hospital_id', hospitalId)
-          .order('requested_at', { ascending: false });
-        if (error) throw error;
-        setWriteoffs(data || []);
+        query = query.eq('status', 'pending_approval');
       } else {
-        // Processed tab — fetch writeoffs, then join patients + profiles in JS
-        const { data: woRows, error: woErr } = await supabase
-          .from('invoice_writeoffs')
-          .select('*')
-          .eq('hospital_id', hospitalId)
-          .in('status', ['approved', 'applied', 'rejected'])
-          .order('created_at', { ascending: false });
-        if (woErr) throw woErr;
-        if (!woRows || woRows.length === 0) {
-          setWriteoffs([]);
-        } else {
-          // Fetch patients and profiles (requesters) separately
-          const patientIds = [...new Set(woRows.map(w => w.patient_id).filter(Boolean))];
-          const requesterIds = [...new Set(woRows.map(w => w.requested_by).filter(Boolean))];
-
-          const [patResp, profResp] = await Promise.all([
-            patientIds.length > 0
-              ? supabase.from('patients').select('id, full_name, hospital_number').in('id', patientIds)
-              : Promise.resolve({ data: [] }),
-            requesterIds.length > 0
-              ? supabase.from('profiles').select('id, full_name').in('id', requesterIds)
-              : Promise.resolve({ data: [] }),
-          ]);
-
-          const patMap = (patResp.data || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
-          const profMap = (profResp.data || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
-
-          const joined = woRows.map(w => ({
-            ...w,
-            patient: patMap[w.patient_id] || null,
-            requester: profMap[w.requested_by] || null,
-          }));
-          setWriteoffs(joined);
-        }
+        query = query.in('status', ['approved', 'applied', 'rejected']);
       }
+
+      const { data: woRows, error: woErr } = await query.order('created_at', { ascending: false });
+      if (woErr) throw woErr;
+      if (!woRows || woRows.length === 0) {
+        setWriteoffs([]);
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: fetch patients + profiles (requesters) in parallel
+      const patientIds = [...new Set(woRows.map(w => w.patient_id).filter(Boolean))];
+      const requesterIds = [...new Set(woRows.map(w => w.requested_by).filter(Boolean))];
+
+      const [patResp, profResp] = await Promise.all([
+        patientIds.length > 0
+          ? supabase.from('patients').select('id, full_name, hospital_number').in('id', patientIds)
+          : Promise.resolve({ data: [] }),
+        requesterIds.length > 0
+          ? supabase.from('profiles').select('id, full_name').in('id', requesterIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const patMap = (patResp.data || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
+      const profMap = (profResp.data || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
+
+      // Step 3: join in JS
+      const joined = woRows.map(w => ({
+        ...w,
+        patient: patMap[w.patient_id] || null,
+        requester: profMap[w.requested_by] || null,
+        // Provide a requested_by_name field for backwards compat with
+        // the table cell that reads w.requested_by_name (from the old view)
+        requested_by_name: profMap[w.requested_by]?.full_name || null,
+      }));
+
+      setWriteoffs(joined);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -246,8 +254,8 @@ export default function WriteOffManager({ prefill }) {
           ) : writeoffs.map(w => (
             <tr key={w.id}>
               <td>
-                <div>{w.patient?.full_name || w.patient_name || 'Unknown'}</div>
-                <div className="rc-meta">{w.patient?.hospital_number || w.hospital_number || '—'}</div>
+                <div>{w.patient?.full_name || 'Unknown'}</div>
+                <div className="rc-meta">{w.patient?.hospital_number || '—'}</div>
               </td>
               <td>{WRITEOFF_TYPES.find(t => t.id === w.writeoff_type)?.label || w.writeoff_type}</td>
               <td className="rc-amount">{formatCurrency(w.writeoff_amount)}</td>
