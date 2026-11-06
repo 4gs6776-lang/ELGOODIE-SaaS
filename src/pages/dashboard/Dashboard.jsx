@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { HospitalProvider } from '../../context/HospitalContext'
 import { supabase } from '../../lib/supabaseClient'
 import AppIcon from '../../components/icons'
+import RevenueCycle from './RevenueCycle'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
 import SpringToggle from '../../components/SpringToggle'
@@ -129,6 +130,7 @@ const NAV_ITEMS = [
   { key: 'patients', label: 'Patients', section: 'Main', icon: 'users' },
   { key: 'reception', label: 'Reception', section: 'Main', icon: 'reception' },
   { key: 'billing', label: 'Billing & Invoices', section: 'Main', icon: 'billing' },
+  { key: 'revenue-cycle', label: 'Revenue Cycle', section: 'Main', icon: 'billing' },
   { key: 'laboratory', label: 'Laboratory', section: 'Main', icon: 'lab' },
   { key: 'pharmacy', label: 'Pharmacy', section: 'Main', icon: 'pharmacy' },
   { key: 'radiology', label: 'Radiology', section: 'Main', icon: 'radiology' },
@@ -1492,6 +1494,7 @@ export default function Dashboard(){
           {tab === 'hmo-patients' && <HmoPatients />}
           {tab === 'anc-patients' && <AncPatients />}
           {tab === 'billing' && <Billing initialSearch={deepLinkSearch}/>}
+          {tab === 'revenue-cycle' && <RevenueCycle />}
           {tab === 'laboratory' && <Laboratory />}
           {tab === 'pharmacy' && <Pharmacy />}
           {tab === 'radiology' && <Radiology />}
