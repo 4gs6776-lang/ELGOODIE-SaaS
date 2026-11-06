@@ -20,7 +20,6 @@ export default function PaymentPlans({ onSelectPatient }) {
   const [installments, setInstallments] = useState([]);
   const [error, setError] = useState(null);
 
-  // New plan form state
   const [form, setForm] = useState({
     patient_id: '',
     invoice_id: '',
@@ -39,21 +38,48 @@ export default function PaymentPlans({ onSelectPatient }) {
     if (hospitalId) loadPlans();
   }, [hospitalId]);
 
+  // FIX: 2-step fetch — no nested select (no FK between payment_plans and patients)
   async function loadPlans() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase
+      // 1. Load plans (without trying to nest patients or invoices)
+      const { data: planRows, error: planErr } = await supabase
         .from('payment_plans')
-        .select(`
-          *,
-          patient:patients(id, full_name, hospital_number, phone),
-          invoice:invoices(id, invoice_number, total_amount)
-        `)
+        .select('*')
         .eq('hospital_id', hospitalId)
         .order('created_at', { ascending: false });
-      if (error) throw error;
-      setPlans(data || []);
+      if (planErr) throw planErr;
+      if (!planRows || planRows.length === 0) {
+        setPlans([]);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Load patients for these plans
+      const patientIds = [...new Set(planRows.map(p => p.patient_id).filter(Boolean))];
+      const invoiceIds = [...new Set(planRows.map(p => p.invoice_id).filter(Boolean))];
+
+      const [patientsResp, invoicesResp] = await Promise.all([
+        patientIds.length > 0
+          ? supabase.from('patients').select('id, full_name, hospital_number, phone').in('id', patientIds)
+          : Promise.resolve({ data: [] }),
+        invoiceIds.length > 0
+          ? supabase.from('invoices').select('id, invoice_number, amount, grand_total').in('id', invoiceIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const patientsMap = (patientsResp.data || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
+      const invoicesMap = (invoicesResp.data || []).reduce((m, i) => { m[i.id] = i; return m; }, {});
+
+      // 3. Join in JS
+      const joined = planRows.map(p => ({
+        ...p,
+        patient: patientsMap[p.patient_id] || null,
+        invoice: invoicesMap[p.invoice_id] || null,
+      }));
+
+      setPlans(joined);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -61,7 +87,6 @@ export default function PaymentPlans({ onSelectPatient }) {
     }
   }
 
-  // Load patient list when opening the create dialog
   useEffect(() => {
     if (showCreate && hospitalId) {
       supabase
@@ -73,12 +98,11 @@ export default function PaymentPlans({ onSelectPatient }) {
     }
   }, [showCreate, hospitalId]);
 
-  // Load patient's outstanding invoices when patient selected
   useEffect(() => {
     if (form.patient_id) {
       supabase
         .from('invoices')
-        .select('id, invoice_number, total_amount, amount_paid, due_date')
+        .select('id, invoice_number, amount, grand_total, amount_paid, due_date')
         .eq('hospital_id', hospitalId)
         .eq('patient_id', form.patient_id)
         .then(({ data }) => setInvoices(data || []));
@@ -106,19 +130,11 @@ export default function PaymentPlans({ onSelectPatient }) {
       });
       setShowCreate(false);
       setForm({
-        patient_id: '',
-        invoice_id: '',
-        total_amount: '',
-        deposit_amount: 0,
-        installment_count: 3,
-        frequency: 'monthly',
-        start_date: new Date().toISOString().split('T')[0],
-        notes: '',
+        patient_id: '', invoice_id: '', total_amount: '',
+        deposit_amount: 0, installment_count: 3, frequency: 'monthly',
+        start_date: new Date().toISOString().split('T')[0], notes: '',
       });
       await loadPlans();
-      // Auto-select newly created plan
-      const created = (plans.length && plans[0]) || null;
-      return planId;
     } catch (e) {
       setError(e.message);
     } finally {
@@ -126,7 +142,6 @@ export default function PaymentPlans({ onSelectPatient }) {
     }
   }
 
-  // Load installments for selected plan
   useEffect(() => {
     if (selectedPlan) {
       supabase
@@ -140,7 +155,6 @@ export default function PaymentPlans({ onSelectPatient }) {
     }
   }, [selectedPlan]);
 
-  // Mark installment paid
   async function recordInstallmentPayment(installment, amount) {
     const newPaid = (installment.amount_paid || 0) + parseFloat(amount);
     const newStatus = newPaid >= installment.amount_due ? 'paid' : 'partial';
@@ -153,7 +167,6 @@ export default function PaymentPlans({ onSelectPatient }) {
       })
       .eq('id', installment.id);
 
-    // Refresh installments
     const { data } = await supabase
       .from('payment_plan_installments')
       .select('*')
@@ -161,7 +174,6 @@ export default function PaymentPlans({ onSelectPatient }) {
       .order('installment_no');
     setInstallments(data || []);
 
-    // If all installments paid, mark plan completed
     const allPaid = (data || []).every(i => i.status === 'paid');
     if (allPaid) {
       await supabase
@@ -210,11 +222,7 @@ export default function PaymentPlans({ onSelectPatient }) {
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
-          <select
-            className="rc-select"
-            value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-          >
+          <select className="rc-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="completed">Completed</option>
@@ -245,22 +253,15 @@ export default function PaymentPlans({ onSelectPatient }) {
                   onClick={() => setSelectedPlan(plan)}
                 >
                   <div className="rc-card-row">
-                    <span className="rc-card-title">
-                      {plan.patient?.full_name}
-                    </span>
-                    <span className={`rc-pill rc-pill-${plan.status}`}>
-                      {plan.status}
-                    </span>
+                    <span className="rc-card-title">{plan.patient?.full_name || 'Unknown patient'}</span>
+                    <span className={`rc-pill rc-pill-${plan.status}`}>{plan.status}</span>
                   </div>
                   <div className="rc-card-row rc-card-meta">
-                    <span>{plan.patient?.hospital_number}</span>
+                    <span>{plan.patient?.hospital_number || '—'}</span>
                     <span>{formatCurrency(plan.total_amount)}</span>
                   </div>
                   <div className="rc-progress">
-                    <div
-                      className="rc-progress-bar"
-                      style={{ width: `${progress.pct}%` }}
-                    />
+                    <div className="rc-progress-bar" style={{ width: `${progress.pct}%` }} />
                   </div>
                   <div className="rc-card-row rc-card-meta">
                     <span>{progress.pct}% paid</span>
@@ -274,7 +275,7 @@ export default function PaymentPlans({ onSelectPatient }) {
 
         {selectedPlan && (
           <aside className="rc-detail">
-            <h2>{selectedPlan.patient?.full_name}</h2>
+            <h2>{selectedPlan.patient?.full_name || 'Unknown patient'}</h2>
             <div className="rc-detail-grid">
               <div><label>Total</label><span>{formatCurrency(selectedPlan.total_amount)}</span></div>
               <div><label>Deposit</label><span>{formatCurrency(selectedPlan.deposit_amount)}</span></div>
@@ -287,22 +288,11 @@ export default function PaymentPlans({ onSelectPatient }) {
             <h3>Installments</h3>
             <table className="rc-table">
               <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Due Date</th>
-                  <th>Amount</th>
-                  <th>Paid</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
+                <tr><th>#</th><th>Due Date</th><th>Amount</th><th>Paid</th><th>Status</th><th>Action</th></tr>
               </thead>
               <tbody>
                 {installments.map(i => (
-                  <InstallmentRow
-                    key={i.id}
-                    installment={i}
-                    onPay={recordInstallmentPayment}
-                  />
+                  <InstallmentRow key={i.id} installment={i} onPay={recordInstallmentPayment} />
                 ))}
               </tbody>
             </table>
@@ -344,19 +334,10 @@ function InstallmentRow({ installment, onPay }) {
         <td>{installment.due_date}</td>
         <td>{formatCurrency(installment.amount_due)}</td>
         <td>{formatCurrency(installment.amount_paid || 0)}</td>
-        <td>
-          <span className={`rc-pill rc-pill-${installment.status}`}>
-            {installment.status}
-          </span>
-        </td>
+        <td><span className={`rc-pill rc-pill-${installment.status}`}>{installment.status}</span></td>
         <td>
           {installment.status !== 'paid' && (
-            <button
-              className="rc-btn-mini"
-              onClick={() => setShowPay(true)}
-            >
-              Record Payment
-            </button>
+            <button className="rc-btn-mini" onClick={() => setShowPay(true)}>Record Payment</button>
           )}
         </td>
       </tr>
@@ -378,12 +359,8 @@ function InstallmentRow({ installment, onPay }) {
                   setShowPay(false);
                   setAmount('');
                 }}
-              >
-                Save
-              </button>
-              <button className="rc-btn-ghost" onClick={() => setShowPay(false)}>
-                Cancel
-              </button>
+              >Save</button>
+              <button className="rc-btn-ghost" onClick={() => setShowPay(false)}>Cancel</button>
             </div>
           </td>
         </tr>
@@ -403,15 +380,10 @@ function CreatePlanModal({ form, setForm, patients, invoices, schedulePreview, s
         <div className="rc-modal-body">
           <div className="rc-form-row">
             <label>Patient *</label>
-            <select
-              value={form.patient_id}
-              onChange={e => setForm({ ...form, patient_id: e.target.value })}
-            >
+            <select value={form.patient_id} onChange={e => setForm({ ...form, patient_id: e.target.value })}>
               <option value="">Select patient...</option>
               {patients.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.full_name} — {p.hospital_number}
-                </option>
+                <option key={p.id} value={p.id}>{p.full_name} — {p.hospital_number}</option>
               ))}
             </select>
           </div>
@@ -423,19 +395,21 @@ function CreatePlanModal({ form, setForm, patients, invoices, schedulePreview, s
                 value={form.invoice_id}
                 onChange={e => {
                   const inv = invoices.find(i => i.id === e.target.value);
+                  // FIX: use `amount` or `grand_total`, not `total_amount`
+                  const outstanding = inv
+                    ? (inv.grand_total || inv.amount || 0) - (inv.amount_paid || 0)
+                    : 0;
                   setForm({
                     ...form,
                     invoice_id: e.target.value,
-                    total_amount: inv
-                      ? (inv.total_amount - (inv.amount_paid || 0)).toString()
-                      : form.total_amount,
+                    total_amount: inv ? outstanding.toString() : form.total_amount,
                   });
                 }}
               >
                 <option value="">No invoice</option>
                 {invoices.map(i => (
                   <option key={i.id} value={i.id}>
-                    {i.invoice_number} — Balance: {formatCurrency((i.total_amount || 0) - (i.amount_paid || 0))}
+                    {i.invoice_number} — Balance: {formatCurrency((i.grand_total || i.amount || 0) - (i.amount_paid || 0))}
                   </option>
                 ))}
               </select>
@@ -445,38 +419,22 @@ function CreatePlanModal({ form, setForm, patients, invoices, schedulePreview, s
           <div className="rc-form-row-2">
             <div>
               <label>Total Amount (₦) *</label>
-              <input
-                type="number"
-                value={form.total_amount}
-                onChange={e => setForm({ ...form, total_amount: e.target.value })}
-              />
+              <input type="number" value={form.total_amount} onChange={e => setForm({ ...form, total_amount: e.target.value })} />
             </div>
             <div>
               <label>Deposit (₦)</label>
-              <input
-                type="number"
-                value={form.deposit_amount}
-                onChange={e => setForm({ ...form, deposit_amount: e.target.value })}
-              />
+              <input type="number" value={form.deposit_amount} onChange={e => setForm({ ...form, deposit_amount: e.target.value })} />
             </div>
           </div>
 
           <div className="rc-form-row-2">
             <div>
               <label>Installments</label>
-              <input
-                type="number"
-                min="1"
-                value={form.installment_count}
-                onChange={e => setForm({ ...form, installment_count: e.target.value })}
-              />
+              <input type="number" min="1" value={form.installment_count} onChange={e => setForm({ ...form, installment_count: e.target.value })} />
             </div>
             <div>
               <label>Frequency</label>
-              <select
-                value={form.frequency}
-                onChange={e => setForm({ ...form, frequency: e.target.value })}
-              >
+              <select value={form.frequency} onChange={e => setForm({ ...form, frequency: e.target.value })}>
                 <option value="weekly">Weekly</option>
                 <option value="biweekly">Biweekly</option>
                 <option value="monthly">Monthly</option>
@@ -486,29 +444,19 @@ function CreatePlanModal({ form, setForm, patients, invoices, schedulePreview, s
 
           <div className="rc-form-row">
             <label>Start Date</label>
-            <input
-              type="date"
-              value={form.start_date}
-              onChange={e => setForm({ ...form, start_date: e.target.value })}
-            />
+            <input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
           </div>
 
           <div className="rc-form-row">
             <label>Notes</label>
-            <textarea
-              value={form.notes}
-              onChange={e => setForm({ ...form, notes: e.target.value })}
-              rows={2}
-            />
+            <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} />
           </div>
 
           {schedulePreview.length > 0 && (
             <div className="rc-preview">
               <h4>Preview Schedule</h4>
               <table className="rc-table">
-                <thead>
-                  <tr><th>#</th><th>Due</th><th>Amount</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>Due</th><th>Amount</th></tr></thead>
                 <tbody>
                   {schedulePreview.map(s => (
                     <tr key={s.installment_no}>

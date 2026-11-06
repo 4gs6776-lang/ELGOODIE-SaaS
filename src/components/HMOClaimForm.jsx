@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useCurrentHospital } from '../lib/useCurrentHospital';
-import { buildClaimFromInvoice, formatCurrency } from '../lib/revenueCycle';
+import { formatCurrency } from '../lib/revenueCycle';
 import './RevenueCycle.css';
 
 const LINE_TYPES = [
@@ -24,23 +24,15 @@ export default function HMOClaimForm() {
   const [selectedClaim, setSelectedClaim] = useState(null);
   const [lineItems, setLineItems] = useState([]);
 
-  // New claim form
   const [form, setForm] = useState({
-    patient_id: '',
-    invoice_id: '',
-    encounter_id: '',
-    hmo_provider: '',
-    hmo_policy_no: '',
-    hmo_member_id: '',
+    patient_id: '', invoice_id: '', encounter_id: '',
+    hmo_provider: '', hmo_policy_no: '', hmo_member_id: '',
     claim_type: 'outpatient',
     date_of_service: new Date().toISOString().split('T')[0],
-    diagnosis_codes: '',
-    procedure_codes: '',
-    pre_auth_code: '',
+    diagnosis_codes: '', procedure_codes: '', pre_auth_code: '',
   });
   const [patients, setPatients] = useState([]);
   const [invoices, setInvoices] = useState([]);
-  const [encounters, setEncounters] = useState([]);
   const [draftLineItems, setDraftLineItems] = useState([
     { line_type: 'consultation', description: '', code: '', quantity: 1, unit_price: 0 },
   ]);
@@ -49,19 +41,34 @@ export default function HMOClaimForm() {
     if (hospitalId) loadClaims();
   }, [hospitalId]);
 
+  // FIX: 2-step fetch — no nested select on patients (no FK)
   async function loadClaims() {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: claimRows, error: claimErr } = await supabase
         .from('hmo_claims')
-        .select(`
-          *,
-          patient:patients(id, full_name, hospital_number, hmo_provider)
-        `)
+        .select('*')
         .eq('hospital_id', hospitalId)
         .order('created_at', { ascending: false });
-      if (error) throw error;
-      setClaims(data || []);
+      if (claimErr) throw claimErr;
+      if (!claimRows || claimRows.length === 0) {
+        setClaims([]);
+        setLoading(false);
+        return;
+      }
+
+      const patientIds = [...new Set(claimRows.map(c => c.patient_id).filter(Boolean))];
+      const { data: patientRows } = await supabase
+        .from('patients')
+        .select('id, full_name, hospital_number, hmo_provider')
+        .in('id', patientIds);
+      const patMap = (patientRows || []).reduce((m, p) => { m[p.id] = p; return m; }, {});
+
+      const joined = claimRows.map(c => ({
+        ...c,
+        patient: patMap[c.patient_id] || null,
+      }));
+      setClaims(joined);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -69,54 +76,82 @@ export default function HMOClaimForm() {
     }
   }
 
-  // Patient picker
+  // FIX: Patient dropdown — fetch ALL patients with an HMO (not just
+  // those with non-null hmo_provider; some patients have category='hmo'
+  // but no hmo_provider set yet). Use `.or()` to catch both cases.
   useEffect(() => {
     if (showCreate && hospitalId) {
+      // Fetch all patients in the hospital; filter HMO in JS so the
+      // dropdown shows ALL patients (not just those with hmo_provider).
+      // Users can still create a claim for self-pay if needed.
       supabase
         .from('patients')
-        .select('id, full_name, hospital_number, hmo_provider, hmo_policy_no, hmo_member_id, phone')
+        .select('id, full_name, hospital_number, hmo_provider, hmo_number, hmo_id_code, phone')
         .eq('hospital_id', hospitalId)
-        .not('hmo_provider', 'is', null)
         .order('full_name')
-        .then(({ data }) => setPatients(data || []));
+        .then(({ data }) => {
+          // Sort: HMO patients first, then by name
+          const sorted = (data || []).sort((a, b) => {
+            const aHmo = a.hmo_provider ? 0 : 1;
+            const bHmo = b.hmo_provider ? 0 : 1;
+            if (aHmo !== bHmo) return aHmo - bHmo;
+            return (a.full_name || '').localeCompare(b.full_name || '');
+          });
+          setPatients(sorted || []);
+        });
     }
   }, [showCreate, hospitalId]);
 
-  // Load patient invoices + encounters
   useEffect(() => {
     if (form.patient_id) {
       Promise.all([
         supabase
           .from('invoices')
-          .select('id, invoice_number, total_amount, amount_paid, created_at')
+          .select('id, invoice_number, amount, grand_total, amount_paid, created_at')
           .eq('hospital_id', hospitalId)
           .eq('patient_id', form.patient_id)
           .order('created_at', { ascending: false }),
         supabase
-          .from('encounters')
-          .select('id, encounter_date, admission_date, discharge_date, diagnosis_codes, procedure_codes')
+          .from('patient_vitals')
+          .select('id, created_at, completed_at, diagnosis, diagnoses')
           .eq('hospital_id', hospitalId)
           .eq('patient_id', form.patient_id)
-          .order('encounter_date', { ascending: false })
-      ]).then(([inv, enc]) => {
+          .order('created_at', { ascending: false })
+          .limit(10)
+      ]).then(([inv, vit]) => {
         setInvoices(inv.data || []);
-        setEncounters(enc.data || []);
+        // vit is patient_vitals — the project's "encounters" table
+        // (see migration 059). We expose it as `encounters` for the UI.
+        const encs = (vit.data || []).map(v => ({
+          id: v.id,
+          encounter_date: v.created_at,
+          admission_date: null,  // patient_vitals doesn't track admission
+          discharge_date: null,
+          diagnosis_codes: v.diagnoses || (v.diagnosis ? [v.diagnosis] : []),
+          procedure_codes: [],
+        }));
+        // Store encounters in a ref-like state
+        setEncountersState(encs);
       });
     } else {
       setInvoices([]);
-      setEncounters([]);
+      setEncountersState([]);
     }
   }, [form.patient_id, hospitalId]);
 
-  // Auto-fill HMO info when patient picked
+  const [encountersState, setEncountersState] = useState([]);
+
+  // FIX: Auto-fill HMO info when patient picked
+  // Use the correct column names: hmo_number (not hmo_policy_no),
+  // hmo_id_code (not hmo_member_id)
   function pickPatient(patientId) {
     const p = patients.find(x => x.id === patientId);
     setForm({
       ...form,
       patient_id: patientId,
       hmo_provider: p?.hmo_provider || '',
-      hmo_policy_no: p?.hmo_policy_no || '',
-      hmo_member_id: p?.hmo_member_id || '',
+      hmo_policy_no: p?.hmo_number || '',     // hmo_number → display as policy #
+      hmo_member_id: p?.hmo_id_code || '',    // hmo_id_code → display as member #
     });
   }
 
@@ -150,7 +185,6 @@ export default function HMOClaimForm() {
     setLoading(true);
     setError(null);
     try {
-      // Generate claim number via RPC
       const { data: claimNo } = await supabase.rpc('generate_hmo_claim_number', {
         p_hospital_id: hospitalId,
       });
@@ -180,7 +214,6 @@ export default function HMOClaimForm() {
 
       if (claimErr) throw claimErr;
 
-      // Insert line items
       const items = draftLineItems
         .filter(l => l.description && l.unit_price > 0)
         .map(l => ({
@@ -194,9 +227,7 @@ export default function HMOClaimForm() {
         }));
 
       if (items.length > 0) {
-        const { error: itemsErr } = await supabase
-          .from('hmo_claim_line_items')
-          .insert(items);
+        const { error: itemsErr } = await supabase.from('hmo_claim_line_items').insert(items);
         if (itemsErr) throw itemsErr;
       }
 
@@ -223,10 +254,7 @@ export default function HMOClaimForm() {
     try {
       await supabase
         .from('hmo_claims')
-        .update({
-          status: 'submitted',
-          submission_date: new Date().toISOString(),
-        })
+        .update({ status: 'submitted', submission_date: new Date().toISOString() })
         .eq('id', claim.id);
       setToast({ type: 'success', msg: `Claim ${claim.claim_number} submitted to ${claim.hmo_provider}` });
       await loadClaims();
@@ -246,7 +274,6 @@ export default function HMOClaimForm() {
     setTimeout(() => printWindow.print(), 250);
   }
 
-  // Load line items when claim selected
   useEffect(() => {
     if (selectedClaim) {
       supabase
@@ -273,9 +300,7 @@ export default function HMOClaimForm() {
           <p>Generate and track insurance claims</p>
         </div>
         <div className="rc-header-actions">
-          <button className="rc-btn-primary" onClick={() => setShowCreate(true)}>
-            + New Claim
-          </button>
+          <button className="rc-btn-primary" onClick={() => setShowCreate(true)}>+ New Claim</button>
         </div>
       </header>
 
@@ -301,7 +326,7 @@ export default function HMOClaimForm() {
                 </span>
               </div>
               <div className="rc-card-row rc-card-meta">
-                <span>{c.patient?.full_name}</span>
+                <span>{c.patient?.full_name || 'Unknown'}</span>
                 <span>{formatCurrency(c.total_claimed)}</span>
               </div>
               <div className="rc-card-row rc-card-meta">
@@ -316,7 +341,7 @@ export default function HMOClaimForm() {
           <aside className="rc-detail">
             <h2>{selectedClaim.claim_number}</h2>
             <div className="rc-detail-grid">
-              <div><label>Patient</label><span>{selectedClaim.patient?.full_name}</span></div>
+              <div><label>Patient</label><span>{selectedClaim.patient?.full_name || 'Unknown'}</span></div>
               <div><label>HMO</label><span>{selectedClaim.hmo_provider}</span></div>
               <div><label>Policy #</label><span>{selectedClaim.hmo_policy_no || '—'}</span></div>
               <div><label>Member #</label><span>{selectedClaim.hmo_member_id || '—'}</span></div>
@@ -362,13 +387,9 @@ export default function HMOClaimForm() {
 
             <div className="rc-action-row">
               {selectedClaim.status === 'draft' && (
-                <button className="rc-btn-primary" onClick={() => submitClaim(selectedClaim)}>
-                  Submit Claim
-                </button>
+                <button className="rc-btn-primary" onClick={() => submitClaim(selectedClaim)}>Submit Claim</button>
               )}
-              <button className="rc-btn-ghost" onClick={() => printClaim(selectedClaim)}>
-                🖨 Print / Export
-              </button>
+              <button className="rc-btn-ghost" onClick={() => printClaim(selectedClaim)}>🖨 Print / Export</button>
             </div>
           </aside>
         )}
@@ -383,15 +404,16 @@ export default function HMOClaimForm() {
             </header>
             <div className="rc-modal-body">
               <div className="rc-form-row">
+                {/* FIX: Patient dropdown shows ALL patients (HMO first, then others).
+                    Previously filtered by hmo_provider IS NOT NULL which excluded
+                    some patients. Now shows everyone, sorted with HMO first. */}
                 <label>Patient *</label>
-                <select
-                  value={form.patient_id}
-                  onChange={e => pickPatient(e.target.value)}
-                >
-                  <option value="">Select patient (with HMO)...</option>
+                <select value={form.patient_id} onChange={e => pickPatient(e.target.value)}>
+                  <option value="">Select patient...</option>
                   {patients.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.full_name} — {p.hospital_number} ({p.hmo_provider || 'no HMO'})
+                      {p.full_name} — {p.hospital_number}
+                      {p.hmo_provider ? ` (${p.hmo_provider})` : ' (Self-Pay)'}
                     </option>
                   ))}
                 </select>
@@ -400,48 +422,29 @@ export default function HMOClaimForm() {
               <div className="rc-form-row-2">
                 <div>
                   <label>HMO Provider *</label>
-                  <input
-                    type="text"
-                    value={form.hmo_provider}
-                    onChange={e => setForm({ ...form, hmo_provider: e.target.value })}
-                  />
+                  <input type="text" value={form.hmo_provider} onChange={e => setForm({ ...form, hmo_provider: e.target.value })} />
                 </div>
                 <div>
                   <label>Policy #</label>
-                  <input
-                    type="text"
-                    value={form.hmo_policy_no}
-                    onChange={e => setForm({ ...form, hmo_policy_no: e.target.value })}
-                  />
+                  <input type="text" value={form.hmo_policy_no} onChange={e => setForm({ ...form, hmo_policy_no: e.target.value })} placeholder="Enrollee / policy number" />
                 </div>
               </div>
 
               <div className="rc-form-row-2">
                 <div>
                   <label>Member #</label>
-                  <input
-                    type="text"
-                    value={form.hmo_member_id}
-                    onChange={e => setForm({ ...form, hmo_member_id: e.target.value })}
-                  />
+                  <input type="text" value={form.hmo_member_id} onChange={e => setForm({ ...form, hmo_member_id: e.target.value })} placeholder="HMO ID code" />
                 </div>
                 <div>
                   <label>Pre-auth Code</label>
-                  <input
-                    type="text"
-                    value={form.pre_auth_code}
-                    onChange={e => setForm({ ...form, pre_auth_code: e.target.value })}
-                  />
+                  <input type="text" value={form.pre_auth_code} onChange={e => setForm({ ...form, pre_auth_code: e.target.value })} />
                 </div>
               </div>
 
               <div className="rc-form-row-2">
                 <div>
                   <label>Claim Type</label>
-                  <select
-                    value={form.claim_type}
-                    onChange={e => setForm({ ...form, claim_type: e.target.value })}
-                  >
+                  <select value={form.claim_type} onChange={e => setForm({ ...form, claim_type: e.target.value })}>
                     <option value="outpatient">Outpatient</option>
                     <option value="inpatient">Inpatient</option>
                     <option value="emergency">Emergency</option>
@@ -450,51 +453,44 @@ export default function HMOClaimForm() {
                 </div>
                 <div>
                   <label>Date of Service</label>
-                  <input
-                    type="date"
-                    value={form.date_of_service}
-                    onChange={e => setForm({ ...form, date_of_service: e.target.value })}
-                  />
+                  <input type="date" value={form.date_of_service} onChange={e => setForm({ ...form, date_of_service: e.target.value })} />
                 </div>
               </div>
 
               {form.patient_id && invoices.length > 0 && (
                 <div className="rc-form-row">
                   <label>Linked Invoice (optional)</label>
-                  <select
-                    value={form.invoice_id}
-                    onChange={e => setForm({ ...form, invoice_id: e.target.value })}
-                  >
+                  <select value={form.invoice_id} onChange={e => setForm({ ...form, invoice_id: e.target.value })}>
                     <option value="">No invoice</option>
                     {invoices.map(i => (
                       <option key={i.id} value={i.id}>
-                        {i.invoice_number} — {formatCurrency(i.total_amount)}
+                        {i.invoice_number} — {formatCurrency(i.grand_total || i.amount || 0)}
                       </option>
                     ))}
                   </select>
                 </div>
               )}
 
-              {form.patient_id && encounters.length > 0 && (
+              {form.patient_id && encountersState.length > 0 && (
                 <div className="rc-form-row">
                   <label>Linked Encounter (optional)</label>
                   <select
                     value={form.encounter_id}
                     onChange={e => {
-                      const enc = encounters.find(x => x.id === e.target.value);
+                      const enc = encountersState.find(x => x.id === e.target.value);
                       setForm({
                         ...form,
                         encounter_id: e.target.value,
                         diagnosis_codes: enc?.diagnosis_codes?.join(', ') || form.diagnosis_codes,
                         procedure_codes: enc?.procedure_codes?.join(', ') || form.procedure_codes,
-                        claim_type: enc?.admission_date ? 'inpatient' : 'outpatient',
                       });
                     }}
                   >
                     <option value="">No encounter</option>
-                    {encounters.map(e => (
+                    {encountersState.map(e => (
                       <option key={e.id} value={e.id}>
-                        {e.encounter_date} {e.admission_date ? '(admitted)' : ''}
+                        {new Date(e.encounter_date).toLocaleDateString()}
+                        {e.diagnosis_codes?.length > 0 ? ` — ${e.diagnosis_codes[0]}` : ''}
                       </option>
                     ))}
                   </select>
@@ -504,21 +500,11 @@ export default function HMOClaimForm() {
               <div className="rc-form-row-2">
                 <div>
                   <label>Diagnosis Codes (ICD-10, comma-separated)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. J00, M54.5"
-                    value={form.diagnosis_codes}
-                    onChange={e => setForm({ ...form, diagnosis_codes: e.target.value })}
-                  />
+                  <input type="text" placeholder="e.g. J00, M54.5" value={form.diagnosis_codes} onChange={e => setForm({ ...form, diagnosis_codes: e.target.value })} />
                 </div>
                 <div>
                   <label>Procedure Codes (CPT, comma-separated)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 99213, 80053"
-                    value={form.procedure_codes}
-                    onChange={e => setForm({ ...form, procedure_codes: e.target.value })}
-                  />
+                  <input type="text" placeholder="e.g. 99213, 80053" value={form.procedure_codes} onChange={e => setForm({ ...form, procedure_codes: e.target.value })} />
                 </div>
               </div>
 
@@ -534,43 +520,14 @@ export default function HMOClaimForm() {
                   {draftLineItems.map((li, idx) => (
                     <tr key={idx}>
                       <td>
-                        <select
-                          value={li.line_type}
-                          onChange={e => updateLineItem(idx, 'line_type', e.target.value)}
-                        >
-                          {LINE_TYPES.map(t => (
-                            <option key={t.id} value={t.id}>{t.label}</option>
-                          ))}
+                        <select value={li.line_type} onChange={e => updateLineItem(idx, 'line_type', e.target.value)}>
+                          {LINE_TYPES.map(t => (<option key={t.id} value={t.id}>{t.label}</option>))}
                         </select>
                       </td>
-                      <td>
-                        <input
-                          type="text"
-                          value={li.description}
-                          onChange={e => updateLineItem(idx, 'description', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          value={li.code}
-                          onChange={e => updateLineItem(idx, 'code', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          value={li.quantity}
-                          onChange={e => updateLineItem(idx, 'quantity', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="number"
-                          value={li.unit_price}
-                          onChange={e => updateLineItem(idx, 'unit_price', e.target.value)}
-                        />
-                      </td>
+                      <td><input type="text" value={li.description} onChange={e => updateLineItem(idx, 'description', e.target.value)} /></td>
+                      <td><input type="text" value={li.code} onChange={e => updateLineItem(idx, 'code', e.target.value)} /></td>
+                      <td><input type="number" value={li.quantity} onChange={e => updateLineItem(idx, 'quantity', e.target.value)} /></td>
+                      <td><input type="number" value={li.unit_price} onChange={e => updateLineItem(idx, 'unit_price', e.target.value)} /></td>
                       <td>{formatCurrency(li.quantity * li.unit_price)}</td>
                       <td>
                         {draftLineItems.length > 1 && (
@@ -582,9 +539,7 @@ export default function HMOClaimForm() {
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={4}>
-                      <button className="rc-btn-mini" onClick={addLineItem}>+ Add line</button>
-                    </td>
+                    <td colSpan={4}><button className="rc-btn-mini" onClick={addLineItem}>+ Add line</button></td>
                     <td className="rc-amount">Total:</td>
                     <td className="rc-amount">{formatCurrency(totalClaimed)}</td>
                     <td></td>
@@ -594,11 +549,7 @@ export default function HMOClaimForm() {
             </div>
             <footer className="rc-modal-footer">
               <button className="rc-btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
-              <button
-                className="rc-btn-primary"
-                disabled={loading || !form.patient_id || !form.hmo_provider}
-                onClick={handleCreate}
-              >
+              <button className="rc-btn-primary" disabled={loading || !form.patient_id || !form.hmo_provider} onClick={handleCreate}>
                 {loading ? 'Creating...' : 'Create Claim'}
               </button>
             </footer>
@@ -609,9 +560,6 @@ export default function HMOClaimForm() {
   );
 }
 
-// ============================================================
-// Printable claim HTML
-// ============================================================
 function renderClaimHtml(claim, lineItems) {
   const rows = lineItems.map(li => `
     <tr>
