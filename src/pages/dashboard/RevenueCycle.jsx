@@ -1,19 +1,10 @@
-// src/pages/dashboard/RevenueCycle.jsx
-// COMPLETE drop-in page (no patching required).
+// src/pages/dashboard/RevenueCycle.jsx (Option B)
 //
-// Adds a new "Revenue Cycle" tab to the dashboard with 4 sub-tabs:
-//   1. Aging Dashboard (outstanding invoices grouped by age)
-//   2. Payment Plans (create + track installments)
-//   3. Write-offs (request + approve workflow)
-//   4. HMO Claims (generate + submit insurance claims)
+// A NEW page (does not touch your existing Billing.jsx) that exposes the
+// 4 revenue cycle tabs. Add a new menu item for it in your Dashboard.jsx.
 //
-// USAGE:
-//   1. Drop this file into src/pages/dashboard/
-//   2. Add a menu item / route that points to <RevenueCycle />
-//   3. Done. No existing files need to be modified.
-//
-// This is intentionally a separate page from the existing Billing.jsx
-// so it doesn't disturb any of your existing invoice management UI.
+// This is the recommended approach if you want to KEEP your existing
+// Billing page (with invoices, payments, cashier workspace, etc.).
 
 import React, { useState } from 'react';
 import AgingDashboard from '../../components/AgingDashboard';
@@ -31,7 +22,6 @@ const TABS = [
 
 export default function RevenueCycle() {
   const [activeTab, setActiveTab] = useState('aging');
-  // Cross-tab prefill: aging dashboard "Write-off" action preloads WriteOffManager
   const [writeoffPrefill, setWriteoffPrefill] = useState(null);
 
   const ActiveComp = TABS.find(t => t.id === activeTab)?.Component || AgingDashboard;
@@ -43,7 +33,6 @@ export default function RevenueCycle() {
 
   function handlePaymentPlan(payload) {
     setActiveTab('plans');
-    // Future: extend PaymentPlans to accept `prefill` prop.
   }
 
   return (
