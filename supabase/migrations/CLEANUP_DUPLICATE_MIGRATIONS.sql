@@ -1,0 +1,54 @@
+-- Cleanup: Remove duplicate migration files (DOCUMENTATION ONLY)
+--
+-- Your project has multiple versions of migrations 092, 094, 095, 097, 098.
+-- Only the LATEST version should be kept. The earlier versions are
+-- harmless (they use IF EXISTS), but they add clutter and confusion.
+--
+-- This file is documentation only — no SQL to run. Below is the list
+-- of files to delete from your supabase/migrations/ folder.
+--
+-- After cleanup, your migrations folder should look like:
+--   090_drug_interaction_engine.sql         ← keep
+--   091_shift_handover_sbar_upgrade.sql     ← keep
+--   092_payment_plans_v3.sql                ← keep
+--   093_invoice_reminders.sql               ← keep
+--   094_invoice_writeoffs_v4.sql             ← keep
+--   095_hmo_claims_v3.sql                   ← keep
+--   096_invoices_due_date.sql               ← keep
+--   097_version_tracking_v2.sql             ← keep
+--   098_sync_resolution_log_v2.sql          ← keep
+--
+-- Files to DELETE:
+--   092_payment_plans.sql                    (v1, broken)
+--   092_payment_plans_v2.sql                 (v2, had users FK bug)
+--   092_revenue_cycle_automation.sql         (alternate name)
+--   093_offline_conflict_resolution.sql      (alternate name)
+--   094_invoice_writeoffs.sql                (v1, broken)
+--   094_invoice_writeoffs_v2.sql             (v2, had users FK bug)
+--   094_invoice_writeoffs_v3.sql             (v3, had param default bug)
+--   095_hmo_claims.sql                       (v1, broken)
+--   095_hmo_claims_v2.sql                    (v2, had users FK bug)
+--   097_version_tracking.sql                 (v1, had FOREACH SLICE bug)
+--   098_sync_resolution_log.sql              (v1, had users FK bug)
+--
+-- Run this from your project root:
+--
+--   cd GOODIE-MEDHUB-V2-main/supabase/migrations
+--   rm 092_payment_plans.sql
+--   rm 092_payment_plans_v2.sql
+--   rm 092_revenue_cycle_automation.sql
+--   rm 093_offline_conflict_resolution.sql
+--   rm 094_invoice_writeoffs.sql
+--   rm 094_invoice_writeoffs_v2.sql
+--   rm 094_invoice_writeoffs_v3.sql
+--   rm 095_hmo_claims.sql
+--   rm 095_hmo_claims_v2.sql
+--   rm 097_version_tracking.sql
+--   rm 098_sync_resolution_log.sql
+--
+-- IMPORTANT: This does NOT affect the database. The migrations have
+-- already been applied (or partially applied + cleaned up). Deleting
+-- the old SQL files just removes them from your project folder so
+-- the next developer doesn't accidentally apply the wrong version.
+
+SELECT 'Documentation only — see comment above' AS note;
