@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import App from './App'
 import { ThemeProvider } from './context/ThemeContext'
+import LiquidGlassSVG from './components/LiquidGlassSVG'
 import './theme/globals.css'
 import './theme/components.css'
 import './theme/dashboard.css'
@@ -64,6 +65,11 @@ registerSW({ immediate: true })
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider>
+      {/* LiquidGlassSVG injects the SVG feDisplacementMap filter once at
+          app root. It's invisible (0x0 size) and only provides the
+          `#liquid-refraction` filter that glass.css references via
+          `backdrop-filter: url(#liquid-refraction)`. */}
+      <LiquidGlassSVG />
       <App />
     </ThemeProvider>
   </React.StrictMode>
