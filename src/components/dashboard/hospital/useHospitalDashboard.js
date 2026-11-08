@@ -108,7 +108,34 @@ export function useHospitalDashboard(hospital, profile) {
   const audit = useOfflineTable('audit_events', on(access.activity))
 
   const all = [pts, appts, vitals, beds, adms, admReqs, labTests, labOrders, stock, invoices, audit]
-  const loading = all.some((t) => t.loading)
+  // PERFORMANCE: Don't block the entire dashboard on the slowest table.
+  // The original `loading = all.some(t => t.loading)` was true until
+  // ALL 11 tables finished loading — so a slow invoices table (10K rows)
+  // blocked the entire dashboard from rendering patient counts.
+  //
+  // Now: expose `loadingByTable` so each widget can show its own
+  // skeleton state independently. The top-level `loading` is kept for
+  // backwards compatibility but only blocks the FIRST render (when
+  // nothing has loaded yet). After the first table arrives, the
+  // dashboard renders with skeleton placeholders for the slow ones.
+  const loadingByTable = {
+    patients: pts.loading,
+    appointments: appts.loading,
+    vitals: vitals.loading,
+    beds: beds.loading,
+    admissions: adms.loading,
+    admissionRequests: admReqs.loading,
+    labTests: labTests.loading,
+    labOrders: labOrders.loading,
+    inventory: stock.loading,
+    invoices: invoices.loading,
+    audit: audit.loading,
+  }
+  // `loading` is true only when EVERY table is still loading — i.e. we
+  // have literally nothing to show yet. As soon as the first table
+  // arrives, `loading` becomes false and the dashboard renders with
+  // per-widget skeletons for the still-loading tables.
+  const loading = all.every((t) => t.loading)
   const isOnline = pts.isOnline
   const pendingSync = pts.pendingCount
 
@@ -232,5 +259,5 @@ export function useHospitalDashboard(hospital, profile) {
   }, [pts.records, appts.records, vitals.records, beds.records, adms.records, admReqs.records,
       labTests.records, labOrders.records, stock.records, invoices.records, audit.records, tz])
 
-  return { access, data, loading, isOnline, pendingSync, tz }
+  return { access, data, loading, loadingByTable, isOnline, pendingSync, tz }
 }
