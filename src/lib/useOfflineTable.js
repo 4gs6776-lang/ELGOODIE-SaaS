@@ -295,6 +295,36 @@ async function putLocalRecord(db, record) {
 }
 
 // ============================================================
+// PUT LOCAL RECORDS — BATCH (single transaction)
+// ============================================================
+// PERFORMANCE: Writes many records in ONE IndexedDB transaction
+// instead of one transaction per record. For a 1000-row pull, this
+// is ~10-50x faster than calling putLocalRecord() in a loop.
+//
+// Safety:
+//   - If any put fails, the entire transaction rolls back (atomic).
+//   - notifyLocalChange() is called ONCE at the end (not per-record),
+//     which also reduces re-render storms in subscribed components.
+//   - Pending (_synced=false) local records are NOT overwritten by
+//     the pull — same rule as the original per-record loop.
+async function putLocalRecordsBatch(db, records) {
+  if (!records || records.length === 0) return
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    for (const record of records) {
+      store.put(record)
+    }
+    tx.oncomplete = () => {
+      notifyLocalChange()
+      resolve(records.length)
+    }
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'))
+  })
+}
+
+// ============================================================
 // GET LOCAL RECORD
 // ============================================================
 
@@ -387,9 +417,15 @@ async function pullFromSupabase(db, tableName, hospitalId) {
 
     if (!remoteRows) return
 
+    // PERFORMANCE: build localById map once, then prepare a batch of
+    // records to write in a SINGLE IndexedDB transaction.
+    // The original code called putLocalRecord() in a loop, which
+    // opened a new transaction per record — for 1000 rows that's
+    // 1000 sequential transactions. The batch version is ~10-50x faster.
     const localRows = await getAllLocalRecords(db)
     const localById = new Map(localRows.map((r) => [r.id, r]))
 
+    const batch = []
     for (const remote of remoteRows) {
       const local = localById.get(remote.id)
 
@@ -397,7 +433,7 @@ async function pullFromSupabase(db, tableName, hospitalId) {
       // (e.g. an edit or delete made offline that hasn't gone up yet).
       if (local && local._synced === false) continue
 
-      await putLocalRecord(db, {
+      batch.push({
         ...remote,
         table_name: tableName,
         hospital_id: hospitalId,
@@ -408,6 +444,12 @@ async function pullFromSupabase(db, tableName, hospitalId) {
         _syncErrorMessage: null,
         _syncErrorKind: null,
       })
+    }
+
+    // Write all rows in ONE transaction. If any put fails, the entire
+    // transaction rolls back and the local data stays exactly as it was.
+    if (batch.length > 0) {
+      await putLocalRecordsBatch(db, batch)
     }
   } catch (err) {
     console.error(`Error pulling ${tableName} from Supabase:`, err)

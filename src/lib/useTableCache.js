@@ -30,8 +30,14 @@ const inFlightRequests = new Map()
 // Key: `${tableName}|${hospitalId}`, Value: Set of callback functions
 const tableListeners = new Map()
 
-// Cache TTL: 5 minutes. After this, the next mount triggers a fresh pull.
-const CACHE_TTL_MS = 5 * 60 * 1000
+// Cache TTL: 30 minutes. After this, the next mount triggers a fresh pull.
+// PERFORMANCE: Was 5 minutes, which caused unnecessary re-pulls every
+// 5 minutes during a shift — 8-12 full re-pulls per table per shift.
+// 30 minutes reduces that to 1-2 re-pulls per table per shift, while
+// still keeping data reasonably fresh. Realtime subscriptions still
+// push updates immediately, so this only affects the periodic full
+// re-pull (which is mostly a safety net for missed realtime events).
+const CACHE_TTL_MS = 30 * 60 * 1000
 
 export function getCachedTable(tableName, hospitalId) {
   const key = `${tableName}|${hospitalId}`
