@@ -372,48 +372,114 @@
 
 /* ============================================================
    12. LIGHT MODE (Apple's milky white glass)
+   ============================================================
+   FIX: Light mode glass was 65% opaque white — too transparent,
+   so the dark body background (--bg:#070F14 from :root, which
+   is the dark-mode default) was bleeding through the glass cards
+   and showing as dark patches.
+
+   Root cause:
+     • :root defines --bg:#070F14 (dark)
+     • html.light-mode overrides --bg:#F3F6F8 (light)
+     • body { background: var(--bg) } should pick up the light value
+     • BUT: the glass cards at 65% opacity let the body show through,
+       and if the body's --bg variable didn't propagate (stale CSS
+       var cache, or a hospital background overlay still active),
+       the dark default showed through.
+
+   Fix:
+     1. Bump light-mode glass opacity from 65% → 92% (essentially
+        solid white with a tiny translucency for the glass sheen)
+     2. Explicitly set body + .dash-shell + .dash-main backgrounds
+        in light mode so there's no chance of dark bleed-through
+     3. Hide the hospital background overlay in light mode (it's
+        designed for dark mode; in light mode it causes dark patches)
    ============================================================ */
 
+/* 12a. Force the body + shell + main to light backgrounds.
+       These come BEFORE the card rules so they apply first. */
+html.light-mode body {
+  background: #F3F6F8 !important;
+  color: #10223d !important;
+}
+
+html.light-mode .dash-shell {
+  background: #F3F6F8 !important;
+}
+
+html.light-mode .dash-main {
+  background: #F3F6F8 !important;
+}
+
+/* 12b. In light mode, hide the hospital background overlay.
+       Background images are designed for dark mode — in light mode
+       they cause dark patches through the translucent glass. */
+html.light-mode #hospital-bg-overlay {
+  display: none !important;
+  background-image: none !important;
+  opacity: 0 !important;
+}
+
+/* 12c. In light mode, override the .has-custom-bg transparency.
+       Even if a hospital has a custom background, we don't apply it
+       in light mode — keeps the light UI clean. */
+html.light-mode .dash-shell.has-custom-bg,
+html.light-mode .dash-shell.has-custom-bg .dash-main {
+  background: #F3F6F8 !important;
+}
+
+/* 12d. Light-mode glass cards — bumped from 65% → 92% opacity.
+       Still has a tiny translucency for the specular sheen to
+       show through, but no more dark patches. */
 html.light-mode .liquid-glass,
 html.light-mode .dash-panel,
 html.light-mode .hd-card,
 html.light-mode .hd-sub-card,
 html.light-mode .premium-stat {
-  background: rgba(255, 255, 255, 0.65) !important;
-  border: 1px solid rgba(255, 255, 255, 0.60) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.80) !important;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.90),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.03),
-    0 8px 32px rgba(43, 75, 115, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.04),
+    0 8px 32px rgba(43, 75, 115, 0.10),
     0 2px 8px rgba(43, 75, 115, 0.06) !important;
+  /* Keep the backdrop-filter so the glass still picks up subtle
+     colours from neighbouring elements, but reduce blur in light
+     mode (less dramatic, more milky) */
+  -webkit-backdrop-filter: blur(20px) saturate(140%) brightness(1.02);
+  backdrop-filter: blur(20px) saturate(140%) brightness(1.02);
 }
 
+/* 12e. Sidebar + topbar in light mode — near-opaque white */
 html.light-mode .dash-sidebar {
-  background: rgba(255, 255, 255, 0.78) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
   border-right-color: rgba(0, 0, 0, 0.06);
 }
 
 html.light-mode .dash-topbar {
-  background: rgba(255, 255, 255, 0.75) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
   border-bottom-color: rgba(0, 0, 0, 0.06);
 }
 
+/* 12f. Modal in light mode — near-opaque white */
 html.light-mode .dash-modal {
-  background: rgba(255, 255, 255, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.80) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(255, 255, 255, 0.90) !important;
   box-shadow:
     0 24px 80px rgba(43, 75, 115, 0.16),
     0 8px 24px rgba(43, 75, 115, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 1) !important;
 }
 
+/* 12g. Form inputs in light mode — solid white */
 html.light-mode .dash-field input,
 html.light-mode .dash-field select,
 html.light-mode .dash-field textarea,
 html.light-mode .hms-search-input,
 html.light-mode .dash-search input {
-  background: rgba(255, 255, 255, 0.50) !important;
-  border-color: rgba(0, 0, 0, 0.08) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-color: rgba(0, 0, 0, 0.10) !important;
+  color: #10223d !important;
 }
 
 html.light-mode .btn-primary {
@@ -438,6 +504,15 @@ html.light-mode .dash-table-wrap {
 html.light-mode .hd-root {
   --hd-text: #10223d;
   --hd-mute: #536783;
+  /* Override the dark-mode hd-card/surface variables here too
+     so any code reading var(--hd-card) gets white in light mode */
+  --hd-card: rgba(255, 255, 255, 0.92);
+  --hd-surface: rgba(255, 255, 255, 0.85);
+  --hd-line: rgba(0, 0, 0, 0.08);
+  --hd-shadow:
+    0 8px 32px rgba(43, 75, 115, 0.10),
+    0 2px 8px rgba(43, 75, 115, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 html.light-mode .hd-root .hd-card,
 html.light-mode .hd-root .hd-sub-card {
@@ -448,7 +523,7 @@ html.light-mode .hd-root .hd-seg,
 html.light-mode .hd-root .hd-chip,
 html.light-mode .hd-root .hd-more {
   color: #183456;
-  background: rgba(255, 255, 255, 0.52) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
 }
 html.light-mode .hd-root .hd-tip {
   color: #f1f6fa;
