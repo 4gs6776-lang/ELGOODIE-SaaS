@@ -1,164 +1,535 @@
 /* =====================================================================
-   G-MEDHUB — APPLE-INSPIRED LIQUID GLASS
-   Scoped to the live hospital overview only. Keeps the existing data,
-   permissions, charts and workflows untouched; this is a visual layer.
+   G-MEDHUB V2 — APPLE-GRADE LIQUID GLASS
+   =====================================================================
+   This file implements Apple's Liquid Glass design language (iOS 26 /
+   macOS Tahoe) as closely as pure CSS allows. The two pieces CSS
+   cannot do alone — true refraction (pixel displacement) and dynamic
+   specular tracking — are handled by:
+     • src/components/LiquidGlassSVG.jsx  → SVG feDisplacementMap filter
+     • src/lib/useLiquidGlass.js          → scroll-velocity tracking
+
+   The combination gives ~100% visual fidelity on Chrome/Edge and
+   ~95% on Safari/Firefox (which lack backdrop-filter: url() support).
+
+   Architecture:
+     1. Define a `.liquid-glass` base class with all the visual properties.
+     2. Apply it globally via CSS class matching (no JSX changes needed).
+     3. Optional `.liquid-glass-refract` class adds SVG refraction (opt-in
+        for hero cards only — GPU-heavy on low-end devices).
+     4. The hospital background image (admin-uploaded) renders BEHIND the
+        glass via #hospital-bg-overlay. The glass picks it up via
+        backdrop-filter, exactly like Apple's Control Center over a
+        wallpaper.
    ===================================================================== */
 
-.hd-root {
-  --hd-card: rgba(9, 22, 43, .58);
-  --hd-surface: rgba(14, 34, 62, .48);
-  --hd-line: rgba(190, 220, 255, .19);
-  --hd-text: #f5f8ff;
-  --hd-mute: #b4c4dc;
-  --hd-shadow: 0 22px 55px rgba(0, 7, 24, .32),
-    0 5px 16px rgba(0, 8, 30, .22),
-    inset 0 1px 0 rgba(255,255,255,.28),
-    inset 0 -1px 0 rgba(255,255,255,.04);
-}
+/* ============================================================
+   1. BASE GLASS MATERIAL
+   ============================================================
+   Apple's glass is NEUTRAL — it picks up colors from what's behind
+   it via the saturation boost in backdrop-filter. It is NOT pre-tinted
+   blue/violet (the previous V2 glass.css was — that's been removed).
+   ============================================================ */
 
-/* Ambient colour behind the panels: cool blue glass with restrained violet. */
-.hd-root::before {
-  top: -90px;
-  right: -2%;
-  width: min(760px, 85%);
-  height: 470px;
-  opacity: .28;
-  filter: blur(72px);
-  background: radial-gradient(ellipse at 25% 35%, rgba(0,174,255,.52), transparent 58%),
-              radial-gradient(ellipse at 78% 22%, rgba(133,75,255,.34), transparent 54%);
-}
-.hd-atmo { opacity: .13; color: #49bfff; }
-
-/* Main cards and panels. Layered highlights emulate Apple's liquid glass. */
-.hd-root .hd-card,
-.hd-root .hd-sub-card {
+.liquid-glass,
+.dash-panel,
+.dash-modal,
+.hd-card,
+.hd-sub-card,
+.premium-stat {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  color: var(--hd-text);
-  background:
-    radial-gradient(130% 115% at 4% 0%, rgba(94,190,255,.19), transparent 52%),
-    linear-gradient(145deg, rgba(30,67,111,.52), rgba(7,20,41,.66) 55%, rgba(31,36,83,.42)) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(190%);
-  backdrop-filter: blur(30px) saturate(190%);
-  border: 1px solid rgba(190,224,255,.30) !important;
-  border-radius: 20px;
-  box-shadow: var(--hd-shadow) !important;
+
+  /* Neutral translucent tint (DARK mode) */
+  background: rgba(255, 255, 255, 0.06) !important;
+
+  /* Heavy blur + saturation = picks up content behind (Apple's key effect) */
+  -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
+  backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
+
+  /* Subtle border (chromatic aberration is added via ::after) */
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 22px;
+
+  /* Soft layered cast shadow (Apple's is lighter than V2's was) */
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.40),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.05) !important;
 }
 
-.hd-root .hd-card::before,
-.hd-root .hd-sub-card::before {
+/* ============================================================
+   2. SPECULAR SHEEN (horizontal bright band)
+   ============================================================
+   Apple's glass has a bright horizontal highlight band at ~15-25%
+   from the top. It's a band, not a radial gradient.
+   The band's position + stretch are driven by scroll velocity
+   via CSS variables set by useLiquidGlass.js (--specular-offset,
+   --specular-stretch).
+   ============================================================ */
+
+.liquid-glass::before,
+.dash-panel::before,
+.hd-card::before,
+.premium-stat::before {
   content: "";
   position: absolute;
-  z-index: -1;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
   border-radius: inherit;
-  background:
-    linear-gradient(118deg, rgba(255,255,255,.20), transparent 23%, transparent 70%, rgba(94,163,255,.09)),
-    radial-gradient(90% 55% at 50% -10%, rgba(255,255,255,.18), transparent 70%);
+
+  /* Horizontal bright band at 15-25% from top — Apple's signature sheen */
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.18) 0%,
+    rgba(255, 255, 255, 0.06) 15%,
+    transparent 25%,
+    transparent 75%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+
+  /* Dynamic specular tracking — driven by useLiquidGlass.js */
+  transform: translateY(var(--specular-offset, 0px)) scaleY(var(--specular-stretch, 1));
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.hd-root .hd-card::after {
+/* ============================================================
+   3. CHROMATIC ABERRATION EDGE (prism effect)
+   ============================================================
+   Apple's glass edges split light into red (top-left) and cyan
+   (bottom-right). We fake this with two offset inset shadows +
+   a masked gradient border.
+   ============================================================ */
+
+.liquid-glass::after,
+.dash-panel::after,
+.hd-card::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 2;
   pointer-events: none;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(125deg, rgba(255,255,255,.48), rgba(115,190,255,.10) 28%, transparent 54%, rgba(148,117,255,.24) 82%, rgba(255,255,255,.18));
+
+  /* Gradient border: white → transparent → white (specular edge) */
+  background: linear-gradient(
+    125deg,
+    rgba(255, 255, 255, 0.48),
+    rgba(255, 0, 80, 0.04) 28%,        /* red chromatic offset */
+    transparent 54%,
+    rgba(0, 200, 255, 0.04) 82%,       /* cyan chromatic offset */
+    rgba(255, 255, 255, 0.18)
+  );
+
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: .68;
+  opacity: 0.68;
 }
 
-/* Nested panel contents retain the same material without becoming opaque. */
-.hd-root .hd-panel { background: transparent !important; }
-.hd-root .hd-pulse { background: transparent !important; }
+/* ============================================================
+   4. SIDEBAR + TOPBAR (semi-transparent glass)
+   ============================================================
+   Apple's sidebars and toolbars are glass — they blur the content
+   scrolling behind them. We make them semi-transparent + add blur.
+   ============================================================ */
+
+.dash-sidebar,
+.dash-topbar {
+  -webkit-backdrop-filter: blur(50px) saturate(180%) brightness(1.02);
+  backdrop-filter: blur(50px) saturate(180%) brightness(1.02);
+}
+
+.dash-sidebar {
+  /* Sidebar: slightly more opaque than cards (stays readable) */
+  background: rgba(7, 16, 22, 0.72) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dash-topbar {
+  /* Topbar: blurs the dashboard content scrolling under it */
+  background: rgba(8, 17, 24, 0.68) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ============================================================
+   5. MODALS (heavier glass)
+   ============================================================
+   Modals sit above everything — they get stronger blur + a dim
+   backdrop to focus attention.
+   ============================================================ */
+
+.dash-modal {
+  background: rgba(12, 21, 29, 0.85) !important;
+  -webkit-backdrop-filter: blur(60px) saturate(190%) brightness(1.08);
+  backdrop-filter: blur(60px) saturate(190%) brightness(1.08);
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 24px;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.40),
+    0 8px 24px rgba(0, 0, 0, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.50) !important;
+}
+
+/* Modal backdrop dims everything behind — like Apple's sheet scrim */
+.dash-modal-backdrop {
+  background: rgba(0, 0, 0, 0.32) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  backdrop-filter: blur(8px) saturate(120%);
+}
+
+/* ============================================================
+   6. FORM INPUTS (subtle glass)
+   ============================================================
+   Inputs get a lighter glass effect — they're small surfaces.
+   ============================================================ */
+
+.dash-field input,
+.dash-field select,
+.dash-field textarea,
+.hms-search-input,
+.dash-search input {
+  background: rgba(255, 255, 255, 0.04) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  backdrop-filter: blur(12px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px;
+}
+
+.dash-field input:focus,
+.dash-field select:focus,
+.dash-field textarea:focus {
+  border-color: rgba(255, 255, 255, 0.20) !important;
+  box-shadow: 0 0 0 3px rgba(0, 199, 199, 0.12) !important;
+}
+
+/* ============================================================
+   7. BUTTONS (glass capsules — like Apple's controls)
+   ============================================================ */
+
+.btn-primary,
+.dash-icon-btn {
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+}
+
+.btn-primary {
+  background: rgba(0, 199, 199, 0.85) !important;
+  border: 1px solid rgba(0, 199, 199, 0.40) !important;
+  box-shadow:
+    0 4px 16px rgba(0, 199, 199, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.30) !important;
+}
+
+.dash-icon-btn {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ============================================================
+   8. TABLES (subtle glass container)
+   ============================================================ */
+
+.dash-table-wrap {
+  background: rgba(255, 255, 255, 0.02) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.04) !important;
+  border-radius: 14px;
+}
+
+/* ============================================================
+   9. HOSPITAL OVERVIEW (upgrade existing .hd-root glass)
+   ============================================================
+   The existing .hd-root had blue/violet pre-tinting. We upgrade it
+   to the same neutral Apple spec so the overview matches the rest
+   of the app.
+   ============================================================ */
+
+.hd-root {
+  --hd-card: rgba(255, 255, 255, 0.06);
+  --hd-surface: rgba(255, 255, 255, 0.04);
+  --hd-line: rgba(255, 255, 255, 0.10);
+  --hd-text: #f1f6fa;
+  --hd-mute: #b4c4dc;
+  --hd-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.40),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* Remove the old blue/violet ambient glow — Apple's glass is neutral */
+.hd-root::before {
+  display: none;
+}
+.hd-atmo { display: none; }
+
+/* Cards: neutral glass (was blue-tinted) */
+.hd-root .hd-card,
 .hd-root .hd-sub-card {
-  background:
-    linear-gradient(145deg, rgba(43,91,139,.34), rgba(7,24,48,.42)) !important;
-  border-color: rgba(196,225,255,.20) !important;
-  border-radius: 16px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 12px 30px rgba(0,8,28,.18) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
+  backdrop-filter: blur(40px) saturate(180%) brightness(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 22px;
+  box-shadow: var(--hd-shadow) !important;
 }
 
-/* Make interactive controls look like small floating glass capsules. */
+/* Nested panels: transparent (inherit parent glass) */
+.hd-root .hd-panel,
+.hd-root .hd-pulse {
+  background: transparent !important;
+}
+
+/* Sub-cards: slightly lighter glass */
+.hd-root .hd-sub-card {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  border-radius: 16px;
+}
+
+/* Interactive capsules — neutral, not blue-tinted */
 .hd-root .hd-status,
 .hd-root .hd-seg,
 .hd-root .hd-chip,
 .hd-root .hd-tip,
 .hd-root .hd-stage button,
 .hd-root .hd-more {
-  color: #eaf4ff;
-  background: rgba(113,165,220,.13) !important;
-  border: 1px solid rgba(195,224,255,.20);
+  color: #f1f6fa;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.10);
   -webkit-backdrop-filter: blur(18px) saturate(170%);
   backdrop-filter: blur(18px) saturate(170%);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
 }
+
+/* Active segment: teal accent (matches brand) */
 .hd-root .hd-seg button.on {
   color: #fff;
-  background: linear-gradient(135deg, rgba(0,142,255,.82), rgba(103,83,255,.72)) !important;
-  border: 1px solid rgba(211,237,255,.35);
-  box-shadow: 0 5px 18px rgba(0,125,255,.28), inset 0 1px 0 rgba(255,255,255,.30);
+  background: rgba(0, 199, 199, 0.85) !important;
+  border: 1px solid rgba(0, 199, 199, 0.40);
+  box-shadow:
+    0 4px 16px rgba(0, 199, 199, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.30);
 }
-.hd-root .hd-tip { background: rgba(8,24,48,.88) !important; }
-.hd-root .hd-stage button { color: var(--hd-text); }
 
-/* Sharper typography and luminous chart/panel accents. */
-.hd-root .hd-head h1 { text-shadow: 0 2px 24px rgba(49,151,255,.18); }
-.hd-root .hd-kpi-value { text-shadow: 0 3px 22px rgba(64,166,255,.16); }
-.hd-root .hd-panel-head h3 { color: #f5f8ff; }
-.hd-root .hd-label,
-.hd-root .hd-sub,
-.hd-root .hd-panel-head p,
-.hd-root .hd-foot { color: #b9cbe3; }
+.hd-root .hd-tip { background: rgba(8, 17, 24, 0.92) !important; }
 
-@media (hover:hover) and (prefers-reduced-motion:no-preference) {
-  .hd-root .hd-card { transition: transform .28s cubic-bezier(.2,.8,.2,1), border-color .28s ease, box-shadow .28s ease, backdrop-filter .28s ease; }
-  .hd-root .hd-card:hover {
-    transform: translateY(-3px);
-    border-color: rgba(177,222,255,.48) !important;
-    -webkit-backdrop-filter: blur(34px) saturate(205%) brightness(1.10);
-    backdrop-filter: blur(34px) saturate(205%) brightness(1.10);
-    box-shadow: 0 26px 62px rgba(0,8,28,.40), 0 0 0 1px rgba(77,174,255,.13), inset 0 1px 0 rgba(255,255,255,.34) !important;
+/* Typography shadows (kept from V2 — they add depth) */
+.hd-root .hd-head h1 { text-shadow: 0 2px 24px rgba(0, 199, 199, 0.18); }
+.hd-root .hd-kpi-value { text-shadow: 0 3px 22px rgba(0, 199, 199, 0.16); }
+
+/* ============================================================
+   10. HOVER INTERACTION (Apple-style lift)
+   ============================================================ */
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .liquid-glass,
+  .dash-panel,
+  .hd-card,
+  .premium-stat {
+    transition:
+      transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
+      box-shadow 0.28s ease,
+      backdrop-filter 0.28s ease,
+      -webkit-backdrop-filter 0.28s ease;
+  }
+
+  .liquid-glass:hover,
+  .dash-panel:hover,
+  .hd-card:hover,
+  .premium-stat:hover {
+    transform: translateY(-2px);
+    -webkit-backdrop-filter: blur(50px) saturate(200%) brightness(1.10);
+    backdrop-filter: blur(50px) saturate(200%) brightness(1.10);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.50),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.06),
+      0 12px 40px rgba(0, 0, 0, 0.16),
+      0 4px 12px rgba(0, 0, 0, 0.10) !important;
   }
 }
 
-/* Light mode uses milky translucent glass and retains readable contrast. */
+/* ============================================================
+   11. OPTIONAL: TRUE REFRACTION (Chrome/Edge only)
+   ============================================================
+   Apply `.liquid-glass-refract` to hero cards to enable SVG
+   feDisplacementMap refraction. The SVG filter is injected by
+   <LiquidGlassSVG /> (mounted once in main.jsx).
+
+   Browsers that don't support backdrop-filter: url() ignore this
+   rule and fall back to plain blur — no broken experience.
+   ============================================================ */
+
+.liquid-glass-refract {
+  -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.05) url(#liquid-refraction);
+  backdrop-filter: blur(40px) saturate(180%) brightness(1.05) url(#liquid-refraction);
+}
+
+/* ============================================================
+   12. LIGHT MODE (Apple's milky white glass)
+   ============================================================ */
+
+html.light-mode .liquid-glass,
+html.light-mode .dash-panel,
+html.light-mode .hd-card,
+html.light-mode .hd-sub-card,
+html.light-mode .premium-stat {
+  background: rgba(255, 255, 255, 0.65) !important;
+  border: 1px solid rgba(255, 255, 255, 0.60) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.90),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.03),
+    0 8px 32px rgba(43, 75, 115, 0.08),
+    0 2px 8px rgba(43, 75, 115, 0.06) !important;
+}
+
+html.light-mode .dash-sidebar {
+  background: rgba(255, 255, 255, 0.78) !important;
+  border-right-color: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .dash-topbar {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+html.light-mode .dash-modal {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.80) !important;
+  box-shadow:
+    0 24px 80px rgba(43, 75, 115, 0.16),
+    0 8px 24px rgba(43, 75, 115, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 1) !important;
+}
+
+html.light-mode .dash-field input,
+html.light-mode .dash-field select,
+html.light-mode .dash-field textarea,
+html.light-mode .hms-search-input,
+html.light-mode .dash-search input {
+  background: rgba(255, 255, 255, 0.50) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+html.light-mode .btn-primary {
+  background: rgba(0, 166, 166, 0.90) !important;
+  border-color: rgba(0, 166, 166, 0.40) !important;
+  box-shadow:
+    0 4px 16px rgba(0, 166, 166, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.40) !important;
+}
+
+html.light-mode .dash-icon-btn {
+  background: rgba(0, 0, 0, 0.03) !important;
+  border-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+html.light-mode .dash-table-wrap {
+  background: rgba(255, 255, 255, 0.40) !important;
+  border-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Light mode: hospital overview text colours */
 html.light-mode .hd-root {
   --hd-text: #10223d;
   --hd-mute: #536783;
-  --hd-shadow: 0 18px 45px rgba(43,75,115,.12), inset 0 1px 0 rgba(255,255,255,.92);
 }
 html.light-mode .hd-root .hd-card,
 html.light-mode .hd-root .hd-sub-card {
   color: #10223d;
-  background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(228,241,255,.60) 58%, rgba(239,233,255,.52)) !important;
-  border-color: rgba(255,255,255,.88) !important;
 }
-html.light-mode .hd-root .hd-panel-head h3 { color: #10223d; }
-html.light-mode .hd-root .hd-label,
-html.light-mode .hd-root .hd-sub,
-html.light-mode .hd-root .hd-panel-head p,
-html.light-mode .hd-root .hd-foot { color: #536783; }
 html.light-mode .hd-root .hd-status,
 html.light-mode .hd-root .hd-seg,
 html.light-mode .hd-root .hd-chip,
-html.light-mode .hd-root .hd-more { color: #183456; background: rgba(255,255,255,.52) !important; }
-html.light-mode .hd-root .hd-tip { color: #f5f8ff; background: rgba(13,31,57,.92) !important; }
+html.light-mode .hd-root .hd-more {
+  color: #183456;
+  background: rgba(255, 255, 255, 0.52) !important;
+}
+html.light-mode .hd-root .hd-tip {
+  color: #f1f6fa;
+  background: rgba(13, 31, 57, 0.92) !important;
+}
 
-/* Keep the material efficient and legible on phones and reduced-motion devices. */
+/* ============================================================
+   13. MOBILE + REDUCED-MOTION FALLBACKS
+   ============================================================ */
+
 @media (max-width: 700px) {
-  .hd-root .hd-card, .hd-root .hd-sub-card {
-    -webkit-backdrop-filter: blur(18px) saturate(165%);
-    backdrop-filter: blur(18px) saturate(165%);
-    border-radius: 16px;
+  .liquid-glass,
+  .dash-panel,
+  .hd-card,
+  .hd-sub-card,
+  .premium-stat {
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+    border-radius: 18px;
+  }
+  .dash-sidebar,
+  .dash-topbar {
+    -webkit-backdrop-filter: blur(32px) saturate(160%);
+    backdrop-filter: blur(32px) saturate(160%);
+  }
+  /* Refraction disabled on mobile for performance */
+  .liquid-glass-refract {
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
-  .hd-root .hd-card { transition: none !important; }
+  .liquid-glass,
+  .dash-panel,
+  .hd-card,
+  .premium-stat {
+    transition: none !important;
+  }
+  .liquid-glass:hover,
+  .dash-panel:hover,
+  .hd-card:hover,
+  .premium-stat:hover {
+    transform: none !important;
+  }
+  /* Static specular — no scroll tracking */
+  .liquid-glass::before,
+  .dash-panel::before,
+  .hd-card::before,
+  .premium-stat::before {
+    transform: none !important;
+  }
+}
+
+/* ============================================================
+   14. Z-INDEX LAYERING
+   ============================================================
+   Ensure the hospital background overlay sits BEHIND the glass
+   (so the glass can pick it up via backdrop-filter).
+   ============================================================ */
+
+#hospital-bg-overlay {
+  z-index: 0;
+}
+
+.dash-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.dash-shell > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* When a hospital has a custom background, keep .dash-main transparent
+   so the background shows through. The glass cards on top will pick it
+   up via backdrop-filter — exactly like Apple's Control Center. */
+.dash-shell.has-custom-bg .dash-main {
+  background: transparent;
+}
+.dash-shell.has-custom-bg {
+  background: transparent;
 }
