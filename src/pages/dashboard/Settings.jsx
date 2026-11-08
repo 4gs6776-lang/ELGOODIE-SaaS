@@ -592,7 +592,7 @@ export default function Settings() {
               defaultOpen={false}
             >
               <div style={{ padding: '14px 0' }}>
-                <LazyManager><HmoProviderManager /></LazyManager>
+                <LazyManager><HmoProviderManager hospital={hospital} profile={profile} /></LazyManager>
               </div>
             </AccordionSection>
 
@@ -647,7 +647,7 @@ export default function Settings() {
               defaultOpen={false}
             >
               <div style={{ padding: '14px 0' }}>
-                <LazyManager><FolderCategoryManager /></LazyManager>
+                <LazyManager><FolderCategoryManager hospital={hospital} profile={profile} /></LazyManager>
               </div>
             </AccordionSection>
 
@@ -658,7 +658,7 @@ export default function Settings() {
               defaultOpen={false}
             >
               <div style={{ padding: '14px 0' }}>
-                <LazyManager><RolePermissionManager /></LazyManager>
+                <LazyManager><RolePermissionManager hospital={hospital} profile={profile} /></LazyManager>
               </div>
             </AccordionSection>
           </>
