@@ -1,43 +1,26 @@
 // src/lib/useLazyTable.js
 //
-// LAZY version of useOfflineTable — only loads data when the component
-// is actually visible (not just mounted).
-//
-// WHY: Settings.jsx imports 10 managers, each calling useOfflineTable.
-// That's 18 IndexedDB reads + 18 Supabase pulls on every Settings page
-// visit, even if the user only wants to change their theme. The fix is
-// to lazy-mount each Settings section: only fetch data when the user
-// clicks to expand that section.
+// LAZY version of useOfflineTable — only loads data when `enabled` is true.
+// Used to defer loading of tables that aren't needed until the user
+// opens a specific tab/section/modal.
 //
 // USAGE:
-//   const { records, loading, addRecord, updateRecord, deleteRecord } =
-//     useLazyTable('hospital_bank_accounts', hospitalId, { enabled: isOpen })
+//   const [showLabResults, setShowLabResults] = useState(false)
+//   const { records: labTests } = useLazyTable('lab_tests', hospital?.id, { enabled: showLabResults })
 //
-// When `enabled` is false, the hook returns empty arrays and does
-// nothing (no IndexedDB, no Supabase, no timers). When `enabled`
-// becomes true, it behaves exactly like useOfflineTable.
-//
-// All writes (addRecord / updateRecord / deleteRecord) work the same
-// way and will trigger the underlying useOfflineTable to pick them up
-// via the cache invalidation mechanism.
+// When `enabled` is false, the hook passes hospitalId=null to
+// useOfflineTable, which skips all I/O (no IndexedDB, no Supabase,
+// no timers). When `enabled` becomes true, it behaves exactly like
+// useOfflineTable.
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  useOfflineTable,
-} from './useOfflineTable';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useOfflineTable } from './useOfflineTable';
 
 export function useLazyTable(tableName, hospitalId, options = {}) {
   const { enabled = true, realtime = false } = options;
-
-  // Always call useOfflineTable (Rules of Hooks), but pass a sentinel
-  // hospitalId when disabled so it does no work. When hospitalId is
-  // null, useOfflineTable returns empty arrays and skips all I/O.
   const effectiveHospitalId = enabled ? hospitalId : null;
-
   const result = useOfflineTable(tableName, effectiveHospitalId, { realtime });
 
-  // Wrap addRecord / updateRecord / deleteRecord so they no-op when
-  // disabled (avoids accidentally writing with a null hospitalId).
   const safeAddRecord = useCallback(
     (...args) => (enabled ? result.addRecord(...args) : Promise.resolve(null)),
     [enabled, result.addRecord]
@@ -76,7 +59,7 @@ export function useLazyTable(tableName, hospitalId, options = {}) {
 //   const shouldMount = useLazyMount(isOpen, 200);
 //   return shouldMount ? <HeavyManager /> : null;
 //
-// When `isOpen` becomes true, waits 200ms (lets the tab transition
+// When `isOpen` becomes true, waits `delayMs` (lets the tab transition
 // finish) then mounts. When `isOpen` becomes false, unmounts immediately
 // to free memory.
 
