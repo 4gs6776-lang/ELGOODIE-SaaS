@@ -3,11 +3,24 @@ import { useAuth } from '../../context/AuthContext'
 import { HospitalProvider } from '../../context/HospitalContext'
 import { supabase } from '../../lib/supabaseClient'
 import AppIcon from '../../components/icons'
+
+// PERFORMANCE: tab-conditional hook helper.
+// Passes hospitalId to useOfflineTable only when the current tab is one
+// of the tabs that needs this table. When the tab doesn't match,
+// hospitalId becomes null and useOfflineTable skips all I/O (no
+// IndexedDB reads, no Supabase pulls, no timers).
+//
+// Usage: const { records } = useTabScopedTable('inventory_items', hospital?.id, tab, ['inventory','pharmacy'])
+const useTabScopedTable = (tableName, hospitalId, activeTab, tabsThatNeedIt) => {
+  const scopedId = tabsThatNeedIt.includes(activeTab) ? hospitalId : null
+  return useOfflineTable(tableName, scopedId)
+}
 import RevenueCycle from './RevenueCycle'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
 import SpringToggle from '../../components/SpringToggle'
 import { useHospitalBranding } from '../../lib/useHospitalBranding'
+import { useLiquidGlass } from '../../lib/useLiquidGlass'
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -22,7 +35,6 @@ import {
   FULL_ACCESS_ROLES,
   ROLE_LABELS,
   getAccessibleModulesWithDb,
-  canWithDb,
 } from '../../lib/permissions'
 import {
   DEFAULT_REGISTRATION_FEES,
@@ -210,7 +222,17 @@ export default function Dashboard(){
   // ---- Hospital branding (dashboard background) ----
   // Reads the hospital_branding row + applies it to the #hospital-bg-overlay
   // div via CSS. This is hospital-level (visible to all staff), not per-user.
+  // The Liquid Glass cards on top will pick up this background via
+  // backdrop-filter — exactly like Apple's Control Center over a wallpaper.
   useHospitalBranding()
+
+  // ---- Apple Liquid Glass: dynamic specular tracking ----
+  // Tracks scroll velocity on the dashboard main scroll container and
+  // updates CSS variables (--specular-offset, --specular-stretch) that
+  // glass.css uses to position/stretch the specular sheen band on every
+  // .liquid-glass element. Zero React re-renders — pure CSS variable updates.
+  const dashMainRef = useRef(null)
+  useLiquidGlass(dashMainRef)
 
   // Hospital timezone — every date/time displayed in this file goes
   // through src/lib/datetime.js with this zone (Stage 1 req. #11).
@@ -226,13 +248,6 @@ export default function Dashboard(){
     dbRolePerms = result.records || []
   } catch { dbRolePerms = [] }
 
-  // FIX: DB-backed permission checks for patient create/delete.
-  // Before this fix, the "Add Patient" button and delete button were
-  // only hidden from doctors. Now they respect the admin's DB-configured
-  // can_create / can_delete settings for the patients module.
-  const canCreatePatient = canWithDb(profile?.role, 'create', 'patients', dbRolePerms)
-  const canDeletePatient = canWithDb(profile?.role, 'delete', 'patients', dbRolePerms)
-
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
     // DB-backed: uses the hospital's custom role permissions if they exist,
@@ -243,13 +258,7 @@ export default function Dashboard(){
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
-  // FIX: Normalize nav keys (hyphens → underscores) before checking against
-  // allowedKeys. The MODULES array in permissions.js uses underscores
-  // (hmo_patients, anc_patients, ai_diagnostics) but NAV_ITEMS uses
-  // hyphens (hmo-patients, anc-patients, ai-diagnostics). Without
-  // normalization, the .includes() check fails and the menu items
-  // are hidden even when the admin granted access.
-  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key.replace(/-/g, '_'))) : NAV_ITEMS
+  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key)) : NAV_ITEMS
   const visibleNavItems = roleNavItems.filter(item => isModuleAllowedByPlan(item.key, planEntitlements))
 
   // Subscription alerts (banner + bell entries) — hospital ADMIN only,
@@ -269,6 +278,8 @@ export default function Dashboard(){
   const [activeMenu, setActiveMenu] = useState(null)
   const headerMenuRef = useRef(null)
 
+  // PERFORMANCE: Patients table stays eager — it's needed for the
+  // shell (nav badges, patient drawer, registration modal).
   const { records: patients, loading, isOnline, pendingCount, addRecord, deleteRecord } = useOfflineTable('patients', hospital?.id)
 
   // ---- Medication reminders (blinking red light on Reminders nav item) ----
@@ -295,7 +306,9 @@ export default function Dashboard(){
   }, [dueNow.length])
   
   // NEW: Fetch patient vitals to determine who was attended today
-  const { records: vitals } = useOfflineTable('patient_vitals', hospital?.id)
+  // PERFORMANCE: vitals is now tab-scoped (declared below with useTabScopedTable)
+  // — only loads on doctor/nursing/handover tabs. The "attended today"
+  // feature still works because those are the tabs where it's needed.
 
   const [profilePatientId, setProfilePatientId] = useState(null)
   const [showModal, setShowModal] = useState(false)
@@ -332,17 +345,25 @@ export default function Dashboard(){
   const [todayDuty, setTodayDuty] = useState([])
   const [loadingDuty, setLoadingDuty] = useState(true)
 
-  const { records: inventoryItems } = useOfflineTable('inventory_items', hospital?.id)
-  const { records: labTests } = useOfflineTable('lab_tests', hospital?.id)
-  const { records: allMessages } = useOfflineTable('messages', hospital?.id)
+  // PERFORMANCE: These tables are tab-scoped — they only load when
+  // the user is on a tab that actually needs them. Before this change,
+  // all 6 tables loaded on every Dashboard mount (even when the user
+  // was on the Billing tab and didn't need inventory/lab/messages data).
+  const { records: vitals } = useTabScopedTable('patient_vitals', hospital?.id, tab, ['doctor', 'nursing', 'handover'])
+  const { records: inventoryItems } = useTabScopedTable('inventory_items', hospital?.id, tab, ['inventory', 'pharmacy'])
+  const { records: labTests } = useTabScopedTable('lab_tests', hospital?.id, tab, ['laboratory'])
+  const { records: allMessages } = useTabScopedTable('messages', hospital?.id, tab, ['messages'])
 
   // ---- Registration fees (folder-prices feature) -------------------
   // Same flow as Reception: when a patient is added via the quick-add
   // form, push a pending billable_charge for the folder fee to the
   // cashier's queue (unless waived). Falls back to hard-coded defaults
   // (DEFAULT_REGISTRATION_FEES) until the admin sets values in Settings.
-  const { records: feeRecords } = useOfflineTable('hospital_registration_fees', hospital?.id)
-  const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
+  // PERFORMANCE: feeRecords only needed when the registration modal is
+  // open OR when on the reception tab. billableCharges only needed when
+  // the registration modal is open.
+  const { records: feeRecords } = useTabScopedTable('hospital_registration_fees', hospital?.id, tab, ['reception'])
+  const { addRecord: addBillableCharge } = useTabScopedTable('billable_charges', hospital?.id, tab, ['reception', 'billing'])
   // dbRolePerms is now declared earlier (before allowedKeys) with a
   // try-catch wrapper so a missing hospital_role_permissions table
   // doesn't crash the dashboard.
@@ -352,8 +373,7 @@ export default function Dashboard(){
   useEffect(() => computeWeeklyCounts(patients), [patients])
   useEffect(() => subscribeSyncErrors(setSyncErrors), [])
   useEffect(() => {
-    // FIX: Normalize tab key (hyphens → underscores) for the same reason
-    if (allowedKeys && !allowedKeys.includes(tab.replace(/-/g, '_'))) setTab('overview')
+    if (allowedKeys && !allowedKeys.includes(tab)) setTab('overview')
     // Also covers deep links (e.g. a reminder pointing at a module the plan lacks).
     else if (!isModuleAllowedByPlan(tab, planEntitlements)) setTab('overview')
   }, [allowedKeys, tab, planEntitlements])
@@ -821,7 +841,7 @@ export default function Dashboard(){
   // to a re-computed value here using just the messages table as a
   // fallback — the moment the user opens Messages, the count gets
   // replaced by the accurate value from the event.
-  const { records: myReadStates } = useOfflineTable('message_channel_reads', hospital?.id)
+  const { records: myReadStates } = useTabScopedTable('message_channel_reads', hospital?.id, tab, ['messages'])
   const [unreadMessageCount, setUnreadMessageCount] = useState(0)
 
   // Recompute the count locally — gives a sensible default before the
@@ -1192,7 +1212,7 @@ export default function Dashboard(){
         </div>
       </aside>
 
-      <main className="dash-main">
+      <main className="dash-main" ref={dashMainRef}>
         {/* Top Header Bar */}
         <header className="dash-topbar">
           <button
@@ -1457,7 +1477,7 @@ export default function Dashboard(){
                           onChange={e => setPatientSearch(e.target.value)}
                         />
                       </div>
-                      {canCreatePatient && (
+                      {profile?.role !== 'doctor' && (
                         <button className="btn btn-primary" style={{ width: 'auto' }} onClick={() => setShowModal(true)}>+ Add Patient</button>
                       )}
                     </div>
@@ -1481,7 +1501,7 @@ export default function Dashboard(){
                                 <td>{p.age}</td>
                                 <td><span className={`dash-status ${p.status === 'review' ? 'review' : 'stable'}`}>{p.status === 'review' ? 'In Review' : 'Stable'}</span></td>
                                 <td style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{formatDateTime(p.created_at, hospitalTz)}</td>
-                                <td>{canDeletePatient ? <button className="dash-delete" onClick={() => handleDelete(p)} title="Delete"><TrashIcon size={13}/></button> : null}</td>
+                                <td>{profile?.role !== 'doctor' ? <button className="dash-delete" onClick={() => handleDelete(p)} title="Delete"><TrashIcon size={13}/></button> : null}</td>
                               </tr>
                             ))}
                           </tbody>

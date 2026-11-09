@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useOfflineTable } from '../../lib/useOfflineTable'
+import { useLazyTable } from '../../lib/useLazyTable'
 import { useRealtimeAlert } from '../../lib/useRealtimeAlert'
 import { usePagination } from '../../lib/usePagination'
 import Pagination from '../../components/common/Pagination'
@@ -21,21 +22,27 @@ export default function Pharmacy() {
   // Batch-2 QA: phones re-flow both tables into record cards instead of
   // force-scrolling 5–7 nowrap columns inside a 320–430px screen.
   const isPhone = useMediaQuery('(max-width: 767px)')
-  const { records: inventoryItems, loading, isOnline, pendingCount, updateRecord, refreshTable } = useOfflineTable('inventory_items', hospital?.id)
+
+  // PERFORMANCE: pharmTab state declared early so we can gate the
+  // heavy table loads on it. Before this change, ALL tables loaded
+  // on every Pharmacy mount — even if the pharmacist was only on
+  // the "queue" tab and didn't need inventory/sales data.
+  const [pharmTab, setPharmTab] = useState('queue') // 'requests' | 'queue' | 'inventory' | 'sales'
+
+  // inventory_items: needed on inventory + queue tabs (queue needs stock info)
+  const { records: inventoryItems, loading, isOnline, pendingCount, updateRecord, refreshTable } = useLazyTable('inventory_items', hospital?.id, { enabled: pharmTab === 'inventory' || pharmTab === 'queue' })
+  // patients: needed on all tabs (for dispense modal)
   const { records: patients } = useOfflineTable('patients', hospital?.id)
+  // Write-only tables — keep eager (write path doesn't depend on `enabled`)
   const { addRecord: addStockRecord } = useOfflineTable('patient_stock_records', hospital?.id)
   const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
-  
-  // NEW: Fetch prescriptions to receive doctor's orders
-  const { records: prescriptions, updateRecord: updatePrescription, syncFromServer: syncPrescriptions } = useOfflineTable('prescriptions', hospital?.id)
-  // NEW: Staff medication requests (nurses + patient profiles send these)
-  // Schema: see migration 030_pharmacy_requests.sql
-  // openRequests = pending requests not yet dispensed/cancelled
-  const { records: pharmRequests, updateRecord: updatePharmRequest } = useOfflineTable('pharmacy_requests', hospital?.id)
-  // NEW: Pharmacy walk-in sales records (created by WalkInSaleModal)
-  // Schema: sale_number, customer_name, items (jsonb), total, payment_method,
-  //         sale_type ('walk_in' | 'prescription'), status, dispensed_by_name
-  const { records: pharmacySales, syncFromServer: syncPharmacySales } = useOfflineTable('pharmacy_sales', hospital?.id)
+
+  // prescriptions: needed on queue + requests tabs
+  const { records: prescriptions, updateRecord: updatePrescriptions, syncFromServer: syncPrescriptions } = useLazyTable('prescriptions', hospital?.id, { enabled: pharmTab === 'queue' || pharmTab === 'requests' })
+  // pharmRequests: needed on requests tab
+  const { records: pharmRequests, updateRecord: updatePharmRequest } = useLazyTable('pharmacy_requests', hospital?.id, { enabled: pharmTab === 'requests' })
+  // pharmacySales: needed on sales tab only
+  const { records: pharmacySales, syncFromServer: syncPharmacySales } = useLazyTable('pharmacy_sales', hospital?.id, { enabled: pharmTab === 'sales' })
   const [toast, setToast] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showDispenseModal, setShowDispenseModal] = useState(false)
@@ -46,7 +53,7 @@ export default function Pharmacy() {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [activeRx, setActiveRx] = useState(null) // Tracks if dispensing from a doctor's order
   const [activeReq, setActiveReq] = useState(null) // Tracks if dispensing a staff request
-  const [pharmTab, setPharmTab] = useState('queue') // 'requests' | 'queue' | 'inventory' | 'sales'
+  // pharmTab was moved up to line 30 (needed for lazy-table gating)
   const [showWalkInModal, setShowWalkInModal] = useState(false)
   const [salesRefreshKey, setSalesRefreshKey] = useState(0)
   // ---- Pharmacy request dispense modal state ----

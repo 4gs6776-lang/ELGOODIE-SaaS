@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useOfflineTable } from '../../lib/useOfflineTable'
+import { useLazyTable } from '../../lib/useLazyTable'
 import { useRealtimeAlert } from '../../lib/useRealtimeAlert'
 import TrashIcon from '../../components/icons/TrashIcon'
 import AppIcon from '../../components/icons'
@@ -52,14 +53,33 @@ const EMPTY_MED = {
 export default function DoctorWorkbench() {
   const { profile, hospital } = useAuth()
   const timezone = getTimezone(hospital)
+  // PERFORMANCE: patients + vitals stay eager — needed for the queue
+  // list that the doctor sees immediately on opening Workbench.
   const { records: patients, loading: loadingPatients, updateRecord: updatePatient, syncFromServer: syncPatients } = useOfflineTable('patients', hospital?.id)
   const { records: vitals, loading: loadingVitals, updateRecord: updateVitals, syncFromServer: syncVitals } = useOfflineTable('patient_vitals', hospital?.id)
-  const { records: labOrders, loading: loadingLabOrders, addRecord: addLabOrder, syncFromServer: syncLabOrders } = useOfflineTable('lab_orders', hospital?.id)
-  const { records: labTests, syncFromServer: syncLabTests } = useOfflineTable('lab_tests', hospital?.id)
-  const { records: prescriptions, loading: loadingPrescriptions, addRecord: addPrescription, updateRecord: updatePrescription, deleteRecord: deletePrescription, syncFromServer: syncPrescriptions } = useOfflineTable('prescriptions', hospital?.id)
-  const { records: inventoryItems } = useOfflineTable('inventory_items', hospital?.id)
-  const { records: hospitalTemplates, addRecord: addTemplate } = useOfflineTable('prescription_templates', hospital?.id)
-  const { records: admissionRequests, addRecord: addAdmissionRequest } = useOfflineTable('admission_requests', hospital?.id)
+
+  // PERFORMANCE: The following tables are LAZY-LOADED — they only fetch
+  // data when the doctor opens a consultation (activeVitalsId is set).
+  // Before this change, all 6 tables loaded on every Workbench mount,
+  // pulling thousands of rows even if the doctor just wanted to see
+  // the queue. Now they load only when needed.
+  //
+  // The addRecord/updateRecord/deleteRecord functions still work even
+  // when disabled (they write to IndexedDB regardless) — only the
+  // read side (records array) is gated.
+  const [activeVitalsId, setActiveVitalsId] = useState(null)
+  const hasActiveConsult = !!activeVitalsId
+
+  const { records: labOrders, loading: loadingLabOrders, addRecord: addLabOrder, syncFromServer: syncLabOrders } = useLazyTable('lab_orders', hospital?.id, { enabled: hasActiveConsult })
+  const { records: labTests, syncFromServer: syncLabTests } = useLazyTable('lab_tests', hospital?.id, { enabled: hasActiveConsult })
+  const { records: prescriptions, loading: loadingPrescriptions, addRecord: addPrescription, updateRecord: updatePrescription, deleteRecord: deletePrescription, syncFromServer: syncPrescriptions } = useLazyTable('prescriptions', hospital?.id, { enabled: hasActiveConsult })
+  const { records: inventoryItems } = useLazyTable('inventory_items', hospital?.id, { enabled: hasActiveConsult })
+  const { records: hospitalTemplates, addRecord: addTemplate } = useLazyTable('prescription_templates', hospital?.id, { enabled: hasActiveConsult })
+  const { records: admissionRequests, addRecord: addAdmissionRequest } = useLazyTable('admission_requests', hospital?.id, { enabled: hasActiveConsult })
+
+  // Write-only tables — these don't need to load records, they just
+  // need the addRecord function. Keep them as useOfflineTable (not
+  // lazy) because the write path doesn't depend on `enabled`.
   const { addRecord: addTimelineEvent } = useOfflineTable('admission_timeline_events', hospital?.id)
   const { addRecord: addPharmacyOrder } = useOfflineTable('pharmacy_orders', hospital?.id)
   
@@ -70,7 +90,7 @@ export default function DoctorWorkbench() {
   const [virtualConsultData, setVirtualConsultData] = useState(null)
   const [medicationAlerts, setMedicationAlerts] = useState(null)
   const loading = loadingPatients || loadingVitals || loadingLabOrders || loadingPrescriptions
-  const [activeVitalsId, setActiveVitalsId] = useState(null)
+  // activeVitalsId was moved up to line 70 (needed for lazy-table gating)
   const [toast, setToast] = useState(null)
   const [completing, setCompleting] = useState(false)
 
