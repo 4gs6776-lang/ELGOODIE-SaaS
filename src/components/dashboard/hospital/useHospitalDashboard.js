@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useOfflineTable } from '../../../lib/useOfflineTable'
 import { canAccessModule, FULL_ACCESS_ROLES } from '../../../lib/permissions'
 import { getTimezone, dayKeyInZone, todayKeyInZone } from '../../../lib/datetime'
 import { labStage } from '../../../lib/lab'
+import { fetchDashboardSummary, normalizeSeries } from '../../../lib/dashboardSummary'
 
 // =====================================================================
 // GOODIE-MEDHUB — data layer for the hospital overview dashboard.
@@ -259,5 +260,74 @@ export function useHospitalDashboard(hospital, profile) {
   }, [pts.records, appts.records, vitals.records, beds.records, adms.records, admReqs.records,
       labTests.records, labOrders.records, stock.records, invoices.records, audit.records, tz])
 
-  return { access, data, loading, loadingByTable, isOnline, pendingSync, tz }
+  // PERFORMANCE: Server-side aggregation RPC.
+  // If the get_dashboard_summary RPC exists (migration 100 applied),
+  // fetch all counts/sums in ONE query. This replaces the need to
+  // download 11 tables and compute in JS.
+  //
+  // The RPC data is MERGED with the client-computed data — RPC values
+  // take priority when available. If the RPC fails (migration not
+  // applied), the client-computed values are used (graceful fallback).
+  const [rpcData, setRpcData] = useState(null)
+  useEffect(() => {
+    if (!hid) return
+    let cancelled = false
+    fetchDashboardSummary(hid, SERIES_DAYS).then(summary => {
+      if (!cancelled && summary) {
+        setRpcData(summary)
+      }
+    })
+    return () => { cancelled = true }
+  }, [hid])
+
+  // Merge RPC data into the client-computed data.
+  // RPC values override client values when available (RPC is more
+  // accurate — it queries the DB directly instead of relying on the
+  // offline cache which might be stale).
+  const mergedData = useMemo(() => {
+    if (!rpcData) return data
+    return {
+      ...data,
+      // Counts from RPC (more accurate than client-side filtering)
+      totalPatients: rpcData.totalPatients ?? data.totalPatients,
+      registeredToday: rpcData.registeredToday ?? data.registeredToday,
+      waitingList: data.waitingList,  // keep client-side list (has patient objects)
+      consultList: data.consultList,  // keep client-side list (has patient objects)
+      queueDischargedToday: rpcData.queueDischargedToday ?? data.queueDischargedToday,
+      ancCount: rpcData.ancCount ?? data.ancCount,
+      triageToday: rpcData.triageToday ?? data.triageToday,
+      apptToday: rpcData.apptToday ?? data.apptToday,
+      apptScheduledToday: rpcData.apptScheduledToday ?? data.apptScheduledToday,
+      apptCompletedToday: rpcData.apptCompletedToday ?? data.apptCompletedToday,
+      apptCancelledToday: rpcData.apptCancelledToday ?? data.apptCancelledToday,
+      bedsTotal: rpcData.bedsTotal ?? data.bedsTotal,
+      bedsOccupied: rpcData.bedsOccupied ?? data.bedsOccupied,
+      bedsAvailable: rpcData.bedsAvailable ?? data.bedsAvailable,
+      bedsCleaning: rpcData.bedsCleaning ?? data.bedsCleaning,
+      bedsReserved: rpcData.bedsReserved ?? data.bedsReserved,
+      admittedCount: rpcData.admittedCount ?? data.admittedCount,
+      admittedToday: rpcData.admittedToday ?? data.admittedToday,
+      dischargedToday: rpcData.dischargedToday ?? data.dischargedToday,
+      pendingAdmissionRequests: rpcData.pendingAdmissionRequests ?? data.pendingAdmissionRequests,
+      labPending: (rpcData.labOrdered + rpcData.labSampleCollected + rpcData.labProcessing) || data.labPending,
+      labCompletedToday: rpcData.labCompletedToday ?? data.labCompletedToday,
+      stockOut: rpcData.stockOut ?? data.stockOut,
+      stockLow: rpcData.stockLow ?? data.stockLow,
+      stockExpired: rpcData.stockExpired ?? data.stockExpired,
+      stockExpiring: rpcData.stockExpiring ?? data.stockExpiring,
+      stockTotal: rpcData.stockTotal ?? data.stockTotal,
+      stockAlerts: (rpcData.stockOut + rpcData.stockLow) || data.stockAlerts,
+      revenueToday: rpcData.revenueToday ?? data.revenueToday,
+      outstanding: rpcData.outstanding ?? data.outstanding,
+      outstandingCount: rpcData.outstandingCount ?? data.outstandingCount,
+      invoicesToday: rpcData.invoicesToday ?? data.invoicesToday,
+      // Series from RPC (normalized to [{key, value}] shape)
+      registrationSeries: rpcData.registrationSeries ? normalizeSeries(rpcData.registrationSeries) : data.registrationSeries,
+      triageSeries: rpcData.triageSeries ? normalizeSeries(rpcData.triageSeries) : data.triageSeries,
+      apptSeries: rpcData.apptSeries ? normalizeSeries(rpcData.apptSeries) : data.apptSeries,
+      revenueSeries: rpcData.revenueSeries ? normalizeSeries(rpcData.revenueSeries) : data.revenueSeries,
+    }
+  }, [data, rpcData])
+
+  return { access, data: mergedData, loading, loadingByTable, isOnline, pendingSync, tz }
 }
