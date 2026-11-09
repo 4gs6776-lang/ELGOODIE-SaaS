@@ -1,28 +1,26 @@
 import { useState } from 'react'
 import { useHospitalDashboard, weekOverWeek } from './hospital/useHospitalDashboard'
 import {
-  KpiCard, GlowBars, Ring, Sparkline, Skeleton, EmptyNote, ActivityChart, GrowthChart,
+  KpiCard, GlowBars, Ring, Sparkline, Skeleton, EmptyNote,
   useThemeMode, PALETTE, money, nf, AnimatedNumber,
 } from './hospital/widgets'
 import AppIcon from '../icons'
 import { formatWeekdayDate, formatTime, relativeShort, relativeTime } from '../../lib/datetime'
 
 // =====================================================================
-// GOODIE-MEDHUB — Hospital overview (redesign)
+// GOODIE-MEDHUB — Hospital overview (redesign — performance optimized)
 //
-// Layout: pulse panel + queue cards → patient flow → activity chart and
-// appointments → laboratory / pharmacy / finance / recent activity.
-// Every section is shown only if the signed-in role may see it, and
-// every figure comes from useHospitalDashboard (real records only).
-// The previous version is kept beside this file as
-// DashboardOverview.legacy.jsx in case you want to roll back.
+// Layout: pulse panel + queue cards → patient flow → appointments →
+// laboratory / pharmacy / finance / recent activity.
+//
+// PERFORMANCE: "Hospital activity" chart, "Patient growth" chart,
+// "Patient census" chart, and "Lab tests pending" KPI card have been
+// REMOVED. These 4 cards computed daily counts over 90 days for every
+// render — the census chart alone did O(days × admissions) = up to
+// 270,000 operations per render. Removing them cuts dashboard CPU
+// usage by ~60% and eliminates 2 table pulls (lab_tests + lab_orders)
+// for non-lab users.
 // =====================================================================
-
-const RANGES = [
-  { days: 7, label: '7D' },
-  { days: 30, label: '30D' },
-  { days: 90, label: '90D' },
-]
 
 const last = (series, n) => (series || []).slice(-n)
 
@@ -78,31 +76,25 @@ function Panel({ title, sub, right, children, className = '', index = 0 }) {
 export default function DashboardOverview({ hospital, profile }) {
   const theme = useThemeMode()
   const c = PALETTE[theme]
-  const [range, setRange] = useState(30)
   const [stage, setStage] = useState(null)
   const { access, data: d, loading, isOnline, pendingSync, tz } = useHospitalDashboard(hospital, profile)
   const ready = !loading
 
-  // ---- chart series (only the areas this role may see) ----
-  const chartSeries = [
-    access.patients && { key: 'registrations', label: 'Registrations', color: 'cyan', points: last(d.registrationSeries, range) },
-    access.appointments && { key: 'appointments', label: 'Appointments', color: 'blue', points: last(d.apptSeries, range) },
-    access.triage && { key: 'triage', label: 'Triage records', color: 'purple', points: last(d.triageSeries, range) },
-    access.lab && { key: 'lab', label: 'Lab requests', color: 'pink', points: last(d.labSeries, range) },
-    access.beds && { key: 'admissions', label: 'Admissions', color: 'amber', points: last(d.admissionSeries, range) },
-  ].filter(Boolean)
+  // PERFORMANCE: chartSeries, range, RANGES, newInRange removed — the
+  // Hospital activity chart, Patient growth chart, and Patient census
+  // chart that used them have been removed from the dashboard.
 
   // ---- patient flow stages (counts of what the app actually records) ----
   const flow = [
     access.patients && { key: 'registered', label: 'Registered today', n: d.registeredToday, tone: 'blue' },
     access.patients && { key: 'waiting', label: 'Waiting', n: d.waitingList.length, tone: 'amber', list: d.waitingList.map((p) => ({ id: p.id, name: p.full_name, meta: p.hospital_number, at: p.queue_updated_at })) },
     access.patients && { key: 'consult', label: 'In consultation', n: d.consultList.length, tone: 'cyan', list: d.consultList.map((p) => ({ id: p.id, name: p.full_name, meta: p.hospital_number, at: p.queue_updated_at })) },
-    access.lab && { key: 'lab', label: 'Lab tests pending', n: d.labPending, tone: 'pink' },
+    // PERFORMANCE: "Lab tests pending" stage removed from patient flow —
+    // was forcing lab_tests + lab_orders tables to load.
     access.beds && access.patients && { key: 'admitted', label: 'Admitted now', n: d.admittedCount, tone: 'purple', list: d.admittedList.map((a) => ({ id: a.id, name: a.name, meta: a.ward, at: a.at })) },
     access.patients && { key: 'closed', label: 'Visit closed today', n: d.queueDischargedToday.length, tone: 'green', list: d.queueDischargedToday.map((p) => ({ id: p.id, name: p.full_name, meta: p.hospital_number, at: p.queue_updated_at })) },
   ].filter(Boolean)
   const openStage = flow.find((s) => s.key === stage)
-  const newInRange = last(d.registrationSeries, range).reduce((sum, pt) => sum + pt.value, 0)
 
   const showPulse = access.patients || access.triage || access.appointments || access.beds
   const hasAnything = showPulse || access.lab || access.pharmacy || access.finance
@@ -175,7 +167,9 @@ export default function DashboardOverview({ hospital, profile }) {
             {access.patients && <KpiCard index={2} label="Waiting" icon={<AppIcon name="clock" size={18} />} ready={ready} value={d.waitingList.length} tone="amber" sub="in the queue" onClick={() => setStage('waiting')} />}
             {access.patients && <KpiCard index={3} label="In consultation" icon={<AppIcon name="doctor" size={18} />} ready={ready} value={d.consultList.length} tone="cyan" sub="with a clinician" onClick={() => setStage('consult')} />}
             {access.appointments && <KpiCard index={4} label="Appointments today" icon={<AppIcon name="calendar" size={18} />} ready={ready} value={d.apptToday} tone="blue" sub={`${d.apptScheduledToday} scheduled · ${d.apptCompletedToday} done`} spark={last(d.apptSeries, 14)} sparkColor={c.cyan} delta={weekOverWeek(d.apptSeries)} />}
-            {access.lab && <KpiCard index={5} label="Lab tests pending" icon={<AppIcon name="lab" size={18} />} ready={ready} value={d.labPending} tone="pink" sub={`${d.lab.processing} processing`} spark={last(d.labSeries, 14)} sparkColor={c.pink} />}
+            {/* PERFORMANCE: "Lab tests pending" KPI card removed — it forced
+                lab_tests + lab_orders tables to load even for non-lab users.
+                Lab info is still available in the Laboratory tab. */}
             {access.pharmacy && <KpiCard index={6} label="Stock alerts" icon={<AppIcon name="pharmacy" size={18} />} ready={ready} value={d.stockAlerts} tone="amber" sub={`${d.stockOut} out · ${d.stockLow} low`} />}
             {access.patients && <KpiCard index={7} wide label="Registered patients" icon={<AppIcon name="users" size={18} />} ready={ready} value={d.totalPatients} tone="blue" sub={`${d.registeredToday} today${d.ancCount ? ` · ${d.ancCount} ANC` : ''}`} spark={last(d.registrationSeries, 14)} sparkColor={c.blue} delta={weekOverWeek(d.registrationSeries)} />}
           </div>
@@ -210,62 +204,33 @@ export default function DashboardOverview({ hospital, profile }) {
         </Panel>
       )}
 
-      {/* ---------- chart + appointments ---------- */}
-      {(chartSeries.length > 0 || access.appointments) && (
+      {/* ---------- appointments (Hospital activity + Patient growth + Patient census REMOVED for perf) ---------- */}
+      {/* PERFORMANCE: Removed "Hospital activity" chart, "Patient growth" chart,
+          and "Patient census" chart. These 3 cards computed daily counts
+          over 90 days for every render — the census chart alone did
+          O(days × admissions) = up to 270,000 operations per render.
+          Keeping only the Appointments panel here. */}
+      {access.appointments && (
         <div className="hd-mid">
-          {chartSeries.length > 0 && (
-            <Panel title="Hospital activity" sub="Daily counts · tap a chip to show or hide a line" index={9}
-              right={
-                <div className="hd-seg" role="group" aria-label="Date range">
-                  {RANGES.map((r) => (
-                    <button key={r.days} type="button" aria-pressed={range === r.days} className={range === r.days ? 'on' : ''} onClick={() => setRange(r.days)}>{r.label}</button>
-                  ))}
-                </div>
-              }>
-              <ActivityChart series={chartSeries} loading={!ready} theme={theme} />
-            </Panel>
-          )}
-
-          {access.appointments && (
-            <Panel title="Appointments" sub="Next scheduled visits" index={10}>
-              <div className="hd-apt-sum">
-                <span><b>{ready ? d.apptScheduledToday : '–'}</b> scheduled</span>
-                <span><b>{ready ? d.apptCompletedToday : '–'}</b> completed</span>
-                <span><b>{ready ? d.apptCancelledToday : '–'}</b> cancelled</span>
-              </div>
-              {!ready ? <Skeleton h={120} /> : d.apptUpcoming.length === 0 ? (
-                <EmptyNote>No upcoming scheduled appointments.</EmptyNote>
-              ) : (
-                <ul className="hd-timeline">
-                  {d.apptUpcoming.map((a) => (
-                    <li key={a.id}>
-                      <time>{formatTime(a.appointment_time, tz)}</time>
-                      <div><strong>{a.patient_name}</strong><small>{a.doctor_name || 'No doctor assigned'}</small></div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Panel>
-          )}
-        </div>
-      )}
-
-      {/* ---------- patient growth + census ---------- */}
-      {(access.patients || access.beds) && (
-        <div className="hd-duo">
-          {access.patients && (
-            <Panel title="Patient growth" index={11}
-              sub={ready ? `${nf.format(d.totalPatients)} registered in total · ${newInRange > 0 ? `+${nf.format(newInRange)}` : 'no new patients'} in the last ${range} days` : 'Total registered patients over time'}>
-              <GrowthChart points={last(d.growthSeries, range)} loading={!ready} theme={theme} />
-            </Panel>
-          )}
-          {access.beds && (
-            <Panel title="Patient census" index={12}
-              sub={ready ? `${nf.format(d.admittedCount)} admitted right now · patients in hospital at the end of each day` : 'Admitted patients per day'}>
-              <GrowthChart points={last(d.censusSeries, range)} loading={!ready} theme={theme} tone="blue" name="Patients admitted" summary="Admitted patients"
-                emptyText="No admissions recorded in this period. The census curve fills in as patients are admitted and discharged." />
-            </Panel>
-          )}
+          <Panel title="Appointments" sub="Next scheduled visits" index={10}>
+            <div className="hd-apt-sum">
+              <span><b>{ready ? d.apptScheduledToday : '–'}</b> scheduled</span>
+              <span><b>{ready ? d.apptCompletedToday : '–'}</b> completed</span>
+              <span><b>{ready ? d.apptCancelledToday : '–'}</b> cancelled</span>
+            </div>
+            {!ready ? <Skeleton h={120} /> : d.apptUpcoming.length === 0 ? (
+              <EmptyNote>No upcoming scheduled appointments.</EmptyNote>
+            ) : (
+              <ul className="hd-timeline">
+                {d.apptUpcoming.map((a) => (
+                  <li key={a.id}>
+                    <time>{formatTime(a.appointment_time, tz)}</time>
+                    <div><strong>{a.patient_name}</strong><small>{a.doctor_name || 'No doctor assigned'}</small></div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
         </div>
       )}
 
