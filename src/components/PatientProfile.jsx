@@ -9,6 +9,7 @@ import PatientWallet from './PatientWallet'
 import { writeAudit } from '../lib/audit'
 import { formatDateTime, getTimezone } from '../lib/datetime'
 import { computePatientStatement } from '../lib/billingService'
+import { canWithDb } from '../lib/permissions'
 
 const TABS = ['Overview', 'Vitals', 'Wallet', 'History', 'Items Given', 'Prescriptions', 'Drug Chart', 'Pharmacy', 'Billing', 'Statement', 'Edit Info']
 // Full-screen patient dashboard, opened by clicking a patient anywhere in
@@ -30,6 +31,15 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   const { records: admissionRequests, syncFromServer: syncAdmissionRequests } = useOfflineTable('admission_requests', hospital?.id)
   const { records: drugChartEntries, addRecord: addDrugChartEntry, updateRecord: updateDrugChartEntry, deleteRecord: deleteDrugChartEntry } = useOfflineTable('patient_drug_charts', hospital?.id)
 
+  // ---- DB-backed role permissions (RBAC) ----
+  // FIX: Load the hospital_role_permissions table so we can check
+  // can_edit for the patients module. Before this fix, the "Edit Info"
+  // tab was only hidden from doctors — every other role (billing, lab,
+  // pharmacist, etc.) could edit patient details even if the admin set
+  // can_edit=false in Settings → Role Permissions.
+  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
+  const canEditPatient = canWithDb(profile?.role, 'edit', 'patients', dbRolePerms)
+
   // ---- Pharmacy requests (free-text med requests to pharmacy) ----
   const { addRecord: addPharmacyRequest } = useOfflineTable('pharmacy_requests', hospital?.id)
   
@@ -47,10 +57,14 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   const { records: radiologyScans } = useOfflineTable('radiology_scans', hospital?.id)
   const { records: appointments } = useOfflineTable('appointments', hospital?.id)
 
-  // Doctors can view patient details but cannot add/edit/delete patients.
-  // The "Edit Info" tab is hidden from doctors.
+  // FIX: The "Edit Info" tab is now gated by DB-backed permissions.
+  // - Admin/owner: always can edit (FULL_ACCESS_ROLES)
+  // - Doctors: never can edit (hardcoded — doctors only view)
+  // - All other roles: check canWithDb(role, 'edit', 'patients', dbRolePerms)
+  //   If the admin set can_edit=false for this role+module in Settings →
+  //   Role Permissions, the tab is hidden and patient details are read-only.
   const isDoctor = profile?.role === 'doctor'
-  const visibleTabs = isDoctor
+  const visibleTabs = (isDoctor || !canEditPatient)
     ? TABS.filter(t => t !== 'Edit Info')
     : TABS
 
