@@ -8,7 +8,6 @@ import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
 import SpringToggle from '../../components/SpringToggle'
 import { useHospitalBranding } from '../../lib/useHospitalBranding'
-import { useLiquidGlass } from '../../lib/useLiquidGlass'
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -23,6 +22,7 @@ import {
   FULL_ACCESS_ROLES,
   ROLE_LABELS,
   getAccessibleModulesWithDb,
+  canWithDb,
 } from '../../lib/permissions'
 import {
   DEFAULT_REGISTRATION_FEES,
@@ -210,17 +210,7 @@ export default function Dashboard(){
   // ---- Hospital branding (dashboard background) ----
   // Reads the hospital_branding row + applies it to the #hospital-bg-overlay
   // div via CSS. This is hospital-level (visible to all staff), not per-user.
-  // The Liquid Glass cards on top will pick up this background via
-  // backdrop-filter — exactly like Apple's Control Center over a wallpaper.
   useHospitalBranding()
-
-  // ---- Apple Liquid Glass: dynamic specular tracking ----
-  // Tracks scroll velocity on the dashboard main scroll container and
-  // updates CSS variables (--specular-offset, --specular-stretch) that
-  // glass.css uses to position/stretch the specular sheen band on every
-  // .liquid-glass element. Zero React re-renders — pure CSS variable updates.
-  const dashMainRef = useRef(null)
-  useLiquidGlass(dashMainRef)
 
   // Hospital timezone — every date/time displayed in this file goes
   // through src/lib/datetime.js with this zone (Stage 1 req. #11).
@@ -236,6 +226,13 @@ export default function Dashboard(){
     dbRolePerms = result.records || []
   } catch { dbRolePerms = [] }
 
+  // FIX: DB-backed permission checks for patient create/delete.
+  // Before this fix, the "Add Patient" button and delete button were
+  // only hidden from doctors. Now they respect the admin's DB-configured
+  // can_create / can_delete settings for the patients module.
+  const canCreatePatient = canWithDb(profile?.role, 'create', 'patients', dbRolePerms)
+  const canDeletePatient = canWithDb(profile?.role, 'delete', 'patients', dbRolePerms)
+
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
     // DB-backed: uses the hospital's custom role permissions if they exist,
@@ -246,7 +243,13 @@ export default function Dashboard(){
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
-  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key)) : NAV_ITEMS
+  // FIX: Normalize nav keys (hyphens → underscores) before checking against
+  // allowedKeys. The MODULES array in permissions.js uses underscores
+  // (hmo_patients, anc_patients, ai_diagnostics) but NAV_ITEMS uses
+  // hyphens (hmo-patients, anc-patients, ai-diagnostics). Without
+  // normalization, the .includes() check fails and the menu items
+  // are hidden even when the admin granted access.
+  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key.replace(/-/g, '_'))) : NAV_ITEMS
   const visibleNavItems = roleNavItems.filter(item => isModuleAllowedByPlan(item.key, planEntitlements))
 
   // Subscription alerts (banner + bell entries) — hospital ADMIN only,
@@ -349,7 +352,8 @@ export default function Dashboard(){
   useEffect(() => computeWeeklyCounts(patients), [patients])
   useEffect(() => subscribeSyncErrors(setSyncErrors), [])
   useEffect(() => {
-    if (allowedKeys && !allowedKeys.includes(tab)) setTab('overview')
+    // FIX: Normalize tab key (hyphens → underscores) for the same reason
+    if (allowedKeys && !allowedKeys.includes(tab.replace(/-/g, '_'))) setTab('overview')
     // Also covers deep links (e.g. a reminder pointing at a module the plan lacks).
     else if (!isModuleAllowedByPlan(tab, planEntitlements)) setTab('overview')
   }, [allowedKeys, tab, planEntitlements])
@@ -1188,7 +1192,7 @@ export default function Dashboard(){
         </div>
       </aside>
 
-      <main className="dash-main" ref={dashMainRef}>
+      <main className="dash-main">
         {/* Top Header Bar */}
         <header className="dash-topbar">
           <button
@@ -1453,7 +1457,7 @@ export default function Dashboard(){
                           onChange={e => setPatientSearch(e.target.value)}
                         />
                       </div>
-                      {profile?.role !== 'doctor' && (
+                      {canCreatePatient && (
                         <button className="btn btn-primary" style={{ width: 'auto' }} onClick={() => setShowModal(true)}>+ Add Patient</button>
                       )}
                     </div>
@@ -1477,7 +1481,7 @@ export default function Dashboard(){
                                 <td>{p.age}</td>
                                 <td><span className={`dash-status ${p.status === 'review' ? 'review' : 'stable'}`}>{p.status === 'review' ? 'In Review' : 'Stable'}</span></td>
                                 <td style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{formatDateTime(p.created_at, hospitalTz)}</td>
-                                <td>{profile?.role !== 'doctor' ? <button className="dash-delete" onClick={() => handleDelete(p)} title="Delete"><TrashIcon size={13}/></button> : null}</td>
+                                <td>{canDeletePatient ? <button className="dash-delete" onClick={() => handleDelete(p)} title="Delete"><TrashIcon size={13}/></button> : null}</td>
                               </tr>
                             ))}
                           </tbody>
