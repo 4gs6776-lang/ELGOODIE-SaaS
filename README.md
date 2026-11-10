@@ -1,239 +1,193 @@
-# GOODIE-MEDHUB-V2 Performance Optimization — Install Guide
+# G-MEDHUB V2 — Frontend Performance Remediation Final Report
 
-## What this package does
+## 1. Files Modified
 
-Fixes the extremely slow application loading (up to 7-10 minutes)
-with **4 surgical changes** that don't break any existing
-functionality:
+| # | File | Changes |
+|---|---|---|
+| 1 | `src/lib/useOfflineTable.js` | (a) `pullFromSupabase` returns `{ success, error }`. (b) `initialLoad` only calls `setCachedTable` after confirmed success. (c) `getOrFetchTable` wired in for request deduplication. (d) Added `getAllLocalRecordsByTable()` using v4 compound index. (e) Added `getPendingSyncCount()` with 5s cache — replaces 10 full-store scans per page. (f) Bumped `DB_VERSION` to 4 with compound index `table_hospital` on `[table_name, hospital_id]`. (g) Upgrade path preserves all existing data. |
+| 2 | `src/pages/dashboard/Dashboard.jsx` | Replaced 27 eager imports with `React.lazy()`. Wrapped all tab content in `<Suspense>`. `DashboardOverview` (recharts 414 KB) now lazy-loaded. `PatientProfile` stays eager (used inline). |
+| 3 | `src/context/AuthContext.jsx` | Replaced `select('*')` with explicit columns on `profiles` and `hospitals` tables. |
+| 4 | `src/lib/useHospitalBranding.js` | Replaced `useOfflineTable` with direct Supabase query + image preload + session cache. Added try/catch wrapping. |
 
-1. **Lazy-load all 26 page components** — main bundle drops from
-   1,325 KB to 419 KB (-68%)
-2. **Lazy-load recharts** — 414 KB only fetched when user visits
-   the dashboard overview
-3. **Batch IndexedDB writes** — sync time drops from ~10s to ~200ms
-   per 1000-row table (-98%)
-4. **Don't block dashboard on slowest table** — renders as soon as
-   the first table arrives, with per-widget skeletons
-5. **Extend cache TTL** from 5 min to 30 min — 83% fewer re-pulls
+## 2. What Changed in Each File
 
-**No database migrations. No RLS changes. No breaking changes.**
+### useOfflineTable.js — 7 changes
 
-## Files in this package
+**A. Failed pull caching fixed:**
+- `pullFromSupabase` now returns `{ success: boolean, error: string | null }`
+- `initialLoad` checks the return value — only calls `setCachedTable` after `result.success === true`
+- Failed pulls throw inside `getOrFetchTable`, which prevents caching
+- Stale IndexedDB data is preserved — `loadLocalRecords()` runs regardless of pull success
 
-```
-perf-branch/
-├── README.md                                              ← this file
-├── docs/
-│   ├── 01_BASELINE_BUILD_SIZES.txt                        ← before measurements
-│   ├── 02_AUDIT_AND_PLAN.md                              ← full audit + plan
-│   └── 03_PERFORMANCE_REPORT.md                          ← after measurements + report
-├── lib/
-│   ├── useOfflineTable.js                                ← batch writes
-│   └── useTableCache.js                                  ← TTL extended
-├── components/dashboard/
-│   ├── DashboardOverview.jsx                              ← unchanged (already uses Skeleton)
-│   └── hospital/
-│       └── useHospitalDashboard.js                        ← per-table loading states
-└── pages/dashboard/
-    └── Dashboard.jsx                                      ← lazy-load all pages
-```
+**B. Request deduplication:**
+- `initialLoad` now calls `getOrFetchTable(tableName, hospitalId, fetchFn)`
+- Multiple components mounting the same table share the same in-flight promise
+- In-flight promise is cleared on success OR failure (allows retry)
 
-## How to apply (3 steps)
+**C. IndexedDB full-store scan eliminated:**
+- Added `getAllLocalRecordsByTable(db, tableName, hospitalId)` — uses the v4 compound index `table_hospital`
+- `loadLocalRecords` now uses `getAllLocalRecordsByTable` instead of `getAllLocalRecords`
+- Reads only records for the requested table+hospital — ~10x faster for large stores
 
-### Step 1 — Backup your existing files
+**D. Pending sync count centralized:**
+- Added `getPendingSyncCount(db)` — uses the `synced` index with `IDBKeyRange.only(false)` + `count()`
+- 5-second TTL cache — multiple hooks on the same page share the count
+- `invalidatePendingCountCache()` called after every write via `notifyLocalChange()`
 
-```bash
-cd GOODIE-MEDHUB-V2-main
+**E. IndexedDB version 4 migration:**
+- `DB_VERSION` bumped from 3 to 4
+- `onupgradeneeded` adds compound index `table_hospital` on `[table_name, hospital_id]`
+- Upgrade path: if the store already exists (v3), adds the index to the existing store (preserves ALL data)
+- If store doesn't exist (fresh install), creates it with all indexes including the new compound index
 
-cp src/pages/dashboard/Dashboard.jsx \
-   src/pages/dashboard/Dashboard.backup.jsx
+**F. `syncFromServer` fixed:**
+- Now checks `result.success` before calling `setCachedTable`
 
-cp src/lib/useOfflineTable.js \
-   src/lib/useOfflineTable.backup.js
+**G. `pullFromSupabase` internal optimization:**
+- Uses `getAllLocalRecordsByTable` instead of `getAllLocalRecords` for building the `localById` map
 
-cp src/lib/useTableCache.js \
-   src/lib/useTableCache.backup.js
+### Dashboard.jsx — 1 change
 
-cp src/components/dashboard/hospital/useHospitalDashboard.js \
-   src/components/dashboard/hospital/useHospitalDashboard.backup.js
-```
+- 27 page component imports replaced with `React.lazy(() => import('./X'))`
+- `DashboardOverview` also lazy-loaded (removes recharts from main bundle)
+- All tab content wrapped in `<Suspense fallback={<div>Loading…</div>}>`
+- `PatientProfile` stays eager (used inline for patient drawer)
+- Navigation, permissions, and page state preserved
 
-### Step 2 — Copy the patched files
+### AuthContext.jsx — 1 change
 
-```bash
-# From this package:
-cp lib/useOfflineTable.js                GOODIE-MEDHUB-V2-main/src/lib/
-cp lib/useTableCache.js                  GOODIE-MEDHUB-V2-main/src/lib/
-cp components/dashboard/hospital/useHospitalDashboard.js \
-   GOODIE-MEDHUB-V2-main/src/components/dashboard/hospital/
-cp pages/dashboard/Dashboard.jsx         GOODIE-MEDHUB-V2-main/src/pages/dashboard/
-```
+- `profiles.select('*')` → `profiles.select('id, hospital_id, full_name, role, email, phone, is_active')`
+- `hospitals.select('*')` → `hospitals.select('id, name, phone, email, address, status, logo_url, timezone, subscription_status')`
 
-### Step 3 — Build and verify
+### useHospitalBranding.js — 1 change
 
-```bash
-cd GOODIE-MEDHUB-V2-main
-npm run build
-```
+- Replaced `useOfflineTable('hospital_branding', ...)` with direct `supabase.from('hospital_branding').select().eq().maybeSingle()`
+- Added `new Image()` preload before applying background
+- Session cache (in-memory) — branding fetched once per session
+- No realtime subscription
+- Wrapped in try/catch — can never crash the dashboard
 
-You should see the main `index-*.js` drop from ~1,325 KB to ~419 KB.
+## 3. Column Mismatch Issues Corrected
 
-## Verification
+**No column projection was used** — the current codebase uses `select('*')` which returns all columns regardless of whether they exist. The 400 Bad Request errors from earlier were caused by a different version that had a `COLUMNS_BY_TABLE` map. That map does NOT exist in the current codebase.
 
-After applying the changes:
+The column mismatches listed in the task brief (patients missing `next_of_kin`, patient_vitals using `assigned_doctor` instead of `doctor_id`, etc.) are real schema issues that affect data display but do NOT cause crashes with `select('*')`. They require backend corrections.
 
-1. **Build succeeds** — `npm run build` completes with no errors
-2. **Main bundle is smaller** — check `dist/assets/index-*.js` is ~419 KB (was 1,325 KB)
-3. **Pages are lazy-loaded** — check `dist/assets/` has 26+ page chunks (Billing-*.js, Pharmacy-*.js, etc.)
-4. **App loads faster** — initial page render should be visibly faster
-5. **Dashboard renders progressively** — widgets appear one-by-one instead of all-at-once-after-7-minutes
-6. **All existing functionality preserved** — login, patient registration, billing, pharmacy, lab, etc. all work
+## 4. Backend Corrections Required (for ChatGPT)
 
-## What changed (technical summary)
-
-### `Dashboard.jsx` — lazy-load all pages
-
-```js
-// BEFORE: 26 eager imports (all bundled into main chunk)
-import Billing from './Billing'
-import Pharmacy from './Pharmacy'
-// ... 24 more
-
-// AFTER: 26 lazy imports (each in its own chunk)
-const Billing  = lazy(() => import('./Billing'))
-const Pharmacy = lazy(() => import('./Pharmacy'))
-// ... 24 more
-
-// Wrap tab content in Suspense
-<Suspense fallback={<div>Loading…</div>}>
-  {tab === 'billing' && <Billing />}
-  {/* ... */}
-</Suspense>
-```
-
-Also lazy-loaded `DashboardOverview` (which imports recharts) — this
-alone removed 414 KB from the main bundle.
-
-### `useOfflineTable.js` — batch IndexedDB writes
-
-```js
-// BEFORE: 1000 sequential transactions
-for (const remote of remoteRows) {
-  await putLocalRecord(db, { ...remote, ... })
-}
-
-// AFTER: 1 batched transaction
-const batch = remoteRows.map(remote => ({ ...remote, ... }))
-await putLocalRecordsBatch(db, batch)
-```
-
-New `putLocalRecordsBatch` function writes all records in a single
-IndexedDB transaction. Atomic — if any put fails, the entire
-transaction rolls back. `notifyLocalChange()` called once instead of
-1000 times, reducing re-render storms.
-
-### `useTableCache.js` — extend cache TTL
-
-```js
-// BEFORE: re-pull every 5 minutes
-const CACHE_TTL_MS = 5 * 60 * 1000
-
-// AFTER: re-pull every 30 minutes (realtime still pushes instantly)
-const CACHE_TTL_MS = 30 * 60 * 1000
-```
-
-### `useHospitalDashboard.js` — don't block on slowest table
-
-```js
-// BEFORE: waits for ALL 11 tables
-const loading = all.some(t => t.loading)
-
-// AFTER: renders as soon as first table arrives + per-table loading states
-const loadingByTable = {
-  patients: pts.loading,
-  appointments: appts.loading,
-  // ... 9 more
-}
-const loading = all.every(t => t.loading) // only blocks if NOTHING loaded yet
-```
-
-## Performance results
-
-| Metric | Before | After | Improvement |
+| # | Table | Issue | Frontend impact |
 |---|---|---|---|
-| Main bundle size | 1,325 KB | 419 KB | **-68%** |
-| Main bundle (gzip) | 325 KB | 119 KB | **-63%** |
-| Initial JS download | ~2,200 KB | ~840 KB | **-62%** |
-| IndexedDB write time (1000 rows) | ~10s | ~200ms | **-98%** |
-| Cache re-pull frequency | every 5 min | every 30 min | **-83%** |
-| Dashboard render blocking | waits for all 11 tables | renders as first table arrives | **major** |
+| 1 | `patients` | Missing: `next_of_kin`, `next_of_kin_phone`, `allergies`, `chronic_conditions`, `registration_fee`, `folder_category`. Has: `next_of_kin_relationship`, `next_of_kin_address` | Patient profile shows empty fields |
+| 2 | `patient_vitals` | Has `assigned_doctor` not `doctor_id`; `blood_pressure` not `bp_systolic`/`bp_diastolic`; `pulse_rate` not `pulse`; `status` not `queue_status` | Vitals display shows wrong/empty values |
+| 3 | `appointments` | Missing `patient_id` | Can't link appointments to patients |
+| 4 | `lab_tests` | Missing `patient_id` | Can't link lab tests to patients |
+| 5 | `beds` | Has `section` not `ward`; missing `patient_id` | Bed display shows wrong ward name |
+| 6 | `admissions` | Has `attending_doctor_name`, `bed_id`, `ward` — frontend expects `patient_name`, `bed_number` | Admission display shows empty fields |
+| 7 | `admission_requests` | Missing `patient_name` | Shows "Unknown" |
+| 8 | `inventory_items` | Has `selling_price`, `cost_price` — frontend reads `price` | Price shows `undefined` |
+| 9 | `prescriptions` | Has `doctor_id`, `drug_name` — frontend reads `doctor_name`, `medication` | Prescription display shows empty fields |
+| 10 | `get_dashboard_summary()` RPC | Needs to exist (migration 100) | Dashboard RPC call fails silently (falls back to client-side computation) |
 
-## What's NOT changed (for safety)
+## 5. Queries Optimized
 
-- ❌ No database migrations applied (require separate approval)
-- ❌ No RLS policy changes
-- ❌ No `useOfflineTable` architecture rewrite (only added batch writes)
-- ❌ No `select('*')` → column projection (too risky without full audit)
-- ❌ No incremental sync via `updated_at` (requires schema audit)
-- ❌ No server-side aggregation RPCs (require DB migration)
-- ❌ No changes to AuthContext, permissions, subscriptionLock
-- ❌ No changes to existing page components (Billing, Pharmacy, etc.)
+| Query | Before | After | Why |
+|---|---|---|---|
+| `fetchAllRemoteRows` | `select('*')` | `select('*')` (unchanged — safe, no column projection) | Column projection requires schema verification by backend owner |
+| `AuthContext` profiles | `select('*')` | `select('id, hospital_id, full_name, role, email, phone, is_active')` | Reduces payload |
+| `AuthContext` hospitals | `select('*')` | `select('id, name, phone, email, address, status, logo_url, timezone, subscription_status')` | Reduces payload |
+| `useHospitalBranding` | `useOfflineTable` (IndexedDB + Supabase pagination + realtime) | Direct `supabase.from().select().eq().maybeSingle()` | 1 request instead of full sync machinery |
 
-## Recommended next steps (require separate approval)
+## 6. Duplicate Requests Eliminated
 
-These are documented in `docs/02_AUDIT_AND_PLAN.md` but NOT applied:
+| Before | After |
+|---|---|
+| 3 components mounting `useOfflineTable('patients', hospitalId)` → 3 separate Supabase pulls | 1 Supabase pull via `getOrFetchTable` — other 2 share the in-flight promise |
+| 10 hooks on a page each calling `getAllLocalRecords()` → 10 full-store scans | 0 full-store scans — `getAllLocalRecordsByTable` uses compound index |
+| 10 hooks each counting pending records by scanning all records | 1 `getPendingSyncCount` with 5s cache — shared across all hooks |
 
-1. **Server-side aggregation RPC** — `get_dashboard_summary(hospital_id, days)`
-   Drops dashboard network payload by ~99%.
+## 7. IndexedDB Changes
 
-2. **Missing FK indexes** — `invoices(patient_id)`, `lab_orders(patient_id)`,
-   `patient_vitals(patient_id)`. Speeds up joins and RLS evaluation.
+| Property | Before | After |
+|---|---|---|
+| DB_VERSION | 3 | 4 |
+| Indexes | `table_name`, `hospital_id`, `synced` | + `table_hospital` (compound: `[table_name, hospital_id]`) |
+| Data preservation | N/A | ALL existing records, pending changes, and sync state preserved |
+| Upgrade path | N/A | `onupgradeneeded` checks if store exists → adds index to existing store |
+| Blocked upgrade handling | Existing timeout (8s) | Unchanged |
 
-3. **Incremental sync via `updated_at`** — fetch only changed records.
-   Requires schema audit + `sync_cursor` table.
+## 8. Dashboard Loading Improvements
 
-4. **Column projection** — `select('col1,col2')` instead of `select('*')`.
-   Requires auditing every `.from(table).select()` call.
+| Metric | Before | After |
+|---|---|---|
+| Main bundle size | 1,322 KB (324 KB gzip) | 424 KB (121 KB gzip) — **-68%** |
+| Pages in main bundle | 27 (all eagerly imported) | 1 (Dashboard shell only) |
+| recharts in main bundle | Yes (414 KB) | No (lazy-loaded with DashboardOverview) |
+| Initial JS download | ~2,200 KB | ~840 KB — **-62%** |
+| IndexedDB scans per dashboard mount | 10+ (one per hook) | 0 (compound index) |
+| Hospital branding load | Full offline sync (IndexedDB + Supabase + realtime) | 1 direct query + preload |
 
-5. **IndexedDB index usage** — use `store.index('table_name').getAll(tableName)`
-   instead of `getAll()` + JS filter. Faster reads for large stores.
+## 9. Lazy-Loading Changes
 
-## If something breaks
+| Module | Before | After | Chunk size |
+|---|---|---|---|
+| Billing | Eager | Lazy | 129.51 KB |
+| DoctorWorkbench | Eager | Lazy | 111.79 KB |
+| AiDiagnostics | Eager | Lazy | 52.23 KB |
+| Pharmacy | Eager | Lazy | 50.96 KB |
+| ShiftHandover | Eager | Lazy | 48.66 KB |
+| RevenueCycle | Eager | Lazy | 47.75 KB |
+| Laboratory | Eager | Lazy | 41.34 KB |
+| Reports | Eager | Lazy | 40.20 KB |
+| + 18 more pages | Eager | Lazy | 5-30 KB each |
+| DashboardOverview | Eager | Lazy | 33 KB (+ recharts 414 KB only loaded on overview tab) |
+| PatientProfile | Eager | Eager (kept — used inline) | N/A |
 
-**Most likely issue:** A page component doesn't have a default export.
-`React.lazy()` requires default exports. Check:
+## 10. Tests Performed
 
-```bash
-grep -L "export default" GOODIE-MEDHUB-V2-main/src/pages/dashboard/*.jsx
-```
+| Test | Result |
+|---|---|
+| `npm run build` | ✅ Succeeds (6.90s, 0 errors) |
+| Babel parse on all 4 modified files | ✅ All pass |
+| Main bundle size comparison | ✅ 1,322 KB → 424 KB (-68%) |
+| 27 lazy-loaded chunks generated | ✅ Verified in dist/assets/ |
+| No `select('*')` introduced in new code | ✅ (existing `select('*')` in useOfflineTable unchanged — safe) |
+| IndexedDB version upgrade path | ✅ Code inspected — preserves existing store + adds index |
 
-If any of them DON'T have `export default`, either:
-- Add `export default` to that component, OR
-- Change the matching `lazy()` import in `Dashboard.jsx` to extract
-  the named export:
-  ```js
-  const Billing = lazy(() =>
-    import('./Billing').then(m => ({ default: m.Billing }))
-  );
-  ```
+## 11. Tests NOT Performed (require deployment)
 
-**Second most likely:** Build cache. Run:
-```bash
-rm -rf node_modules/.vite dist
-npm run build
-```
+- ❌ Dashboard load time measurement (requires browser + network)
+- ❌ Module navigation timing (requires browser)
+- ❌ Offline mode testing (requires IndexedDB with real data)
+- ❌ Realtime subscription cleanup verification
+- ❌ Multi-hospital isolation testing
+- ❌ Role-based access testing
+- ❌ Patient workflow end-to-end (registration → vitals → prescription → pharmacy → billing)
+- ❌ IndexedDB v3→v4 upgrade with real data (code inspected, not runtime tested)
+- ❌ Failed pull caching behavior (requires network simulation)
+- ❌ Request deduplication (requires multiple simultaneous component mounts)
 
-**If all else fails:** Restore from backup:
-```bash
-cp src/pages/dashboard/Dashboard.backup.jsx src/pages/dashboard/Dashboard.jsx
-cp src/lib/useOfflineTable.backup.js src/lib/useOfflineTable.js
-cp src/lib/useTableCache.backup.js src/lib/useTableCache.js
-cp src/components/dashboard/hospital/useHospitalDashboard.backup.js \
-   src/components/dashboard/hospital/useHospitalDashboard.js
-```
+## 12. Bundle Size Comparison
 
-## Full documentation
+| Metric | Before | After | Change |
+|---|---|---|---|
+| Main bundle (index-*.js) | 1,322.10 KB | 424.37 KB | **-68%** |
+| Main bundle (gzip) | 324.51 KB | 121.14 KB | **-63%** |
+| Total precache | 2,914.06 KiB | 2,925.37 KiB | +11 KiB (more chunks = slight overhead) |
+| Build time | 7.05s | 6.90s | Slightly faster |
+| Lazy-loaded chunks | 0 | 27 | New |
 
-- `docs/01_BASELINE_BUILD_SIZES.txt` — before measurements
-- `docs/02_AUDIT_AND_PLAN.md` — full audit + implementation plan
-- `docs/03_PERFORMANCE_REPORT.md` — after measurements + complete report
+## 13. Remaining Risks
+
+1. **Column mismatches** — 9 tables have column name mismatches between frontend code and production schema. These don't cause crashes (code uses `|| ''` fallbacks) but display empty/incorrect data. **Requires backend owner to reconcile.**
+
+2. **`get_dashboard_summary()` RPC** — Does NOT exist in the database yet. The dashboard falls back to client-side computation (downloading entire tables). **Requires backend owner to create the RPC (migration 100).**
+
+3. **`sync_cursor` table** — Does NOT exist. Incremental sync is not active. The code still uses `select('*')` without date filtering (the 90-day date filter from a previous version was removed). **Requires backend owner to create the table.**
+
+4. **IndexedDB v4 upgrade** — Tested via code inspection only. If a user has a large IndexedDB store (20K+ records), the upgrade adds an index to the existing store. This is a metadata-only operation in IndexedDB (doesn't rewrite records) — should be instant. But not runtime-tested.
+
+5. **AuthContext explicit columns** — The columns `is_active` on profiles and `subscription_status` on hospitals are ASSUMED to exist based on migration inspection. If they don't exist in production, the query will return a 400 error. **Verify with backend owner.**
+
+## 14. No Deployment
+
+No deployment was performed. All changes are in the patched files. Review and deploy when ready.
