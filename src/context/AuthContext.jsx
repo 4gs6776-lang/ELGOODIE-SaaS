@@ -16,21 +16,46 @@ export function AuthProvider({ children }){
   const [loading, setLoading] = useState(true)
 
   async function loadProfileAndHospital(userId, attempt = 1){
+    // FIX: Use only verified production columns.
+    // profiles table has: id, hospital_id, full_name, role, active, created_at,
+    // updated_at, facility_id, _version, _last_editor, _last_synced_at
+    // It does NOT have: email, phone, is_active
+    // Email is retrieved from the Supabase auth session (session.user.email).
     const { data: profileData, error: profileErr } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, hospital_id, full_name, role, active, facility_id')
       .eq('id', userId)
       .maybeSingle()
 
     if (profileErr || !profileData) {
-      if (attempt < 6) {
+      // FIX: Don't retry on permanent schema errors (400 Bad Request).
+      // A 400 means the column list is wrong — retrying won't fix it.
+      // Only retry on network errors (5xx, timeout, "Failed to fetch").
+      const isPermanentError = profileErr && (
+        profileErr.code === 'PGRST204' ||  // schema cache miss
+        profileErr.status === 400 ||
+        profileErr.message?.includes('Could not find') ||
+        profileErr.message?.includes('schema cache')
+      )
+
+      if (!isPermanentError && attempt < 6) {
         await wait(700)
         return loadProfileAndHospital(userId, attempt + 1)
       }
+      console.error('Profile load failed:', profileErr?.message || 'No profile data')
       setProfile(null)
       setHospital(null)
       return
     }
+
+    // Enrich profile with email from the auth session (not stored in profiles table)
+    // This is set AFTER the initial loadProfileAndHospital call, so we need to
+    // get the session here.
+    const { data: { session: currentSession } } = await supabase.auth.getSession()
+    if (currentSession?.user?.email) {
+      profileData.email = currentSession.user.email
+    }
+
     setProfile(profileData)
 
     // Tell the subscription lock layer about the user's role so it can
@@ -43,6 +68,11 @@ export function AuthProvider({ children }){
       return
     }
 
+    // hospitals table: verified columns used by the app are
+    // id, name, phone, address, status, logo_url, timezone
+    // Using select('*') here because the hospitals table is small (1 row per
+    // hospital) and we don't want to risk another 400 from a wrong column name.
+    // The backend owner can provide the exact column list for further optimization.
     const { data: hospitalData } = await supabase
       .from('hospitals')
       .select('*')
@@ -51,6 +81,7 @@ export function AuthProvider({ children }){
 
     setHospital(hospitalData || null)
   }
+
 useEffect(() => {
   supabase.auth.getSession().then(async ({ data: { session } }) => {
     setSession(session)
