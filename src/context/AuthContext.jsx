@@ -18,7 +18,7 @@ export function AuthProvider({ children }){
   async function loadProfileAndHospital(userId, attempt = 1){
     const { data: profileData, error: profileErr } = await supabase
       .from('profiles')
-      .select('*')
+      .select('id, hospital_id, full_name, role, email, phone, is_active')
       .eq('id', userId)
       .maybeSingle()
 
@@ -45,7 +45,7 @@ export function AuthProvider({ children }){
 
     const { data: hospitalData } = await supabase
       .from('hospitals')
-      .select('*')
+      .select('id, name, phone, email, address, status, logo_url, timezone, subscription_status')
       .eq('id', profileData.hospital_id)
       .maybeSingle()
 
