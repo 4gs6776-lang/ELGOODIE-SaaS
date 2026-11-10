@@ -341,11 +341,6 @@ async function getLocalRecord(db, id) {
 // ============================================================
 // GET ALL LOCAL RECORDS
 // ============================================================
-// PERFORMANCE: Uses the IndexedDB index on `table_name` when
-// available, falling back to getAll() + JS filter for backwards
-// compat. The index-based read is ~10x faster for large stores
-// (20K+ records) because it only reads records for the requested
-// table, not the entire store.
 
 async function getAllLocalRecords(db) {
   return new Promise((resolve, reject) => {
@@ -354,44 +349,6 @@ async function getAllLocalRecords(db) {
     const request = store.getAll()
     request.onsuccess = () => resolve(request.result || [])
     request.onerror = () => reject(request.error)
-  })
-}
-
-// PERFORMANCE: Read only records for a specific table + hospital
-// using the IndexedDB index. Much faster than getAll() + filter.
-async function getAllLocalRecordsByTable(db, tableName, hospitalId) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
-
-    // Try the table_name index first (faster)
-    if (store.indexNames.contains('table_name')) {
-      const index = store.index('table_name')
-      const request = index.getAll(tableName)
-      request.onsuccess = () => {
-        const all = request.result || []
-        // Still need to filter by hospital_id (the index is on
-        // table_name only, not composite)
-        const filtered = hospitalId
-          ? all.filter(r => r.hospital_id === hospitalId && !r._deleted && !r.deleted_at)
-          : all.filter(r => !r._deleted && !r.deleted_at)
-        resolve(filtered)
-      }
-      request.onerror = () => reject(request.error)
-    } else {
-      // Fallback: getAll() + filter (legacy path)
-      const request = store.getAll()
-      request.onsuccess = () => {
-        const all = request.result || []
-        const filtered = all.filter(r =>
-          r.table_name === tableName &&
-          (!hospitalId || r.hospital_id === hospitalId) &&
-          !r._deleted && !r.deleted_at
-        )
-        resolve(filtered)
-      }
-      request.onerror = () => reject(request.error)
-    }
   })
 }
 
@@ -430,161 +387,17 @@ async function deleteLocalRecord(db, id) {
 const PULL_PAGE_SIZE = 1000
 const PULL_MAX_PAGES = 500
 
-// ============================================================
-// COLUMN PROJECTION MAP
-// ============================================================
-// PERFORMANCE: Instead of select('*') which returns EVERY column
-// (including clinical notes, JSONB payloads, prescriptions, etc.),
-// we project only the columns each table's consumers actually read.
-// This drops network payload by ~60-80% for wide tables.
-//
-// Tables NOT in this map fall back to select('*') (safe default).
-// To add a table, audit every place its records are read and list
-// only the columns used.
-const COLUMNS_BY_TABLE = {
-  // patients: read by Dashboard, Reception, PatientProfile, DoctorWorkbench, etc.
-  patients: 'id, hospital_id, full_name, surname, other_names, hospital_number, phone, email, ' +
-            'gender, age, date_of_birth, category, queue_status, queue_updated_at, status, ' +
-            'hmo_provider, hmo_plan, hmo_number, hmo_id_code, hmo_coverage_percent, ' +
-            'blood_group, genotype, marital_status, religion, address, state_of_origin, ' +
-            'nationality, next_of_kin, next_of_kin_phone, emergency_contact, ' +
-            'allergies, chronic_conditions, registration_fee, folder_category, ' +
-            'created_at, deleted_at, updated_at',
-
-  // patient_vitals: read by Dashboard (triage counts), DoctorWorkbench, Nursing
-  patient_vitals: 'id, hospital_id, patient_id, patient_name, doctor_id, doctor_name, ' +
-                  'temperature, bp_systolic, bp_diastolic, pulse, respiratory_rate, spo2, ' +
-                  'weight, height, bmi, chief_complaints, status, queue_status, ' +
-                  'completed, completed_at, completed_by, completed_by_name, ' +
-                  'history_presenting_complaint, diagnosis, diagnoses, symptoms, ' +
-                  'clinical_notes, treatment_plan, follow_up_notes, ' +
-                  'examination_findings, created_at, updated_at',
-
-  // invoices: read by Dashboard (revenue), Billing, PatientProfile
-  invoices: 'id, hospital_id, invoice_number, patient_id, patient_name, ' +
-            'amount, grand_total, amount_paid, balance, status, due_date, ' +
-            'invoice_type, draft_status, receipt_number, created_at, updated_at',
-
-  // lab_tests: read by Dashboard (lab counts), Laboratory
-  lab_tests: 'id, hospital_id, patient_id, patient_name, test_name, status, ' +
-             'resulted_at, requested_at, created_at, updated_at',
-
-  // lab_orders: read by DoctorWorkbench (lab results), Laboratory
-  lab_orders: 'id, hospital_id, patient_id, patient_vitals_id, patient_name, ' +
-              'test_name, status, resulted_at, requested_at, created_at, updated_at',
-
-  // prescriptions: read by DoctorWorkbench, Pharmacy, PatientProfile
-  prescriptions: 'id, hospital_id, patient_id, patient_name, doctor_id, doctor_name, ' +
-                 'medication, dosage, frequency, route, duration, status, ' +
-                 'created_at, updated_at',
-
-  // audit_events: read by Dashboard (recent activity), AuditLog
-  audit_events: 'id, hospital_id, action, actor_name, actor_role, ' +
-                'entity_type, entity_id, summary, created_at, updated_at',
-
-  // appointments: read by Dashboard (today counts), Appointments page
-  appointments: 'id, hospital_id, patient_id, patient_name, doctor_name, ' +
-                'appointment_time, status, reason, created_at, updated_at',
-
-  // beds: read by Dashboard (occupancy)
-  beds: 'id, hospital_id, bed_number, ward, status, patient_id, ' +
-        'created_at, updated_at',
-
-  // admissions: read by Dashboard (admitted count), Admissions, IPD
-  admissions: 'id, hospital_id, patient_id, patient_name, ward, bed_number, ' +
-              'status, admitted_at, discharge_date, created_at, updated_at',
-
-  // admission_requests: read by Dashboard (pending count), Admissions
-  admission_requests: 'id, hospital_id, patient_id, patient_name, doctor_id, ' +
-                     'status, priority, reason, created_at, updated_at',
-
-  // inventory_items: read by Dashboard (stock alerts), Pharmacy, Inventory
-  inventory_items: 'id, hospital_id, name, generic_name, quantity, unit, ' +
-                   'reorder_level, expiry_date, batch_number, category, ' +
-                   'price, cost_price, supplier, created_at, updated_at',
-
-  // messages: read by Dashboard (message badge), Messages page
-  messages: 'id, hospital_id, sender_id, sender_name, recipient_id, ' +
-            'channel_type, channel_key, body, created_at, updated_at',
-
-  // pharmacy_sales: read by Pharmacy (sales history)
-  pharmacy_sales: 'id, hospital_id, sale_number, customer_name, total, ' +
-                  'payment_method, sale_type, status, dispensed_by_name, ' +
-                  'created_at, updated_at',
-
-  // pharmacy_requests: read by Pharmacy (requests tab)
-  pharmacy_requests: 'id, hospital_id, patient_id, patient_name, requester_name, ' +
-                    'medication, dosage, frequency, status, priority, notes, ' +
-                    'created_at, updated_at',
-}
-
-function getColumnsForTable(tableName) {
-  return COLUMNS_BY_TABLE[tableName] || '*'
-}
-
-// PERFORMANCE: Tables with thousands of historical rows only sync the
-// last 90 days. Older data stays in the database — it's just not pulled
-// to the device. This reduces sync payload by ~70% for hospitals with
-// years of invoice/lab/audit history.
-//
-// Tables NOT in this list sync everything (they're either small lookup
-// tables or need full history for correctness).
-//
-// Trade-off: patient history older than 90 days won't be visible when
-// offline. When online, the app can still query Supabase directly for
-// older records — only the offline cache is limited.
-const DATE_FILTERED_TABLES = new Set([
-  'invoices',
-  'lab_tests',
-  'lab_orders',
-  'audit_events',
-  'patient_vitals',
-  'prescriptions',
-  'pharmacy_sales',
-  'pharmacy_requests',
-  'admission_timeline_events',
-])
-
 // Returns every row for the hospital, or null if ANY page failed (we then
 // keep the local data exactly as it was instead of applying a half-read
 // table).
-async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
+async function fetchAllRemoteRows(tableName, hospitalId) {
   const rows = []
-
-  // PERFORMANCE: Column projection — only fetch the columns we need,
-  // not select('*'). Drops network payload by ~60-80% for wide tables.
-  const columns = getColumnsForTable(tableName)
-
-  // PERFORMANCE: For big historical tables, add a date filter so we
-  // only sync the last 90 days (or since the last sync cursor).
-  const useDateFilter = DATE_FILTERED_TABLES.has(tableName)
-  const cutoffDate = sinceTimestamp || (useDateFilter
-    ? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
-    : null)
-
   for (let page = 0; page < PULL_MAX_PAGES; page += 1) {
     const from = page * PULL_PAGE_SIZE
-    let query = supabase
+    const { data, error } = await supabase
       .from(tableName)
-      .select(columns)
+      .select('*')
       .eq('hospital_id', hospitalId)
-
-    // Apply date filter:
-    // - If we have a sync cursor (sinceTimestamp), use updated_at >= cursor
-    //   (incremental sync — only fetch records changed since last sync)
-    // - Otherwise, for big tables, use created_at >= 90 days ago
-    // - Small tables get no filter (sync everything)
-    if (cutoffDate) {
-      if (sinceTimestamp) {
-        // Incremental sync: use updated_at (catches updates + inserts)
-        query = query.gte('updated_at', cutoffDate)
-      } else {
-        // Initial sync: use created_at for the 90-day window
-        query = query.gte('created_at', cutoffDate)
-      }
-    }
-
-    const { data, error } = await query
       .order('id', { ascending: true })
       .range(from, from + PULL_PAGE_SIZE - 1)
 
@@ -596,66 +409,20 @@ async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
   return rows
 }
 
-// ============================================================
-// SYNC CURSOR MANAGEMENT
-// ============================================================
-// Reads/writes the sync_cursor table to track the last successful
-// sync timestamp per (hospital, table). Used for incremental sync:
-//   1. Read cursor → get lastSyncedAt
-//   2. Fetch only records with updated_at >= lastSyncedAt
-//   3. Write cursor → update lastSyncedAt to now()
-
-async function getSyncCursor(hospitalId, tableName) {
-  if (!hospitalId || !supabase?.from) return null
-  try {
-    const { data, error } = await supabase
-      .from('sync_cursor')
-      .select('last_synced_at')
-      .eq('hospital_id', hospitalId)
-      .eq('table_name', tableName)
-      .maybeSingle()
-    if (error || !data) return null
-    return data.last_synced_at
-  } catch {
-    return null
-  }
-}
-
-async function setSyncCursor(hospitalId, tableName, syncedAt) {
-  if (!hospitalId || !supabase?.from) return
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    await supabase
-      .from('sync_cursor')
-      .upsert({
-        hospital_id: hospitalId,
-        table_name: tableName,
-        last_synced_at: syncedAt || new Date().toISOString(),
-        last_synced_by: user?.id || null,
-      }, { onConflict: 'hospital_id,table_name' })
-  } catch (e) {
-    console.warn(`Failed to update sync cursor for ${tableName}:`, e.message)
-  }
-}
-
 async function pullFromSupabase(db, tableName, hospitalId) {
   if (!navigator.onLine || !supabase?.from || !hospitalId) return
 
   try {
-    // PERFORMANCE: Incremental sync — read the sync cursor for this
-    // table+hospital. If a cursor exists, only fetch records updated
-    // since the cursor timestamp. If no cursor (first sync), fetch
-    // the last 90 days (for big tables) or everything (for small tables).
-    const sinceTimestamp = await getSyncCursor(hospitalId, tableName)
-
-    const remoteRows = await fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp)
+    const remoteRows = await fetchAllRemoteRows(tableName, hospitalId)
 
     if (!remoteRows) return
 
-    // PERFORMANCE: Use the table_name index to read only this table's
-    // local records (instead of getAllLocalRecords which reads the
-    // entire IndexedDB store). ~10x faster for large stores.
-    const localRows = await getAllLocalRecordsByTable(db, tableName, hospitalId)
+    // PERFORMANCE: build localById map once, then prepare a batch of
+    // records to write in a SINGLE IndexedDB transaction.
+    // The original code called putLocalRecord() in a loop, which
+    // opened a new transaction per record — for 1000 rows that's
+    // 1000 sequential transactions. The batch version is ~10-50x faster.
+    const localRows = await getAllLocalRecords(db)
     const localById = new Map(localRows.map((r) => [r.id, r]))
 
     const batch = []
@@ -684,14 +451,6 @@ async function pullFromSupabase(db, tableName, hospitalId) {
     if (batch.length > 0) {
       await putLocalRecordsBatch(db, batch)
     }
-
-    // PERFORMANCE: Update the sync cursor so the next sync is incremental.
-    // Only write the cursor if the sync succeeded (we're past the try
-    // block's error-prone parts). This means: if ANY page fetch failed
-    // (fetchAllRemoteRows returned null), we return early above and
-    // don't update the cursor — so the next sync retries from the same
-    // cursor timestamp.
-    await setSyncCursor(hospitalId, tableName)
   } catch (err) {
     console.error(`Error pulling ${tableName} from Supabase:`, err)
   }
@@ -725,18 +484,19 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     const seq = ++loadSeqRef.current
     try {
       const db = await openDB()
-      // PERFORMANCE: Use the table_name index to read only this table's
-      // records, instead of getAllLocalRecords() which reads the entire
-      // store. ~10x faster for large stores (20K+ records).
-      const filtered = await getAllLocalRecordsByTable(db, tableName, hospitalId)
+      const all = await getAllLocalRecords(db)
       if (seq !== loadSeqRef.current) return // a newer read superseded this one
+
+      const filtered = all.filter(
+        (record) =>
+          record.table_name === tableName &&
+          record.hospital_id === hospitalId &&
+          !record._deleted &&
+          !record.deleted_at
+      )
 
       setRecords(filtered)
 
-      // Pending count still needs a full store read (counts across ALL tables)
-      // — but only when there might be pending records. This is a rare
-      // operation (only when offline writes exist).
-      const all = await getAllLocalRecords(db)
       const pending = all.filter(
         (record) => record._synced === false && record._discarded !== true
       )
