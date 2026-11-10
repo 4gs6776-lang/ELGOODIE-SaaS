@@ -554,6 +554,133 @@ async function setSyncCursor(hospitalId, tableName, syncedAt) {
 // PULL RECORDS DOWN FROM SUPABASE
 // ============================================================
 
+// ============================================================
+// VERIFIED COLUMN PROJECTION MAP
+// ============================================================
+// Each column listed below has been verified against the production
+// schema by the backend owner. Tables NOT in this map use select('*')
+// (safe default). Columns NOT listed here are either missing from
+// production or unverified — they are reported as backend requirements.
+//
+// RULES:
+//   1. Only list columns confirmed to exist in production.
+//   2. Do NOT invent columns or guess names.
+//   3. Where a column name differs from what the frontend code reads,
+//      the frontend code is adapted to use the production column name.
+//   4. Where a column is genuinely missing, it is NOT listed here —
+//      the frontend code handles undefined values with || '' fallbacks.
+
+const COLUMNS_BY_TABLE = {
+  // patients: verified columns from production schema
+  // MISSING in production (frontend reads them but they return undefined):
+  //   next_of_kin, next_of_kin_phone, allergies, chronic_conditions,
+  //   registration_fee, folder_category
+  // Production has: next_of_kin_relationship, next_of_kin_address
+  // These mismatches are reported as backend requirements.
+  patients: 'id, hospital_id, full_name, surname, other_names, hospital_number, ' +
+            'phone, email, gender, age, date_of_birth, category, ' +
+            'queue_status, queue_updated_at, status, ' +
+            'hmo_provider, hmo_plan, hmo_number, hmo_id_code, hmo_coverage_percent, ' +
+            'blood_group, genotype, marital_status, religion, ' +
+            'address, state_of_origin, nationality, ' +
+            'next_of_kin_relationship, next_of_kin_address, ' +
+            'occupation, emergency_contact_name, emergency_contact_phone, ' +
+            'anc_edd, anc_lmp, anc_husband_name, anc_indication, ' +
+            'folder_expires_at, folder_renewed, folder_renewal_count, folder_re_registered, ' +
+            'portal_account_created, hmo_authorization_code, ' +
+            'hmo_authorization_date, hmo_authorization_expires, ' +
+            'created_at, deleted_at, updated_at',
+
+  // patient_vitals: production uses assigned_doctor (not doctor_id),
+  // blood_pressure (not bp_systolic/bp_diastolic), pulse_rate (not pulse),
+  // status (not queue_status), completed_at (not completed)
+  patient_vitals: 'id, hospital_id, patient_id, patient_name, ' +
+                  'assigned_doctor, blood_pressure, pulse_rate, ' +
+                  'respiratory_rate, temperature, spo2, weight, height, ' +
+                  'chief_complaints, status, ' +
+                  'completed_at, completed_by, ' +
+                  'history_presenting_complaint, past_medical_history, ' +
+                  'past_surgical_history, drug_history, allergy_history, ' +
+                  'family_social_history, examination_findings, observations, ' +
+                  'diagnosis, diagnoses, symptoms, ' +
+                  'clinical_notes, treatment_plan, follow_up_notes, ' +
+                  'created_at, updated_at',
+
+  // invoices: production uses patient_name (TEXT, not patient_id UUID)
+  invoices: 'id, hospital_id, invoice_number, patient_name, ' +
+            'amount, grand_total, amount_paid, balance, status, ' +
+            'invoice_type, draft_status, receipt_number, ' +
+            'created_at, updated_at',
+
+  // lab_tests: production does NOT have patient_id — uses patient_name
+  lab_tests: 'id, hospital_id, patient_name, test_name, status, ' +
+             'resulted_at, requested_at, created_at, updated_at',
+
+  // lab_orders: production does NOT have patient_id — uses patient_name
+  // Has patient_vitals_id (verified in DoctorWorkbench code)
+  lab_orders: 'id, hospital_id, patient_name, patient_vitals_id, ' +
+              'test_name, status, resulted_at, requested_at, ' +
+              'created_at, updated_at',
+
+  // prescriptions: production uses drug_name (not medication), doctor_id (not doctor_name)
+  prescriptions: 'id, hospital_id, patient_id, patient_name, ' +
+                'doctor_id, drug_name, dosage, frequency, route, duration, ' +
+                'status, patient_vitals_id, notes, quantity, ' +
+                'finalized, dispensed, cancelled, ' +
+                'nurse_sent_to_pharmacy, encounter_id, inventory_item_id, ' +
+                'created_at, updated_at',
+
+  // appointments: production does NOT have patient_id — uses patient_name
+  appointments: 'id, hospital_id, patient_name, doctor_name, ' +
+                'appointment_time, status, reason, ' +
+                'created_at, updated_at',
+
+  // beds: production uses section (not ward), does NOT have patient_id
+  beds: 'id, hospital_id, bed_number, section, status, ' +
+        'created_at, updated_at',
+
+  // admissions: production uses bed_id (not bed_number), ward, attending_doctor_name
+  // Does NOT have patient_name — uses patient_id
+  admissions: 'id, hospital_id, patient_id, ward, bed_id, ' +
+              'status, admitted_at, discharge_date, attending_doctor_name, ' +
+              'created_at, updated_at',
+
+  // admission_requests: production does NOT have patient_name — uses patient_id
+  admission_requests: 'id, hospital_id, patient_id, doctor_id, ' +
+                     'status, priority, reason, ' +
+                     'created_at, updated_at',
+
+  // inventory_items: production uses selling_price, cost_price (not price)
+  inventory_items: 'id, hospital_id, name, generic_name, quantity, unit, ' +
+                   'reorder_level, expiry_date, batch_number, category, ' +
+                   'selling_price, cost_price, supplier, ' +
+                   'created_at, updated_at',
+
+  // audit_events
+  audit_events: 'id, hospital_id, action, actor_name, actor_role, ' +
+                'entity_type, entity_id, summary, ' +
+                'created_at, updated_at',
+
+  // messages
+  messages: 'id, hospital_id, sender_id, sender_name, recipient_id, ' +
+            'channel_type, channel_key, body, ' +
+            'created_at, updated_at',
+
+  // pharmacy_sales
+  pharmacy_sales: 'id, hospital_id, sale_number, customer_name, total, ' +
+                  'payment_method, sale_type, status, dispensed_by_name, ' +
+                  'created_at, updated_at',
+
+  // pharmacy_requests
+  pharmacy_requests: 'id, hospital_id, patient_id, patient_name, requester_name, ' +
+                    'medication, dosage, frequency, status, priority, notes, ' +
+                    'created_at, updated_at',
+}
+
+function getColumnsForTable(tableName) {
+  return COLUMNS_BY_TABLE[tableName] || '*'
+}
+
 // Supabase (PostgREST) returns AT MOST 1000 rows per request by default.
 const PULL_PAGE_SIZE = 1000
 const PULL_MAX_PAGES = 500
@@ -578,7 +705,7 @@ async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
     const from = page * PULL_PAGE_SIZE
     let query = supabase
       .from(tableName)
-      .select('*')
+      .select(getColumnsForTable(tableName))
       .eq('hospital_id', hospitalId)
 
     // Apply incremental filter if we have a cursor
@@ -611,7 +738,7 @@ async function fetchAllRemoteRowsNoFilter(tableName, hospitalId) {
     const from = page * PULL_PAGE_SIZE
     const { data, error } = await supabase
       .from(tableName)
-      .select('*')
+      .select(getColumnsForTable(tableName))
       .eq('hospital_id', hospitalId)
       .order('id', { ascending: true })
       .range(from, from + PULL_PAGE_SIZE - 1)
