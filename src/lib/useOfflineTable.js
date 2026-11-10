@@ -495,27 +495,117 @@ async function deleteLocalRecord(db, id) {
 }
 
 // ============================================================
+// SYNC CURSOR MANAGEMENT (Stage 2 — incremental sync)
+// ============================================================
+// Reads/writes the sync_cursor table to track the last successful
+// sync timestamp per (hospital, table). Used for incremental sync:
+//   1. Read cursor → get lastSyncedAt
+//   2. Fetch only records with updated_at >= (cursor - overlap)
+//   3. Write cursor → advance to now()
+//
+// The overlap window (5 minutes) ensures records changed DURING the
+// sync are caught on the next sync — prevents edge-case data loss
+// where a record is updated between the cursor read and the fetch.
+//
+// Safety:
+//   - If the cursor read fails → full sync (no filter)
+//   - If the fetch fails → cursor NOT advanced (retry from same point)
+//   - If updated_at column doesn't exist → 400 from PostgREST →
+//     catch error → full sync fallback (no date filter)
+//   - Pending offline writes (_synced=false) are NEVER overwritten
+
+const SYNC_OVERLAP_MS = 5 * 60 * 1000  // 5-minute overlap window
+
+async function getSyncCursor(hospitalId, tableName) {
+  if (!hospitalId || !supabase?.from) return null
+  try {
+    const { data, error } = await supabase
+      .from('sync_cursor')
+      .select('last_synced_at')
+      .eq('hospital_id', hospitalId)
+      .eq('table_name', tableName)
+      .maybeSingle()
+    if (error || !data) return null
+    return data.last_synced_at
+  } catch {
+    return null  // Non-fatal — fall back to full sync
+  }
+}
+
+async function setSyncCursor(hospitalId, tableName, syncedAt) {
+  if (!hospitalId || !supabase?.from) return
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase
+      .from('sync_cursor')
+      .upsert({
+        hospital_id: hospitalId,
+        table_name: tableName,
+        last_synced_at: syncedAt || new Date().toISOString(),
+        last_synced_by: user?.id || null,
+      }, { onConflict: 'hospital_id,table_name' })
+  } catch (e) {
+    // Non-fatal — cursor update failed, next sync will retry from same point
+    console.warn(`[sync_cursor] Failed to advance cursor for ${tableName}:`, e.message)
+  }
+}
+
+// ============================================================
 // PULL RECORDS DOWN FROM SUPABASE
 // ============================================================
 
 // Supabase (PostgREST) returns AT MOST 1000 rows per request by default.
-// Before this fix the pull made ONE request, so any table with more than
-// 1000 rows for a hospital (patients, invoices, lab orders...) was
-// silently cut off: the rest never reached the device, lists showed only
-// the first 1000 and counts were wrong. We now read the table in pages
-// of 1000 until the last page.
-//   - If you ever change "Max rows" in Supabase (Settings -> API), set
-//     PULL_PAGE_SIZE to the same number.
-//   - Rows are ordered by id so pages never overlap or skip rows.
-//   - PULL_MAX_PAGES is only a safety stop against an endless loop
-//     (500 pages = 500,000 rows).
 const PULL_PAGE_SIZE = 1000
 const PULL_MAX_PAGES = 500
 
-// Returns every row for the hospital, or null if ANY page failed (we then
-// keep the local data exactly as it was instead of applying a half-read
-// table).
-async function fetchAllRemoteRows(tableName, hospitalId) {
+// Returns every row for the hospital (or only changed rows if sinceTimestamp
+// is provided), or null if ANY page failed.
+//
+// Incremental sync: when sinceTimestamp is provided, adds
+// .gte('updated_at', sinceTimestamp - overlap) to fetch only changed
+// records. If the updated_at column doesn't exist, PostgREST returns 400 —
+// we catch that and retry without the filter (full sync fallback).
+async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
+  const rows = []
+
+  // If we have a cursor, subtract the overlap window to catch records
+  // changed during the previous sync.
+  const cutoffDate = sinceTimestamp
+    ? new Date(new Date(sinceTimestamp).getTime() - SYNC_OVERLAP_MS).toISOString()
+    : null
+
+  for (let page = 0; page < PULL_MAX_PAGES; page += 1) {
+    const from = page * PULL_PAGE_SIZE
+    let query = supabase
+      .from(tableName)
+      .select('*')
+      .eq('hospital_id', hospitalId)
+
+    // Apply incremental filter if we have a cursor
+    if (cutoffDate) {
+      query = query.gte('updated_at', cutoffDate)
+    }
+
+    const { data, error } = await query
+      .order('id', { ascending: true })
+      .range(from, from + PULL_PAGE_SIZE - 1)
+
+    // If the error is about updated_at column not existing, retry without the filter
+    if (error && cutoffDate && error.message && error.message.includes('updated_at')) {
+      console.warn(`[sync] ${tableName} doesn't have updated_at column — falling back to full sync`)
+      return fetchAllRemoteRowsNoFilter(tableName, hospitalId)
+    }
+
+    if (error || !data) return null
+    rows.push(...data)
+    if (data.length < PULL_PAGE_SIZE) return rows
+  }
+  console.warn(`Pull of ${tableName} stopped at ${PULL_MAX_PAGES * PULL_PAGE_SIZE} rows (safety limit).`)
+  return rows
+}
+
+// Full sync fallback (no date filter) — used when updated_at doesn't exist
+async function fetchAllRemoteRowsNoFilter(tableName, hospitalId) {
   const rows = []
   for (let page = 0; page < PULL_MAX_PAGES; page += 1) {
     const from = page * PULL_PAGE_SIZE
@@ -541,11 +631,17 @@ async function pullFromSupabase(db, tableName, hospitalId) {
   if (!navigator.onLine || !supabase?.from || !hospitalId) return { success: false, error: 'offline' }
 
   try {
-    const remoteRows = await fetchAllRemoteRows(tableName, hospitalId)
+    // STAGE 2: Read the sync cursor before fetching.
+    // If a cursor exists, fetch only records changed since the cursor
+    // (with a 5-minute overlap window for safety).
+    // If no cursor (first sync), fetch all rows.
+    const sinceTimestamp = await getSyncCursor(hospitalId, tableName)
+
+    const remoteRows = await fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp)
 
     if (!remoteRows) return { success: false, error: 'fetch returned null' }
 
-    // PERFORMANCE: Use getAllLocalRecordsByTable (index-based) instead
+    // PERFORMANCE: Use getAllLocalRecordsByTable (compound index) instead
     // of getAllLocalRecords (full-store scan) to build the localById map.
     const localRows = await getAllLocalRecordsByTable(db, tableName, hospitalId)
     const localById = new Map(localRows.map((r) => [r.id, r]))
@@ -555,6 +651,7 @@ async function pullFromSupabase(db, tableName, hospitalId) {
       const local = localById.get(remote.id)
 
       // Don't overwrite a record that has local changes waiting to sync
+      // (e.g. an edit or delete made offline that hasn't gone up yet).
       if (local && local._synced === false) continue
 
       batch.push({
@@ -562,6 +659,7 @@ async function pullFromSupabase(db, tableName, hospitalId) {
         table_name: tableName,
         hospital_id: hospitalId,
         _synced: true,
+        // Soft-deleted rows stay in the local store but are hidden from lists.
         _deleted: Boolean(remote.deleted_at),
         _syncError: false,
         _syncErrorMessage: null,
@@ -569,9 +667,17 @@ async function pullFromSupabase(db, tableName, hospitalId) {
       })
     }
 
+    // Write all rows in ONE transaction. If any put fails, the entire
+    // transaction rolls back and the local data stays exactly as it was.
     if (batch.length > 0) {
       await putLocalRecordsBatch(db, batch)
     }
+
+    // STAGE 2: Advance the sync cursor after a confirmed successful sync.
+    // This MUST happen AFTER the batch write succeeds — if the write
+    // throws, we never reach this line, so the cursor stays at the old
+    // value and the next sync retries from the same point.
+    await setSyncCursor(hospitalId, tableName)
 
     return { success: true, error: null }
   } catch (err) {
