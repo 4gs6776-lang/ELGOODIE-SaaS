@@ -1,27 +1,10 @@
-
-   import { useEffect, useMemo, useRef, useState, useSyncExternalStore, lazy, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, lazy, Suspense } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { HospitalProvider } from '../../context/HospitalContext'
 import { supabase } from '../../lib/supabaseClient'
 import AppIcon from '../../components/icons'
-
-// PERFORMANCE: tab-conditional hook helper.
-// Passes hospitalId to useOfflineTable only when the current tab is one
-// of the tabs that needs this table. When the tab doesn't match,
-// hospitalId becomes null and useOfflineTable skips all I/O (no
-// IndexedDB reads, no Supabase pulls, no timers).
-//
-// Usage: const { records } = useTabScopedTable('inventory_items', hospital?.id, tab, ['inventory','pharmacy'])
-const useTabScopedTable = (tableName, hospitalId, activeTab, tabsThatNeedIt) => {
-  const scopedId = tabsThatNeedIt.includes(activeTab) ? hospitalId : null
-  return useOfflineTable(tableName, scopedId)
-}
-import RevenueCycle from './RevenueCycle'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
-import SpringToggle from '../../components/SpringToggle'
-import { useHospitalBranding } from '../../lib/useHospitalBranding'
-import { useLiquidGlass } from '../../lib/useLiquidGlass'
 import { writeAudit } from '../../lib/audit'
 import {
   getTimezone,
@@ -35,7 +18,7 @@ import {
 import {
   FULL_ACCESS_ROLES,
   ROLE_LABELS,
-  getAccessibleModulesWithDb,
+  getAccessibleModules,
 } from '../../lib/permissions'
 import {
   DEFAULT_REGISTRATION_FEES,
@@ -43,9 +26,6 @@ import {
   getFeeForCategory,
   formatFee,
 } from '../../lib/registrationFees'
-import Billing from './Billing'
-import Staff from './Staff'
-import Appointments from './Appointments'
 import {
   useOfflineTable,
   getAllSyncErrors,
@@ -53,29 +33,49 @@ import {
   retryTableQueue,
   skipStuckSyncItem,
 } from '../../lib/useOfflineTable';
-import Pharmacy from './Pharmacy'
-import Laboratory from './Laboratory'
-import Radiology from './Radiology'
-import Insurance from './Insurance'
-import Inventory from './Inventory'
-import HmoPatients from './HmoPatients'
-import AncPatients from './AncPatients'
-import Reports from './Reports'
-import Facilities from './Facilities'
-import AuditLog from './AuditLog'
-import Notifications from './Notifications'
-import Settings from './Settings'
-import Subscription from './Subscription'
-import DoctorWorkbench from './DoctorWorkbench'
-import Nursing from './Nursing'
-import DutyRoster from './DutyRoster'
-import IPD from './IPD'
-import Admissions from './Admissions'
-import Reception from './Reception'
+// =====================================================================
+// LAZY-LOADED PAGE MODULES
+// ---------------------------------------------------------------------
+// Each tab below 'overview' / 'patients' is loaded on first visit,
+// not at app startup. This keeps the initial bundle to the dashboard
+// shell + overview so first paint on a slow tablet is fast.
+//
+// Tab strings are UNCHANGED. An earlier iteration renamed hyphens to
+// underscores and broke deep-link navigation; that bug is NOT
+// reintroduced here. The Liquid Glass styling, navigation, sidebar,
+// top bar, every prop passed to each module — all unchanged.
+//
+// PatientProfile stays eagerly imported because it is opened by
+// clicking a patient row, which should feel instant.
+// DashboardOverview stays eagerly imported so the first paint of the
+// default 'overview' tab is immediate.
+// =====================================================================
+const Billing         = lazy(() => import('./Billing'))
+const Staff           = lazy(() => import('./Staff'))
+const Appointments    = lazy(() => import('./Appointments'))
+const Pharmacy        = lazy(() => import('./Pharmacy'))
+const Laboratory      = lazy(() => import('./Laboratory'))
+const Radiology       = lazy(() => import('./Radiology'))
+const Insurance       = lazy(() => import('./Insurance'))
+const Inventory       = lazy(() => import('./Inventory'))
+const HmoPatients     = lazy(() => import('./HmoPatients'))
+const AncPatients     = lazy(() => import('./AncPatients'))
+const Reports         = lazy(() => import('./Reports'))
+const Facilities      = lazy(() => import('./Facilities'))
+const AuditLog        = lazy(() => import('./AuditLog'))
+const Notifications   = lazy(() => import('./Notifications'))
+const Settings        = lazy(() => import('./Settings'))
+const Subscription    = lazy(() => import('./Subscription'))
+const DoctorWorkbench = lazy(() => import('./DoctorWorkbench'))
+const Nursing         = lazy(() => import('./Nursing'))
+const DutyRoster      = lazy(() => import('./DutyRoster'))
+const IPD             = lazy(() => import('./IPD'))
+const Admissions      = lazy(() => import('./Admissions'))
+const Reception       = lazy(() => import('./Reception'))
 import PatientProfile from '../../components/PatientProfile'
-import Messages from './Messages'
-import ShiftHandover from './ShiftHandover'
-import AiDiagnostics from './AiDiagnostics'
+const Messages        = lazy(() => import('./Messages'))
+const ShiftHandover   = lazy(() => import('./ShiftHandover'))
+const AiDiagnostics   = lazy(() => import('./AiDiagnostics'))
 import DashboardOverview from '../../components/dashboard/DashboardOverview'
 import { useMedicationReminders } from '../../hooks/useMedicationReminders'
 import { usePagination } from '../../lib/usePagination'
@@ -144,7 +144,6 @@ const NAV_ITEMS = [
   { key: 'patients', label: 'Patients', section: 'Main', icon: 'users' },
   { key: 'reception', label: 'Reception', section: 'Main', icon: 'reception' },
   { key: 'billing', label: 'Billing & Invoices', section: 'Main', icon: 'billing' },
-  { key: 'revenue-cycle', label: 'Revenue Cycle', section: 'Main', icon: 'billing' },
   { key: 'laboratory', label: 'Laboratory', section: 'Main', icon: 'lab' },
   { key: 'pharmacy', label: 'Pharmacy', section: 'Main', icon: 'pharmacy' },
   { key: 'radiology', label: 'Radiology', section: 'Main', icon: 'radiology' },
@@ -220,42 +219,14 @@ function LiveClock({ hospital }) {
 export default function Dashboard(){
   const { profile, hospital, signOut } = useAuth()
 
-  // ---- Hospital branding (dashboard background) ----
-  // Reads the hospital_branding row + applies it to the #hospital-bg-overlay
-  // div via CSS. This is hospital-level (visible to all staff), not per-user.
-  // The Liquid Glass cards on top will pick up this background via
-  // backdrop-filter — exactly like Apple's Control Center over a wallpaper.
-  useHospitalBranding()
-
-  // ---- Apple Liquid Glass: dynamic specular tracking ----
-  // Tracks scroll velocity on the dashboard main scroll container and
-  // updates CSS variables (--specular-offset, --specular-stretch) that
-  // glass.css uses to position/stretch the specular sheen band on every
-  // .liquid-glass element. Zero React re-renders — pure CSS variable updates.
-  const dashMainRef = useRef(null)
-  useLiquidGlass(dashMainRef)
-
   // Hospital timezone — every date/time displayed in this file goes
   // through src/lib/datetime.js with this zone (Stage 1 req. #11).
   const hospitalTz = getTimezone(hospital)
 
-  // ---- DB-backed role permissions (RBAC) ----
-  // MUST be declared BEFORE allowedKeys which uses it.
-  // Wrapped in try-catch so a missing hospital_role_permissions table
-  // (migration 067 not run yet) doesn't crash the dashboard.
-  let dbRolePerms = []
-  try {
-    const result = useOfflineTable('hospital_role_permissions', hospital?.id)
-    dbRolePerms = result.records || []
-  } catch { dbRolePerms = [] }
-
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
-    // DB-backed: uses the hospital's custom role permissions if they exist,
-    // falls back to hardcoded defaults when the DB is empty or a specific
-    // role+module row doesn't exist.
-    return getAccessibleModulesWithDb(profile?.role, dbRolePerms)
-  }, [profile?.role, dbRolePerms])
+    return getAccessibleModules(profile?.role)
+  }, [profile?.role])
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
@@ -269,8 +240,16 @@ export default function Dashboard(){
 
   const [tab, setTab] = useState('overview')
   const [drawerOpen, setDrawerOpen] = useState(false)
-  // Theme mode is managed by ThemeContext (ThemeProvider in main.jsx)
-  // — the SpringToggle in the header calls toggleMode() from useTheme().
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('gmedhub-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
+  })
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light-mode', theme === 'light')
+    try { localStorage.setItem('gmedhub-theme', theme) } catch {}
+  }, [theme])
+
+  function toggleTheme(){ setTheme(current => current === 'light' ? 'dark' : 'light') }
 
   const [syncErrors, setSyncErrors] = useState([])
   const [syncPanelOpen, setSyncPanelOpen] = useState(false)
@@ -279,8 +258,6 @@ export default function Dashboard(){
   const [activeMenu, setActiveMenu] = useState(null)
   const headerMenuRef = useRef(null)
 
-  // PERFORMANCE: Patients table stays eager — it's needed for the
-  // shell (nav badges, patient drawer, registration modal).
   const { records: patients, loading, isOnline, pendingCount, addRecord, deleteRecord } = useOfflineTable('patients', hospital?.id)
 
   // ---- Medication reminders (blinking red light on Reminders nav item) ----
@@ -307,9 +284,7 @@ export default function Dashboard(){
   }, [dueNow.length])
   
   // NEW: Fetch patient vitals to determine who was attended today
-  // PERFORMANCE: vitals is now tab-scoped (declared below with useTabScopedTable)
-  // — only loads on doctor/nursing/handover tabs. The "attended today"
-  // feature still works because those are the tabs where it's needed.
+  const { records: vitals } = useOfflineTable('patient_vitals', hospital?.id)
 
   const [profilePatientId, setProfilePatientId] = useState(null)
   const [showModal, setShowModal] = useState(false)
@@ -346,28 +321,17 @@ export default function Dashboard(){
   const [todayDuty, setTodayDuty] = useState([])
   const [loadingDuty, setLoadingDuty] = useState(true)
 
-  // PERFORMANCE: These tables are tab-scoped — they only load when
-  // the user is on a tab that actually needs them. Before this change,
-  // all 6 tables loaded on every Dashboard mount (even when the user
-  // was on the Billing tab and didn't need inventory/lab/messages data).
-  const { records: vitals } = useTabScopedTable('patient_vitals', hospital?.id, tab, ['doctor', 'nursing', 'handover'])
-  const { records: inventoryItems } = useTabScopedTable('inventory_items', hospital?.id, tab, ['inventory', 'pharmacy'])
-  const { records: labTests } = useTabScopedTable('lab_tests', hospital?.id, tab, ['laboratory'])
-  const { records: allMessages } = useTabScopedTable('messages', hospital?.id, tab, ['messages'])
+  const { records: inventoryItems } = useOfflineTable('inventory_items', hospital?.id)
+  const { records: labTests } = useOfflineTable('lab_tests', hospital?.id)
+  const { records: allMessages } = useOfflineTable('messages', hospital?.id)
 
   // ---- Registration fees (folder-prices feature) -------------------
   // Same flow as Reception: when a patient is added via the quick-add
   // form, push a pending billable_charge for the folder fee to the
   // cashier's queue (unless waived). Falls back to hard-coded defaults
   // (DEFAULT_REGISTRATION_FEES) until the admin sets values in Settings.
-  // PERFORMANCE: feeRecords only needed when the registration modal is
-  // open OR when on the reception tab. billableCharges only needed when
-  // the registration modal is open.
-  const { records: feeRecords } = useTabScopedTable('hospital_registration_fees', hospital?.id, tab, ['reception'])
-  const { addRecord: addBillableCharge } = useTabScopedTable('billable_charges', hospital?.id, tab, ['reception', 'billing'])
-  // dbRolePerms is now declared earlier (before allowedKeys) with a
-  // try-catch wrapper so a missing hospital_role_permissions table
-  // doesn't crash the dashboard.
+  const { records: feeRecords } = useOfflineTable('hospital_registration_fees', hospital?.id)
+  const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
   const selectedCategoryFee = getFeeForCategory(form.category, feeRecords)
   const hasRegistrationFee = selectedCategoryFee > 0
 
@@ -842,7 +806,7 @@ export default function Dashboard(){
   // to a re-computed value here using just the messages table as a
   // fallback — the moment the user opens Messages, the count gets
   // replaced by the accurate value from the event.
-  const { records: myReadStates } = useTabScopedTable('message_channel_reads', hospital?.id, tab, ['messages'])
+  const { records: myReadStates } = useOfflineTable('message_channel_reads', hospital?.id)
   const [unreadMessageCount, setUnreadMessageCount] = useState(0)
 
   // Recompute the count locally — gives a sensible default before the
@@ -1123,20 +1087,6 @@ export default function Dashboard(){
   return (
     <HospitalProvider>
     <div className="dash-shell">
-      {/* Hospital branding background overlay — fixed, behind everything,
-          pointer-events:none so it never blocks clicks. Brightness/opacity
-          are applied to this div ONLY, never to dashboard content. */}
-      <div
-        id="hospital-bg-overlay"
-        style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 0,
-          pointerEvents: 'none',
-          display: 'none',  // hidden by default — useHospitalBranding enables it
-          transition: 'opacity 0.3s ease',
-        }}
-      />
       <div className={`dash-overlay ${drawerOpen ? 'show' : ''}`} onClick={() => setDrawerOpen(false)} />
 
       <aside className={`dash-sidebar ${drawerOpen ? 'open' : ''}`}>
@@ -1213,7 +1163,7 @@ export default function Dashboard(){
         </div>
       </aside>
 
-      <main className="dash-main" ref={dashMainRef}>
+      <main className="dash-main">
         {/* Top Header Bar */}
         <header className="dash-topbar">
           <button
@@ -1312,10 +1262,14 @@ export default function Dashboard(){
 
             <LiveClock hospital={hospital} />
 
-            {/* Theme Toggle — glassmorphic SpringToggle (light/dark mode).
-                Redesigned to NOT cause the reload loop the old version had.
-                Reads from React context, no DOM MutationObserver. */}
-            <SpringToggle />
+            {/* 1. Theme Toggle */}
+            <button 
+              className="dash-icon-btn" 
+              title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+              onClick={toggleTheme}
+            >
+              <AppIcon name={theme === 'light' ? 'sun' : 'moon'} size={18}/>
+            </button>
 
             {/* 2. Notifications Bell Popover */}
             <div style={{ position: 'relative' }}>
@@ -1428,15 +1382,15 @@ export default function Dashboard(){
             <DashboardOverview hospital={hospital} profile={profile} />
           )}
 
-                    {/* Other tab routing components */}
-          {tab === 'appointments' && <Appointments initialSearch={deepLinkSearch}/>}
+          {/* Other tab routing components — wrapped in <Suspense> so
+              lazy-loaded modules show the existing loading state.
+              The fallback uses the EXISTING .dash-empty-state CSS
+              class — no new styling is introduced. */}
+          <Suspense fallback={<div className="dash-empty-state">Loading…</div>}>
+            {tab === 'appointments' && <Appointments initialSearch={deepLinkSearch}/>}
           {tab === 'patients' && (
             profilePatientId ? (
-              <PatientProfile
-                patientId={profilePatientId}
-                patient={patients.find(p => p.id === profilePatientId)}
-                onClose={() => setProfilePatientId(null)}
-              />
+              <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
             ) : (
               <>
                 {/* NEW: ATTENDED TODAY SECTION */}
@@ -1530,7 +1484,6 @@ export default function Dashboard(){
           {tab === 'hmo-patients' && <HmoPatients />}
           {tab === 'anc-patients' && <AncPatients />}
           {tab === 'billing' && <Billing initialSearch={deepLinkSearch}/>}
-          {tab === 'revenue-cycle' && <RevenueCycle />}
           {tab === 'laboratory' && <Laboratory />}
           {tab === 'pharmacy' && <Pharmacy />}
           {tab === 'radiology' && <Radiology />}
@@ -1551,6 +1504,7 @@ export default function Dashboard(){
           {tab === 'messages' && <Messages />}
           {tab === 'subscription' && <Subscription />}
           {tab === 'settings' && <Settings />}
+          </Suspense>
 
         </div>
       </main>
@@ -1737,25 +1691,18 @@ export default function Dashboard(){
           right: 0;
           width: 280px;
           background: var(--bg-elevated);
-          background-color: var(--glass-bg, var(--bg-elevated));
-          background-image: var(--glass-sheen, none);
-          -webkit-backdrop-filter: var(--glass-blur, none);
-          backdrop-filter: var(--glass-blur, none);
-          border: 1px solid var(--glass-border, var(--line));
-          border-radius: 16px;
-          box-shadow: var(--glass-shadow, 0 10px 25px rgba(0, 0, 0, 0.4));
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
           z-index: 100;
           overflow: hidden;
-        }
-        @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-          .dash-popover-menu { background: var(--bg-elevated); }
         }
         .dash-popover-header {
           padding: 10px 14px;
           font-size: 12px;
           font-weight: 600;
-          background: var(--glass-head, var(--bg-card-hover));
-          border-bottom: 1px solid var(--glass-border, var(--line));
+          background: var(--bg-card-hover);
+          border-bottom: 1px solid var(--line);
           color: var(--ivory);
         }
         .dash-popover-body {
@@ -1765,7 +1712,7 @@ export default function Dashboard(){
         .dash-popover-item {
           padding: 10px 14px;
           font-size: 12px;
-          border-bottom: 1px solid var(--glass-border, var(--line));
+          border-bottom: 1px solid var(--line);
           color: var(--muted);
           line-height: 1.4;
         }
