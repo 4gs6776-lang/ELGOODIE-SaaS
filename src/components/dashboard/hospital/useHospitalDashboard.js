@@ -260,98 +260,83 @@ export function useHospitalDashboard(hospital, profile) {
   }, [pts.records, appts.records, vitals.records, beds.records, adms.records, admReqs.records,
       labTests.records, labOrders.records, stock.records, invoices.records, audit.records, tz])
 
-  // ============================================================
-  // STAGE 1: RPC INTEGRATION — skeleton-while-revalidate
-  // ============================================================
-  // The get_dashboard_summary() RPC returns ~30 scalar counts/sums in ONE
-  // query. We fetch it immediately and merge the RPC values into the
-  // client-computed data.
-  //
-  // CRITICAL: The RPC returns COUNTS (numbers). The client computes both
-  // counts AND LISTS (arrays of patient objects). We must NEVER override
-  // array fields with RPC numbers — that was the crash bug
-  // (queueDischargedToday.map is not a function).
-  //
-  // Merge rules:
-  //   - Scalar fields (totalPatients, bedsOccupied, revenueToday, etc.)
-  //     → RPC value takes priority (more accurate, queries DB directly)
-  //   - Array fields (waitingList, consultList, admittedList, stockWatch,
-  //     apptUpcoming, activity, queueDischargedToday)
-  //     → ALWAYS keep client-computed value (RPC doesn't return arrays)
-  //   - Series fields (registrationSeries, triageSeries, etc.)
-  //     → Keep client-computed (RPC doesn't return series in v2)
-
+  // RPC integration — skeleton-while-revalidate
+  // RPC scalar counts override client-computed values.
+  // Array fields are NEVER overridden (RPC returns counts, not arrays).
+  // FIX: Use nullish coalescing (??) correctly — 0 is a valid value for
+  // labPending and stockAlerts, but || treats 0 as falsy and falls back
+  // to client value incorrectly.
   const [rpcData, setRpcData] = useState(null)
   useEffect(() => {
     if (!hid) return
     let cancelled = false
     fetchDashboardSummary(hid, SERIES_DAYS).then(summary => {
-      if (!cancelled && summary) {
-        setRpcData(summary)
-      }
+      if (!cancelled && summary) setRpcData(summary)
     })
     return () => { cancelled = true }
   }, [hid])
 
-  // Merge RPC scalar values into client-computed data.
-  // Array fields are NEVER overridden (they come from useOfflineTable).
   const mergedData = useMemo(() => {
     if (!rpcData) return data
     return {
       ...data,
-      // ---- Patients (scalar counts from RPC) ----
+      // Patients
       totalPatients: rpcData.totalPatients ?? data.totalPatients,
       registeredToday: rpcData.registeredToday ?? data.registeredToday,
       ancCount: rpcData.ancCount ?? data.ancCount,
-      // ---- Queue lists (KEEP client arrays — RPC returns counts only) ----
-      waitingList: data.waitingList,              // array — keep client
-      consultList: data.consultList,              // array — keep client
-      queueDischargedToday: data.queueDischargedToday,  // array — keep client
-      // ---- Triage ----
+      // Arrays — ALWAYS keep client
+      waitingList: data.waitingList,
+      consultList: data.consultList,
+      queueDischargedToday: data.queueDischargedToday,
+      // Triage
       triageToday: rpcData.triageToday ?? data.triageToday,
-      // ---- Appointments (scalars from RPC; upcoming list stays client) ----
+      // Appointments
       apptToday: rpcData.apptToday ?? data.apptToday,
       apptScheduledToday: rpcData.apptScheduledToday ?? data.apptScheduledToday,
       apptCompletedToday: rpcData.apptCompletedToday ?? data.apptCompletedToday,
       apptCancelledToday: rpcData.apptCancelledToday ?? data.apptCancelledToday,
-      apptUpcoming: data.apptUpcoming,           // array — keep client
-      // ---- Beds (scalars from RPC) ----
+      apptUpcoming: data.apptUpcoming,
+      // Beds
       bedsTotal: rpcData.bedsTotal ?? data.bedsTotal,
       bedsOccupied: rpcData.bedsOccupied ?? data.bedsOccupied,
       bedsAvailable: rpcData.bedsAvailable ?? data.bedsAvailable,
       bedsCleaning: rpcData.bedsCleaning ?? data.bedsCleaning,
       bedsReserved: rpcData.bedsReserved ?? data.bedsReserved,
-      // ---- Admissions (scalars from RPC; admitted list stays client) ----
+      // Admissions
       admittedCount: rpcData.admittedCount ?? data.admittedCount,
       admittedToday: rpcData.admittedToday ?? data.admittedToday,
       dischargedToday: rpcData.dischargedToday ?? data.dischargedToday,
       pendingAdmissionRequests: rpcData.pendingAdmissionRequests ?? data.pendingAdmissionRequests,
-      admittedList: data.admittedList,            // array — keep client
-      // ---- Lab (scalars from RPC) ----
-      labPending: ((rpcData.labOrdered ?? 0) + (rpcData.labSampleCollected ?? 0) + (rpcData.labProcessing ?? 0)) || data.labPending,
+      admittedList: data.admittedList,
+      // Lab — FIX: use ?? not || (0 is valid for labPending)
+      labPending: rpcData.labOrdered != null || rpcData.labSampleCollected != null || rpcData.labProcessing != null
+        ? (rpcData.labOrdered ?? 0) + (rpcData.labSampleCollected ?? 0) + (rpcData.labProcessing ?? 0)
+        : data.labPending,
       labCompletedToday: rpcData.labCompletedToday ?? data.labCompletedToday,
-      // ---- Pharmacy / inventory (scalars from RPC; stockWatch stays client) ----
+      // Pharmacy — FIX: use ?? not || (0 is valid for stockAlerts)
       stockOut: rpcData.stockOut ?? data.stockOut,
       stockLow: rpcData.stockLow ?? data.stockLow,
       stockExpired: rpcData.stockExpired ?? data.stockExpired,
       stockExpiring: rpcData.stockExpiring ?? data.stockExpiring,
       stockTotal: rpcData.stockTotal ?? data.stockTotal,
-      stockAlerts: ((rpcData.stockOut ?? 0) + (rpcData.stockLow ?? 0)) || data.stockAlerts,
-      stockWatch: data.stockWatch,               // array — keep client
-      // ---- Finance (scalars from RPC) ----
+      stockAlerts: rpcData.stockOut != null || rpcData.stockLow != null
+        ? (rpcData.stockOut ?? 0) + (rpcData.stockLow ?? 0)
+        : data.stockAlerts,
+      stockWatch: data.stockWatch,
+      // Finance
       revenueToday: rpcData.revenueToday ?? data.revenueToday,
       outstanding: rpcData.outstanding ?? data.outstanding,
       outstandingCount: rpcData.outstandingCount ?? data.outstandingCount,
       invoicesToday: rpcData.invoicesToday ?? data.invoicesToday,
-      // ---- Series (keep client-computed — RPC v2 doesn't return series) ----
+      // Series — keep client
       registrationSeries: data.registrationSeries,
       triageSeries: data.triageSeries,
       apptSeries: data.apptSeries,
       revenueSeries: data.revenueSeries,
-      // ---- Activity (array — keep client) ----
+      // Activity
       activity: data.activity,
-      // ---- occupancyPct (derived — recompute from RPC bed counts) ----
-      occupancyPct: (rpcData.bedsTotal && rpcData.bedsTotal > 0)
+      // Derived
+      occupancyPct: (rpcData.bedsTotal != null && rpcData.bedsTotal > 0)
         ? Math.round((rpcData.bedsOccupied / rpcData.bedsTotal) * 100)
         : data.occupancyPct,
     }
