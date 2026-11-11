@@ -249,9 +249,19 @@ export function useHospitalDashboard(hospital, profile) {
 
     m.totalPatients = pick('totalPatients', localTotalPatients)
     m.registeredToday = pick('registeredToday', localRegisteredToday)
-    m.waitingList = localWaiting           // LOCAL_ONLY
-    m.consultList = localConsult           // LOCAL_ONLY
-    m.queueDischargedToday = pick('queueDischargedToday', localQueueDischargedToday.length)
+    m.waitingList = localWaiting           // LOCAL_ONLY — array
+    m.consultList = localConsult           // LOCAL_ONLY — array
+    // FIX: queueDischargedToday must be the ARRAY of patient objects,
+    // NOT the count. DashboardOverview.jsx line 95 calls
+    // `d.queueDischargedToday.length` and `d.queueDischargedToday.map(...)`,
+    // which requires an array. The previous code returned
+    // `localQueueDischargedToday.length` (a number), which crashed the
+    // dashboard with "queueDischargedToday.map is not a function"
+    // every time a user signed in and the overview tab rendered.
+    // The RPC `discharged_today` field is documented as `integer`, so
+    // we must NOT use `pick()` here — the RPC value is a count, not a
+    // list. Always use the local array.
+    m.queueDischargedToday = localQueueDischargedToday  // LOCAL_ONLY — array
     m.ancCount = pick('ancCount', patients.filter((p) => p.category === 'anc').length)
     m.registrationSeries = dailySeries(patients, (p) => p.created_at, SERIES_DAYS, tz, now)
     const registeredInWindow = m.registrationSeries.reduce((sum, pt) => sum + pt.value, 0)
