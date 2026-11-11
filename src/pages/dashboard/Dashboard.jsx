@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+
+   import { useEffect, useMemo, useRef, useState, useSyncExternalStore, lazy, Suspense } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { HospitalProvider } from '../../context/HospitalContext'
 import { supabase } from '../../lib/supabaseClient'
