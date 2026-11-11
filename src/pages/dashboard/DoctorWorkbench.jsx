@@ -10,6 +10,16 @@ import { TagAutocomplete } from '../../components/ClinicalAutocomplete'
 import Autocomplete from '../../components/common/Autocomplete'
 import LabResultViewer from '../../components/LabResultViewer'
 import { writeAudit } from '../../lib/audit'
+// Drug Chart workflow integration — creates a linked
+// patient_drug_charts entry the moment a prescription is saved,
+// so the nurse sees the order on the chart immediately. Idempotent:
+// retries / reconnects after an offline save do NOT create duplicates.
+import { createDrugChartFromPrescription } from '../../lib/drugChartWorkflow'
+// Explicit supabase import — needed by createDrugChartFromPrescription's
+// idempotent server-side lookup, and also fixes a latent bug where
+// `supabase` was referenced in handleMedicationOverride and the
+// virtual-consultation handler without an explicit import.
+import { supabase } from '../../lib/supabaseClient'
 import { escapeHtml } from '../../lib/escapeHtml'
 import { labStage, normalizeLabRow, LAB_STAGE_LABEL } from '../../lib/lab'
 import { SYMPTOM_OPTIONS, DIAGNOSIS_OPTIONS, FREQUENCY_OPTIONS, ROUTE_OPTIONS, DEFAULT_TEMPLATES } from '../../lib/clinicalData'
@@ -73,6 +83,17 @@ export default function DoctorWorkbench() {
   const { records: labOrders, loading: loadingLabOrders, addRecord: addLabOrder, syncFromServer: syncLabOrders } = useLazyTable('lab_orders', hospital?.id, { enabled: hasActiveConsult })
   const { records: labTests, syncFromServer: syncLabTests } = useLazyTable('lab_tests', hospital?.id, { enabled: hasActiveConsult })
   const { records: prescriptions, loading: loadingPrescriptions, addRecord: addPrescription, updateRecord: updatePrescription, deleteRecord: deletePrescription, syncFromServer: syncPrescriptions } = useLazyTable('prescriptions', hospital?.id, { enabled: hasActiveConsult })
+
+  // ---- Drug Chart hook ------------------------------------------------
+  // We need addRecord + records here so createDrugChartFromPrescription
+  // can (a) idempotently look up an existing chart entry in the local
+  // cache, and (b) insert a new one if none exists. The hook is always
+  // enabled (not gated by hasActiveConsult) because a doctor may save
+  // a prescription at any time during the consult.
+  const {
+    records: drugChartEntries,
+    addRecord: addDrugChartEntry,
+  } = useOfflineTable('patient_drug_charts', hospital?.id)
   const { records: inventoryItems } = useLazyTable('inventory_items', hospital?.id, { enabled: hasActiveConsult })
   const { records: hospitalTemplates, addRecord: addTemplate } = useLazyTable('prescription_templates', hospital?.id, { enabled: hasActiveConsult })
   const { records: admissionRequests, addRecord: addAdmissionRequest } = useLazyTable('admission_requests', hospital?.id, { enabled: hasActiveConsult })
@@ -700,6 +721,61 @@ export default function DoctorWorkbench() {
           const saved = await addPrescription(payload)
           if (status === 'active' && saved?.id) {
             await addPharmacyOrder({ hospital_id: hospital.id, prescription_id: saved.id, patient_id: activeVitals.patient_id, patient_name: payload.patient_name, encounter_id: activeVitals.id, doctor_id: profile?.id, doctor_name: profile?.full_name, status: 'pending_pharmacy' })
+
+            // ---- Drug Chart workflow integration ---------------------------
+            // Persist the prescription FIRST, get the returned UUID, then
+            // create exactly ONE linked patient_drug_charts entry using
+            // that exact prescription_id. Idempotent: a retry / reconnect
+            // after an offline save does NOT create a duplicate — the
+            // helper looks up an existing chart entry by (prescription_id,
+            // patient_id, hospital_id) before inserting.
+            //
+            // We only create the chart entry when the prescription is
+            // 'active' (sent to pharmacy). Drafts do NOT generate chart
+            // rows — the nurse should not see a draft on the chart.
+            try {
+              const chartResult = await createDrugChartFromPrescription({
+                supabase,
+                hospital,
+                prescription: {
+                  ...saved,
+                  // Carry the original payload fields the helper needs
+                  // for the field mapping (drug_name, dosage, route,
+                  // frequency, duration) — `saved` may not always
+                  // echo them back depending on the backend response.
+                  drug_name: payload.drug_name,
+                  dosage: payload.dosage,
+                  route: payload.route,
+                  frequency: payload.frequency,
+                  duration: payload.duration,
+                  patient_id: payload.patient_id,
+                  hospital_id: hospital.id,
+                  doctor_id: payload.doctor_id,
+                  created_by: payload.created_by,
+                  instructions: payload.instructions,
+                },
+                patientId: payload.patient_id,
+                patientName: payload.patient_name,
+                doctorInstructions: payload.instructions || null,
+                addDrugChartEntry,
+                existingChartEntries: drugChartEntries,
+              })
+              if (chartResult.error) {
+                // Non-fatal — the prescription was saved; the chart
+                // entry will be created on retry. Log for visibility.
+                console.warn(
+                  `[drug-chart] Could not create chart entry for prescription ${saved.id}:`,
+                  chartResult.error
+                )
+              }
+            } catch (chartErr) {
+              // Same: never block the prescription save on the chart
+              // creation. The user can retry via the Sync Queue panel.
+              console.warn(
+                `[drug-chart] Exception creating chart entry for prescription ${saved.id}:`,
+                chartErr
+              )
+            }
           }
           updated.push({ ...m, dbId: saved?.id || null })
         }

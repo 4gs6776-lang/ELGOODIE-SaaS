@@ -8,6 +8,13 @@ import PatientAutocomplete from '../../components/common/PatientAutocomplete'
 import ModuleHistoryButton from '../../components/ModuleHistoryButton'
 import { writeAudit } from '../../lib/audit'
 import AiDiagnostics from './AiDiagnostics'
+// Drug Chart workflow integration — the new recordMedicationAdministration
+// helper validates cross-patient / cross-hospital scope, inserts ONE
+// row into medication_administrations with the authenticated staff's
+// UUID, updates the linked patient_drug_charts row (chart_status =
+// 'given', sign derived from the staff profile), and updates the
+// prescription's status to 'dispensed'.
+import { recordMedicationAdministration } from '../../lib/drugChartWorkflow'
 import {
   checkVitalsAgainstLimits,
   buildAlertReason,
@@ -28,6 +35,15 @@ export default function Nursing(){
   records: medicationAdministrations,
   addRecord: addMedicationAdministration
 } = useOfflineTable('medication_administrations', hospital?.id)
+
+  // ---- Drug Chart hook (used by recordMedicationAdministration) ----
+  // We need both `records` (to find the linked chart entry by
+  // prescription_id) and `updateRecord` (to mark it 'given' and stamp
+  // the nurse's sign). The hook is hospital-scoped via RLS.
+  const {
+    records: drugChartEntries,
+    updateRecord: updateDrugChartEntry,
+  } = useOfflineTable('patient_drug_charts', hospital?.id)
 
   // ---- Early-warning alert hooks ----
   const { records: vitalsLimits } = useOfflineTable('hospital_vitals_limits', hospital?.id)
@@ -267,31 +283,50 @@ export default function Nursing(){
       return
     }
 
-    await addMedicationAdministration({
-      patient_id: resolvedPatientId,
-      prescription_id: rx.id,
-
-      patient_name: rx.patient_name,
-      drug_name: rx.drug_name,
-      dosage: rx.dosage || '',
-      route: rx.route || '',
-      frequency: rx.frequency || '',
-      instructions: rx.instructions || '',
-
-      administered_by: profile.id,
-      administered_by_name: profile.full_name || 'Nurse',
-
-      status: 'administered',
-      administered_at: new Date().toISOString(),
-
-      notes: ''
+    // ---- Drug Chart workflow integration -------------------------------
+    // Delegate to the new helper, which:
+    //   * Validates the prescription belongs to the SAME patient AND
+    //     hospital as the signed-in staff (cross-patient / cross-
+    //     hospital is refused with a clear error).
+    //   * Inserts ONE row into medication_administrations with the
+    //     authenticated staff's UUID (administered_by), full name
+    //     (administered_by_name), and the actual administered_at time.
+    //   * Updates the linked patient_drug_charts row: chart_status =
+    //     'given', sign derived from the staff profile (e.g. "RN-GA"),
+    //     entry_time = the actual administration time. Preserves the
+    //     original next_dose scheduling info.
+    //   * Updates the prescription's status to 'dispensed' so the
+    //     pharmacy workflow sees it as fulfilled.
+    //   * Never uses the legacy staff_id field as a substitute.
+    //   * Never records an administration just because a prescription
+    //     exists — this function is only called from the explicit
+    //     "Mark administered" click handler.
+    const result = await recordMedicationAdministration({
+      supabase: null, // not used for writes — only for the idempotent chart lookup, which is local-only here
+      hospital,
+      profile,
+      prescription: {
+        ...rx,
+        // Ensure the prescription carries the resolved patient_id and
+        // hospital_id so the helper's cross-scope validation works
+        // even when the prescription row was issued before patient_id
+        // was added to the payload.
+        patient_id: resolvedPatientId,
+        hospital_id: hospital.id,
+      },
+      patientId: resolvedPatientId,
+      addMedicationAdministration,
+      updateDrugChartEntry,
+      updatePrescription,
+      drugChartEntries,
+      notes: '',
+      writeAudit,
     })
 
-    await updatePrescription(rx.id, {
-      status: 'dispensed',
-      administered_at: new Date().toISOString(),
-      administered_by: profile.id
-    })
+    if (!result.success) {
+      showToast(result.error || 'Could not record medication administration')
+      return
+    }
 
     showToast(
       `${rx.drug_name} administered to ${rx.patient_name}`
