@@ -68,6 +68,11 @@ import { todayKeyInZone } from './datetime'
 export const LOCAL_ONLY_KEYS = new Set([
   'waitingList',
   'consultList',
+  // FIX: queueDischargedToday is an ARRAY of patient objects (not a
+  // count). The RPC `discharged_today` field is documented as
+  // `integer`, so we must NOT let the RPC value overwrite the local
+  // array. DashboardOverview.jsx calls .length and .map() on it.
+  'queueDischargedToday',
   'apptUpcoming',
   'admittedList',
   'stockWatch',
