@@ -264,7 +264,7 @@ export default function Dashboard(){
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
-  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key)) : NAV_ITEMS
+  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key.replace(/-/g, '_'))) : NAV_ITEMS
   const visibleNavItems = roleNavItems.filter(item => isModuleAllowedByPlan(item.key, planEntitlements))
 
   // Subscription alerts (banner + bell entries) — hospital ADMIN only,
@@ -379,7 +379,7 @@ export default function Dashboard(){
   useEffect(() => computeWeeklyCounts(patients), [patients])
   useEffect(() => subscribeSyncErrors(setSyncErrors), [])
   useEffect(() => {
-    if (allowedKeys && !allowedKeys.includes(tab)) setTab('overview')
+    if (allowedKeys && !allowedKeys.includes(tab.replace(/-/g, '_'))) setTab('overview')
     // Also covers deep links (e.g. a reminder pointing at a module the plan lacks).
     else if (!isModuleAllowedByPlan(tab, planEntitlements)) setTab('overview')
   }, [allowedKeys, tab, planEntitlements])
