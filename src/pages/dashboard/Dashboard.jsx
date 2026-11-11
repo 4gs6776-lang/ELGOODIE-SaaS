@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, lazy, Suspense } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { HospitalProvider } from '../../context/HospitalContext'
 import { supabase } from '../../lib/supabaseClient'
@@ -15,38 +15,7 @@ const useTabScopedTable = (tableName, hospitalId, activeTab, tabsThatNeedIt) => 
   const scopedId = tabsThatNeedIt.includes(activeTab) ? hospitalId : null
   return useOfflineTable(tableName, scopedId)
 }
-// PERFORMANCE: Lazy-load all page modules so the main bundle stays small.
-// Each page loads on demand only when the user navigates to that tab.
-// DashboardOverview (imports recharts ~414 KB) is also lazy-loaded.
-// PatientProfile stays eager — it's used inline for the patient drawer.
-const RevenueCycle    = lazy(() => import('./RevenueCycle'))
-const Billing         = lazy(() => import('./Billing'))
-const Staff           = lazy(() => import('./Staff'))
-const Appointments    = lazy(() => import('./Appointments'))
-const Pharmacy        = lazy(() => import('./Pharmacy'))
-const Laboratory      = lazy(() => import('./Laboratory'))
-const Radiology       = lazy(() => import('./Radiology'))
-const Insurance       = lazy(() => import('./Insurance'))
-const Inventory       = lazy(() => import('./Inventory'))
-const HmoPatients     = lazy(() => import('./HmoPatients'))
-const AncPatients     = lazy(() => import('./AncPatients'))
-const Reports         = lazy(() => import('./Reports'))
-const Facilities      = lazy(() => import('./Facilities'))
-const AuditLog        = lazy(() => import('./AuditLog'))
-const Notifications   = lazy(() => import('./Notifications'))
-const Settings        = lazy(() => import('./Settings'))
-const Subscription    = lazy(() => import('./Subscription'))
-const DoctorWorkbench = lazy(() => import('./DoctorWorkbench'))
-const Nursing         = lazy(() => import('./Nursing'))
-const DutyRoster      = lazy(() => import('./DutyRoster'))
-const IPD             = lazy(() => import('./IPD'))
-const Admissions      = lazy(() => import('./Admissions'))
-const Reception       = lazy(() => import('./Reception'))
-const Messages        = lazy(() => import('./Messages'))
-const ShiftHandover   = lazy(() => import('./ShiftHandover'))
-const AiDiagnostics   = lazy(() => import('./AiDiagnostics'))
-const DashboardOverview = lazy(() => import('../../components/dashboard/DashboardOverview'))
-import PatientProfile from '../../components/PatientProfile'
+import RevenueCycle from './RevenueCycle'
 import ConnectionState from '../../components/common/ConnectionState'
 import TrashIcon from '../../components/icons/TrashIcon'
 import SpringToggle from '../../components/SpringToggle'
@@ -73,6 +42,9 @@ import {
   getFeeForCategory,
   formatFee,
 } from '../../lib/registrationFees'
+import Billing from './Billing'
+import Staff from './Staff'
+import Appointments from './Appointments'
 import {
   useOfflineTable,
   getAllSyncErrors,
@@ -80,8 +52,30 @@ import {
   retryTableQueue,
   skipStuckSyncItem,
 } from '../../lib/useOfflineTable';
-// All page components are lazy-loaded above (lines 22-48).
-// PatientProfile stays eager (used inline for patient drawer).
+import Pharmacy from './Pharmacy'
+import Laboratory from './Laboratory'
+import Radiology from './Radiology'
+import Insurance from './Insurance'
+import Inventory from './Inventory'
+import HmoPatients from './HmoPatients'
+import AncPatients from './AncPatients'
+import Reports from './Reports'
+import Facilities from './Facilities'
+import AuditLog from './AuditLog'
+import Notifications from './Notifications'
+import Settings from './Settings'
+import Subscription from './Subscription'
+import DoctorWorkbench from './DoctorWorkbench'
+import Nursing from './Nursing'
+import DutyRoster from './DutyRoster'
+import IPD from './IPD'
+import Admissions from './Admissions'
+import Reception from './Reception'
+import PatientProfile from '../../components/PatientProfile'
+import Messages from './Messages'
+import ShiftHandover from './ShiftHandover'
+import AiDiagnostics from './AiDiagnostics'
+import DashboardOverview from '../../components/dashboard/DashboardOverview'
 import { useMedicationReminders } from '../../hooks/useMedicationReminders'
 import { usePagination } from '../../lib/usePagination'
 import { useSubscriptionAlerts, getSubscriptionBanner } from '../../lib/useSubscriptionAlerts'
@@ -264,7 +258,7 @@ export default function Dashboard(){
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
-  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key.replace(/-/g, '_'))) : NAV_ITEMS
+  const roleNavItems = allowedKeys ? NAV_ITEMS.filter(item => allowedKeys.includes(item.key)) : NAV_ITEMS
   const visibleNavItems = roleNavItems.filter(item => isModuleAllowedByPlan(item.key, planEntitlements))
 
   // Subscription alerts (banner + bell entries) — hospital ADMIN only,
@@ -379,7 +373,7 @@ export default function Dashboard(){
   useEffect(() => computeWeeklyCounts(patients), [patients])
   useEffect(() => subscribeSyncErrors(setSyncErrors), [])
   useEffect(() => {
-    if (allowedKeys && !allowedKeys.includes(tab.replace(/-/g, '_'))) setTab('overview')
+    if (allowedKeys && !allowedKeys.includes(tab)) setTab('overview')
     // Also covers deep links (e.g. a reminder pointing at a module the plan lacks).
     else if (!isModuleAllowedByPlan(tab, planEntitlements)) setTab('overview')
   }, [allowedKeys, tab, planEntitlements])
@@ -1429,10 +1423,6 @@ export default function Dashboard(){
             </div>
           )}
 
-          {/* PERFORMANCE: Suspense boundary for lazy-loaded pages.
-              Each page is React.lazy() — the browser fetches its chunk
-              on first visit and shows a loading fallback meanwhile. */}
-          <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--muted, #6b7280)', fontSize: 13 }}>Loading…</div>}>
           {tab === 'overview' && (
             <DashboardOverview hospital={hospital} profile={profile} />
           )}
@@ -1560,7 +1550,6 @@ export default function Dashboard(){
           {tab === 'messages' && <Messages />}
           {tab === 'subscription' && <Subscription />}
           {tab === 'settings' && <Settings />}
-          </Suspense>
 
         </div>
       </main>
