@@ -3,6 +3,12 @@
 // Used by the ConflictResolverModal to display side-by-side diffs and
 // build the merged payload that gets written back to the server.
 
+// Imports MUST be at the top of the file. ES modules hoist them so
+// the previous bottom-of-file import worked, but Vite's
+// build-import-analysis plugin + most linters prefer the
+// conventional position.
+import { supabase } from './supabaseClient';
+
 // ============================================================
 // FIELD CATEGISATION
 // Different fields need different merge strategies by default.
@@ -154,9 +160,17 @@ export function classifyConflict(diffs) {
 
 // ============================================================
 // FORMAT FIELD VALUE FOR DISPLAY
+// ---------------------------------------------------------------------
+// Returns a PLAIN STRING (never a JSX element) so this file can be
+// parsed as plain JavaScript (.js) by Vite / esbuild without a JSX
+// loader. The previous version returned `<em>empty</em>` which broke
+// the Vite PWA build (vite:build-import-analysis failed at line
+// 159:96 because the file is .js, not .jsx). Callers that want
+// special styling for the empty placeholder can detect the string
+// and wrap it in their own JSX.
 // ============================================================
 export function formatValue(value) {
-  if (value === null || value === undefined) return <em style={{ color: '#9ca3af' }}>empty</em>;
+  if (value === null || value === undefined) return '— empty —';
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'object') return JSON.stringify(value, null, 2);
   if (typeof value === 'boolean') return value ? '✓ true' : '✗ false';
@@ -166,7 +180,6 @@ export function formatValue(value) {
 // ============================================================
 // SUPABASE RPC WRAPPERS
 // ============================================================
-import { supabase } from './supabaseClient';
 
 export async function fetchConflicts(hospitalId, limit = 50) {
   const { data, error } = await supabase.rpc('fetch_pending_conflicts', {
