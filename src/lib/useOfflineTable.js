@@ -18,9 +18,10 @@ import {
 } from './useTableCache'
 
 const DB_NAME = 'HospitalOfflineDB'
-const DB_VERSION = 4  // v4: added compound index (table_name, hospital_id) for faster filtered reads
+const DB_VERSION = 4  // v4: added compound index (table_name, hospital_id) + sync_cursor store
 
 const STORE_NAME = 'offline_records'
+const CURSOR_STORE = 'sync_cursors'  // Per-device incremental sync cursors
 
 // Tables that must NEVER be hard-deleted (clinical history is referenced
 // by child rows: vitals, lab orders, prescriptions, invoices...).
@@ -87,6 +88,8 @@ function openDB() {
 
     request.onupgradeneeded = (event) => {
       const db = event.target.result
+
+      // --- Main offline records store ---
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
         store.createIndex('table_name', 'table_name', { unique: false })
@@ -101,6 +104,15 @@ function openDB() {
         if (!store.indexNames.contains('table_hospital')) {
           store.createIndex('table_hospital', ['table_name', 'hospital_id'], { unique: false })
         }
+      }
+
+      // --- Per-device sync cursor store (v4) ---
+      // Stores one cursor per (table_name, hospital_id) pair.
+      // This is LOCAL to this device — NOT shared with other devices.
+      // Two devices in the same hospital each maintain their own cursor.
+      if (!db.objectStoreNames.contains(CURSOR_STORE)) {
+        const cursorStore = db.createObjectStore(CURSOR_STORE, { keyPath: ['table_name', 'hospital_id'] })
+        cursorStore.createIndex('hospital_id', 'hospital_id', { unique: false })
       }
     }
 
@@ -282,7 +294,6 @@ async function writeWithSchemaRetry(tableName, run, basePayload = {}) {
 const localChangeListeners = new Set()
 
 function notifyLocalChange() {
-  // Invalidate the pending count cache so the next read gets a fresh count
   invalidatePendingCountCache()
   localChangeListeners.forEach((listener) => {
     try {
@@ -367,64 +378,38 @@ async function getAllLocalRecords(db) {
 // ============================================================
 // GET LOCAL RECORDS BY TABLE + HOSPITAL (index-based, no full-store scan)
 // ============================================================
-// PERFORMANCE: Uses the v4 compound index (table_name, hospital_id)
-// to read only records for the requested table+hospital, instead of
-// getAllLocalRecords() which reads the ENTIRE store then filters in JS.
-// ~10x faster for large stores (20K+ records).
-//
-// TENANT ISOLATION: When hospitalId is null/undefined, this function
-// returns an EMPTY array. It NEVER returns records from multiple
-// hospitals. This is a hard security boundary — if the hospital scope
-// cannot be determined, no data is shown.
+// TENANT ISOLATION: When hospitalId is null/undefined, returns [].
+// Never returns records from multiple hospitals.
 
 async function getAllLocalRecordsByTable(db, tableName, hospitalId) {
-  // SECURITY: If hospitalId is missing, return empty array.
-  // Never allow an unrestricted lookup that could cross hospital boundaries.
-  if (!hospitalId) {
-    return []
-  }
+  if (!hospitalId) return []
 
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const store = tx.objectStore(STORE_NAME)
 
-    // Use the v4 compound index when available (fastest path)
     if (store.indexNames.contains('table_hospital')) {
       const index = store.index('table_hospital')
       const keyRange = IDBKeyRange.only([tableName, hospitalId])
       const request = index.getAll(keyRange)
       request.onsuccess = () => {
         const all = request.result || []
-        const filtered = all.filter(r => !r._deleted && !r.deleted_at)
-        resolve(filtered)
+        resolve(all.filter(r => !r._deleted && !r.deleted_at))
       }
       request.onerror = () => reject(request.error)
     } else if (store.indexNames.contains('table_name')) {
-      // Fallback for DB version < 4: use table_name index, then filter by hospital_id in JS
-      // SECURITY: hospitalId is guaranteed non-null here (checked above)
       const index = store.index('table_name')
       const request = index.getAll(tableName)
       request.onsuccess = () => {
         const all = request.result || []
-        const filtered = all.filter(r =>
-          r.hospital_id === hospitalId &&
-          !r._deleted && !r.deleted_at
-        )
-        resolve(filtered)
+        resolve(all.filter(r => r.hospital_id === hospitalId && !r._deleted && !r.deleted_at))
       }
       request.onerror = () => reject(request.error)
     } else {
-      // Last resort: getAll() + filter (legacy path, very slow)
-      // SECURITY: hospitalId is guaranteed non-null here (checked above)
       const request = store.getAll()
       request.onsuccess = () => {
         const all = request.result || []
-        const filtered = all.filter(r =>
-          r.table_name === tableName &&
-          r.hospital_id === hospitalId &&
-          !r._deleted && !r.deleted_at
-        )
-        resolve(filtered)
+        resolve(all.filter(r => r.table_name === tableName && r.hospital_id === hospitalId && !r._deleted && !r.deleted_at))
       }
       request.onerror = () => reject(request.error)
     }
@@ -432,59 +417,108 @@ async function getAllLocalRecordsByTable(db, tableName, hospitalId) {
 }
 
 // ============================================================
-// GET PENDING SYNC COUNT (index-based, no full-store scan)
+// PER-DEVICE SYNC CURSOR (stored in IndexedDB, NOT on the server)
 // ============================================================
-// PERFORMANCE: Uses the 'synced' index to count only unsynchronized
-// records, instead of reading the entire store. Centralized so
-// multiple hooks share the same count instead of each scanning.
+// Each device maintains its own cursor. Two devices in the same hospital
+// each have their own cursor — no sharing, no interference.
+// A new installation has NO cursor → full sync first, then incremental.
+
+const SYNC_OVERLAP_MS = 5 * 60 * 1000  // 5-minute overlap to catch concurrent changes
+
+async function getLocalSyncCursor(db, tableName, hospitalId) {
+  if (!hospitalId) return null
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(CURSOR_STORE, 'readonly')
+      const store = tx.objectStore(CURSOR_STORE)
+      const request = store.get([tableName, hospitalId])
+      request.onsuccess = () => {
+        const result = request.result
+        resolve(result ? result.last_synced_at : null)
+      }
+      request.onerror = () => resolve(null)  // Non-fatal — fall back to full sync
+    } catch {
+      resolve(null)  // Store doesn't exist yet (pre-v4) — full sync
+    }
+  })
+}
+
+async function setLocalSyncCursor(db, tableName, hospitalId, syncedAt) {
+  if (!hospitalId) return
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(CURSOR_STORE, 'readwrite')
+      const store = tx.objectStore(CURSOR_STORE)
+      store.put({
+        table_name: tableName,
+        hospital_id: hospitalId,
+        last_synced_at: syncedAt || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()  // Non-fatal
+    } catch {
+      resolve()  // Store doesn't exist yet — non-fatal
+    }
+  })
+}
+
+// ============================================================
+// PENDING SYNC COUNT (scoped to active hospital, excludes discarded)
+// ============================================================
 
 let _pendingCountCache = null
+let _pendingCountHospitalId = null
 let _pendingCountTimestamp = 0
-const PENDING_COUNT_TTL_MS = 5000  // 5 seconds
+const PENDING_COUNT_TTL_MS = 5000
 
-async function getPendingSyncCount(db) {
-  // Return cached count if fresh (within 5s)
-  if (_pendingCountCache !== null && Date.now() - _pendingCountTimestamp < PENDING_COUNT_TTL_MS) {
+async function getPendingSyncCount(db, hospitalId) {
+  if (!hospitalId) return 0
+
+  if (_pendingCountHospitalId === hospitalId && _pendingCountCache !== null &&
+      Date.now() - _pendingCountTimestamp < PENDING_COUNT_TTL_MS) {
     return _pendingCountCache
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const store = tx.objectStore(STORE_NAME)
 
     if (store.indexNames.contains('synced')) {
-      // Use the synced index to count only _synced=false records
       const index = store.index('synced')
-      const keyRange = IDBKeyRange.only(false)
-      const request = index.count(keyRange)
+      const request = index.getAll(false)
       request.onsuccess = () => {
-        const count = request.result || 0
-        // Subtract discarded records (they have _synced=false but _discarded=true)
-        // We'll need to filter those separately — but for a quick count,
-        // this is close enough. The exact count is computed on next full scan.
+        const all = request.result || []
+        // Scope to this hospital, exclude discarded
+        const count = all.filter(r =>
+          r.hospital_id === hospitalId && r._discarded !== true
+        ).length
         _pendingCountCache = count
+        _pendingCountHospitalId = hospitalId
         _pendingCountTimestamp = Date.now()
         resolve(count)
       }
-      request.onerror = () => reject(request.error)
+      request.onerror = () => resolve(0)
     } else {
-      // Fallback: count all and filter (legacy path)
       const request = store.getAll()
       request.onsuccess = () => {
         const all = request.result || []
-        const count = all.filter(r => r._synced === false && r._discarded !== true).length
+        const count = all.filter(r =>
+          r._synced === false && r._discarded !== true && r.hospital_id === hospitalId
+        ).length
         _pendingCountCache = count
+        _pendingCountHospitalId = hospitalId
         _pendingCountTimestamp = Date.now()
         resolve(count)
       }
-      request.onerror = () => reject(request.error)
+      request.onerror = () => resolve(0)
     }
   })
 }
 
-// Invalidate the pending count cache (called after writes)
 function invalidatePendingCountCache() {
   _pendingCountCache = null
+  _pendingCountHospitalId = null
   _pendingCountTimestamp = 0
 }
 
@@ -506,97 +540,23 @@ async function deleteLocalRecord(db, id) {
 }
 
 // ============================================================
-// SYNC CURSOR MANAGEMENT (Stage 2 — incremental sync)
-// ============================================================
-// Reads/writes the sync_cursor table to track the last successful
-// sync timestamp per (hospital, table). Used for incremental sync:
-//   1. Read cursor → get lastSyncedAt
-//   2. Fetch only records with updated_at >= (cursor - overlap)
-//   3. Write cursor → advance to now()
-//
-// The overlap window (5 minutes) ensures records changed DURING the
-// sync are caught on the next sync — prevents edge-case data loss
-// where a record is updated between the cursor read and the fetch.
-//
-// Safety:
-//   - If the cursor read fails → full sync (no filter)
-//   - If the fetch fails → cursor NOT advanced (retry from same point)
-//   - If updated_at column doesn't exist → 400 from PostgREST →
-//     catch error → full sync fallback (no date filter)
-//   - Pending offline writes (_synced=false) are NEVER overwritten
-
-const SYNC_OVERLAP_MS = 5 * 60 * 1000  // 5-minute overlap window
-
-async function getSyncCursor(hospitalId, tableName) {
-  if (!hospitalId || !supabase?.from) return null
-  try {
-    const { data, error } = await supabase
-      .from('sync_cursor')
-      .select('last_synced_at')
-      .eq('hospital_id', hospitalId)
-      .eq('table_name', tableName)
-      .maybeSingle()
-    if (error || !data) return null
-    return data.last_synced_at
-  } catch {
-    return null  // Non-fatal — fall back to full sync
-  }
-}
-
-async function setSyncCursor(hospitalId, tableName, syncedAt) {
-  if (!hospitalId || !supabase?.from) return
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    await supabase
-      .from('sync_cursor')
-      .upsert({
-        hospital_id: hospitalId,
-        table_name: tableName,
-        last_synced_at: syncedAt || new Date().toISOString(),
-        last_synced_by: user?.id || null,
-      }, { onConflict: 'hospital_id,table_name' })
-  } catch (e) {
-    // Non-fatal — cursor update failed, next sync will retry from same point
-    console.warn(`[sync_cursor] Failed to advance cursor for ${tableName}:`, e.message)
-  }
-}
-
-// ============================================================
 // PULL RECORDS DOWN FROM SUPABASE
 // ============================================================
 
-// ============================================================
-// COLUMN PROJECTION — DISABLED
-// ============================================================
-// The COLUMNS_BY_TABLE map was removed because it caused 400 errors
-// on tables where the production schema doesn't have the columns the
-// map listed (e.g., patients.phone, prescriptions.patient_id,
-// prescriptions.nurse_sent_to_pharmacy, etc.).
-//
-// Until the backend owner provides a verified column list for EVERY
-// table, we use select('*') which returns all columns safely.
-// This is the same behavior the app had before the performance patch.
-
-function getColumnsForTable(tableName) {
-  return '*'
-}
-
-// Supabase (PostgREST) returns AT MOST 1000 rows per request by default.
 const PULL_PAGE_SIZE = 1000
 const PULL_MAX_PAGES = 500
 
-// Returns every row for the hospital (or only changed rows if sinceTimestamp
-// is provided), or null if ANY page failed.
+// Returns { rows, error, truncated } where:
+//   - rows: array of records (may be partial if truncated)
+//   - error: original Supabase error object if any page failed (NOT replaced with null)
+//   - truncated: true if max page limit was reached without a final short page
 //
-// Incremental sync: when sinceTimestamp is provided, adds
-// .gte('updated_at', sinceTimestamp - overlap) to fetch only changed
-// records. If the updated_at column doesn't exist, PostgREST returns 400 —
-// we catch that and retry without the filter (full sync fallback).
+// When sinceTimestamp is provided, adds .gte('updated_at', cutoff) for incremental sync.
+// If updated_at column doesn't exist, PostgREST returns 400 — we catch and retry
+// without the filter (full sync fallback).
+
 async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
   const rows = []
-
-  // If we have a cursor, subtract the overlap window to catch records
-  // changed during the previous sync.
   const cutoffDate = sinceTimestamp
     ? new Date(new Date(sinceTimestamp).getTime() - SYNC_OVERLAP_MS).toISOString()
     : null
@@ -605,10 +565,9 @@ async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
     const from = page * PULL_PAGE_SIZE
     let query = supabase
       .from(tableName)
-      .select(getColumnsForTable(tableName))
+      .select('*')
       .eq('hospital_id', hospitalId)
 
-    // Apply incremental filter if we have a cursor
     if (cutoffDate) {
       query = query.gte('updated_at', cutoffDate)
     }
@@ -617,59 +576,81 @@ async function fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp) {
       .order('id', { ascending: true })
       .range(from, from + PULL_PAGE_SIZE - 1)
 
-    // If the error is about updated_at column not existing, retry without the filter
+    // If error mentions updated_at, retry without the filter (full sync fallback)
     if (error && cutoffDate && error.message && error.message.includes('updated_at')) {
-      console.warn(`[sync] ${tableName} doesn't have updated_at column — falling back to full sync`)
+      console.warn(`[sync] ${tableName} doesn't have updated_at — falling back to full sync`)
       return fetchAllRemoteRowsNoFilter(tableName, hospitalId)
     }
 
-    if (error || !data) return null
+    // PRESERVE the original error object — don't replace with null
+    if (error) return { rows: [], error, truncated: false }
+    if (!data) return { rows: [], error: { message: 'No data returned' }, truncated: false }
+
     rows.push(...data)
-    if (data.length < PULL_PAGE_SIZE) return rows
+    if (data.length < PULL_PAGE_SIZE) {
+      return { rows, error: null, truncated: false }
+    }
   }
-  console.warn(`Pull of ${tableName} stopped at ${PULL_MAX_PAGES * PULL_PAGE_SIZE} rows (safety limit).`)
-  return rows
+
+  // Max page limit reached without a final short page — truncated
+  console.warn(`Pull of ${tableName} stopped at safety limit (${PULL_MAX_PAGES * PULL_PAGE_SIZE} rows).`)
+  return { rows, error: null, truncated: true }
 }
 
-// Full sync fallback (no date filter) — used when updated_at doesn't exist
+// Full sync fallback (no date filter)
 async function fetchAllRemoteRowsNoFilter(tableName, hospitalId) {
   const rows = []
   for (let page = 0; page < PULL_MAX_PAGES; page += 1) {
     const from = page * PULL_PAGE_SIZE
     const { data, error } = await supabase
       .from(tableName)
-      .select(getColumnsForTable(tableName))
+      .select('*')
       .eq('hospital_id', hospitalId)
       .order('id', { ascending: true })
       .range(from, from + PULL_PAGE_SIZE - 1)
 
-    if (error || !data) return null
+    if (error) return { rows: [], error, truncated: false }
+    if (!data) return { rows: [], error: { message: 'No data returned' }, truncated: false }
+
     rows.push(...data)
-    if (data.length < PULL_PAGE_SIZE) return rows
+    if (data.length < PULL_PAGE_SIZE) return { rows, error: null, truncated: false }
   }
-  console.warn(`Pull of ${tableName} stopped at ${PULL_MAX_PAGES * PULL_PAGE_SIZE} rows (safety limit).`)
-  return rows
+  console.warn(`Pull of ${tableName} stopped at safety limit.`)
+  return { rows, error: null, truncated: true }
 }
 
-// FIX: pullFromSupabase now returns { success, error } so the caller
-// can decide whether to cache the result as "successfully synced" or
-// preserve stale data and surface an error.
+// pullFromSupabase now:
+//   1. Reads the LOCAL (per-device) sync cursor from IndexedDB
+//   2. Fetches only changed records (incremental) or all records (full sync)
+//   3. Does NOT mark success if truncated (max page limit without final page)
+//   4. Preserves the original Supabase error object
+//   5. Advances the LOCAL cursor ONLY after confirmed success
+//   6. NEVER overwrites pending offline writes (_synced === false)
+
 async function pullFromSupabase(db, tableName, hospitalId) {
-  if (!navigator.onLine || !supabase?.from || !hospitalId) return { success: false, error: 'offline' }
+  if (!navigator.onLine || !supabase?.from || !hospitalId) {
+    return { success: false, error: { message: 'Offline or no hospital ID' } }
+  }
 
   try {
-    // STAGE 2: Read the sync cursor before fetching.
-    // If a cursor exists, fetch only records changed since the cursor
-    // (with a 5-minute overlap window for safety).
-    // If no cursor (first sync), fetch all rows.
-    const sinceTimestamp = await getSyncCursor(hospitalId, tableName)
+    // Read the LOCAL per-device cursor
+    const sinceTimestamp = await getLocalSyncCursor(db, tableName, hospitalId)
 
-    const remoteRows = await fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp)
+    const { rows: remoteRows, error, truncated } = await fetchAllRemoteRows(tableName, hospitalId, sinceTimestamp)
 
-    if (!remoteRows) return { success: false, error: 'fetch returned null' }
+    // PRESERVE the original error — don't replace with "fetch returned null"
+    if (error) {
+      console.error(`Pull of ${tableName} failed:`, error.message || error)
+      return { success: false, error }
+    }
 
-    // PERFORMANCE: Use getAllLocalRecordsByTable (compound index) instead
-    // of getAllLocalRecords (full-store scan) to build the localById map.
+    // Do NOT mark as success if truncated — the pull is incomplete
+    if (truncated) {
+      console.warn(`Pull of ${tableName} truncated at safety limit — NOT marking as synced.`)
+      return { success: false, error: { message: 'Truncated at safety limit — pull incomplete' } }
+    }
+
+    // Use getAllLocalRecordsByTable (index-based) instead of getAllLocalRecords (full scan)
     const localRows = await getAllLocalRecordsByTable(db, tableName, hospitalId)
     const localById = new Map(localRows.map((r) => [r.id, r]))
 
@@ -677,8 +658,7 @@ async function pullFromSupabase(db, tableName, hospitalId) {
     for (const remote of remoteRows) {
       const local = localById.get(remote.id)
 
-      // Don't overwrite a record that has local changes waiting to sync
-      // (e.g. an edit or delete made offline that hasn't gone up yet).
+      // NEVER overwrite pending offline writes
       if (local && local._synced === false) continue
 
       batch.push({
@@ -686,7 +666,6 @@ async function pullFromSupabase(db, tableName, hospitalId) {
         table_name: tableName,
         hospital_id: hospitalId,
         _synced: true,
-        // Soft-deleted rows stay in the local store but are hidden from lists.
         _deleted: Boolean(remote.deleted_at),
         _syncError: false,
         _syncErrorMessage: null,
@@ -694,22 +673,18 @@ async function pullFromSupabase(db, tableName, hospitalId) {
       })
     }
 
-    // Write all rows in ONE transaction. If any put fails, the entire
-    // transaction rolls back and the local data stays exactly as it was.
     if (batch.length > 0) {
       await putLocalRecordsBatch(db, batch)
     }
 
-    // STAGE 2: Advance the sync cursor after a confirmed successful sync.
-    // This MUST happen AFTER the batch write succeeds — if the write
-    // throws, we never reach this line, so the cursor stays at the old
-    // value and the next sync retries from the same point.
-    await setSyncCursor(hospitalId, tableName)
+    // Advance the LOCAL cursor AFTER confirmed successful write
+    // If the write throws, we never reach this line — cursor stays at old value
+    await setLocalSyncCursor(db, tableName, hospitalId)
 
     return { success: true, error: null }
   } catch (err) {
     console.error(`Error pulling ${tableName} from Supabase:`, err)
-    return { success: false, error: err.message || String(err) }
+    return { success: false, error: err }
   }
 }
 
@@ -742,18 +717,14 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     try {
       const db = await openDB()
 
-      // PERFORMANCE: Use getAllLocalRecordsByTable (compound index)
-      // instead of getAllLocalRecords (full-store scan) + JS filter.
-      // Reads only records for this table+hospital — ~10x faster.
+      // Use index-based read instead of full-store scan
       const filtered = await getAllLocalRecordsByTable(db, tableName, hospitalId)
       if (seq !== loadSeqRef.current) return
 
       setRecords(filtered)
 
-      // PERFORMANCE: Use centralized getPendingSyncCount (index-based
-      // count on the 'synced' index) instead of scanning all records.
-      // Multiple hooks on the same page share the cached count (5s TTL).
-      const pending = await getPendingSyncCount(db)
+      // Use centralized pending count (scoped to this hospital, excludes discarded)
+      const pending = await getPendingSyncCount(db, hospitalId)
       if (seq !== loadSeqRef.current) return
       setPendingCount(pending)
       pendingCountRef.current = pending
@@ -768,10 +739,8 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
   useEffect(() => {
     async function initialLoad() {
-      // ---- Check global cache first ----
       const cached = getCachedTable(tableName, hospitalId)
       if (cached) {
-        // Cache hit — read from IndexedDB (already populated by a previous pull)
         await loadLocalRecords()
         return
       }
@@ -780,30 +749,20 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
         try {
           const db = await openDB()
 
-          // FIX: Use getOrFetchTable for request deduplication.
-          // If 3 components mount useOfflineTable('patients', hospitalId)
-          // simultaneously, only 1 Supabase pull fires — the other 2
-          // share the same in-flight promise.
+          // Use getOrFetchTable for request deduplication
           await getOrFetchTable(tableName, hospitalId, async () => {
             const result = await pullFromSupabase(db, tableName, hospitalId)
 
-            // FIX: Only mark as cached after a CONFIRMED successful pull.
-            // A failed pull must NOT be cached as success — otherwise
-            // the 30-min TTL blocks retries and the user sees stale data.
+            // Only cache after confirmed success
             if (result.success) {
-              return []  // empty array = "successfully synced" marker
+              return []
             } else {
-              // Pull failed — don't cache as success.
-              // Stale IndexedDB data (if any) is still available via
-              // loadLocalRecords() below.
-              console.warn(`Pull of ${tableName} failed: ${result.error}. Stale data preserved.`)
-              throw new Error(result.error)  // getOrFetchTable will NOT cache this
+              // Pull failed — preserve stale data, don't cache as success
+              console.warn(`Pull of ${tableName} failed: ${result.error?.message || 'unknown'}. Stale data preserved.`)
+              throw new Error(result.error?.message || 'Pull failed')
             }
           })
         } catch (err) {
-          // Either DB open failed or pull failed — either way,
-          // fall through to loadLocalRecords() which reads whatever
-          // IndexedDB has (could be stale data from a previous session).
           console.error(`Initial load for ${tableName} failed (non-fatal):`, err.message)
         }
       }
@@ -1130,12 +1089,11 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
   const syncFromServer = async () => {
     if (!hospitalId) return
     try {
-      // Invalidate the cache so other components know to re-read
       invalidateTable(tableName, hospitalId)
       const db = await openDB()
       const result = await pullFromSupabase(db, tableName, hospitalId)
       await loadLocalRecords()
-      // FIX: Only re-populate the cache after a confirmed successful pull
+      // Only re-populate cache after confirmed success
       if (result && result.success) {
         setCachedTable(tableName, hospitalId, [])
       }
