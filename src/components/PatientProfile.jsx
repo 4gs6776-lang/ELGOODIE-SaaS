@@ -30,6 +30,11 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   // card until the user closes + reopens it.
   const { records: admissionRequests, syncFromServer: syncAdmissionRequests } = useOfflineTable('admission_requests', hospital?.id)
   const { records: drugChartEntries, addRecord: addDrugChartEntry, updateRecord: updateDrugChartEntry, deleteRecord: deleteDrugChartEntry } = useOfflineTable('patient_drug_charts', hospital?.id)
+  // Medication administrations — needed so MedicationChart can
+  // classify each row as 'pending' / 'given' / 'missed' /
+  // 'discontinued'. Without this, the chart cannot tell whether a
+  // dose has actually been administered.
+  const { records: medicationAdministrations } = useOfflineTable('medication_administrations', hospital?.id)
 
   // ---- DB-backed role permissions (RBAC) ----
   // FIX: Load the hospital_role_permissions table so we can check
@@ -306,6 +311,13 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .filter(e => e.patient_id === patient.id)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
+  // Patient-scoped medication administrations — used by MedicationChart
+  // to classify each chart row as 'pending' / 'given' / 'missed' /
+  // 'discontinued'. Filtered by patient_id so a different patient's
+  // administrations never bleed into this chart.
+  const patientMedicationAdministrations = (medicationAdministrations || [])
+    .filter(a => a.patient_id === patient.id)
+
   // NEW: Filter stock records for this patient
   const patientStockRecords = stockRecords
     .filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name)
@@ -539,6 +551,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
               updatePatient={updatePatient}
               showToast={showToast}
               prescriptions={patientPrescriptions}
+              medicationAdministrations={patientMedicationAdministrations}
             />
           )}
           {tab === 'Pharmacy' && (

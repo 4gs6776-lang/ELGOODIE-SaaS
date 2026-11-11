@@ -4,6 +4,11 @@ import '../theme/marChart.css'
 import AppIcon from './icons'
 import TrashIcon from './icons/TrashIcon'
 import { formatDate, calculateAge } from '../lib/datetime'
+// Drug Chart workflow integration — the classifier tells us whether
+// each row is Pending, Given, Missed or Discontinued, so we can badge
+// the row and (when status !== 'given') separate it from the
+// administered rows in the display.
+import { classifyDrugChartEntry } from '../lib/drugChartWorkflow'
 
 // ============================================================
 // PREMIUM MEDICATION ADMINISTRATION CHART (MAR)
@@ -69,18 +74,57 @@ function deriveSign(profile){
   return `${prefix}-${initials}`
 }
 
-export default function MedicationChart({ patient, entries, admissionRequest, latestConsultation, profile, hospitalName, addEntry, updateEntry, deleteEntry, updatePatient, showToast, prescriptions = [] }){
+export default function MedicationChart({ patient, entries, admissionRequest, latestConsultation, profile, hospitalName, addEntry, updateEntry, deleteEntry, updatePatient, showToast, prescriptions = [], medicationAdministrations = [] }){
   // Ward, bed, diagnosis, allergies... are saved on the patient record, so only
   // Front Desk, Nurse and Admin may change them; other roles see them read-only.
   const canEditPatient = canEditPatientDetails(profile?.role)
 
+  // Build a lookup of prescriptions by id so we can pass the linked
+  // prescription to classifyDrugChartEntry() for each row.
+  const prescriptionById = useMemo(() => {
+    const m = new Map()
+    for (const rx of prescriptions) m.set(rx.id, rx)
+    return m
+  }, [prescriptions])
+
+  // Classify each entry as 'pending' | 'given' | 'missed' | 'discontinued'.
+  // We compute this once per render (memoized) so the badge and the
+  // pending/administered split stay consistent.
+  const classified = useMemo(() => {
+    const now = new Date()
+    return entries.map(e => ({
+      entry: e,
+      status: classifyDrugChartEntry(
+        e,
+        prescriptionById.get(e.prescription_id),
+        medicationAdministrations,
+        now
+      ),
+    }))
+  }, [entries, prescriptionById, medicationAdministrations])
+
   // Chart order is chronological — oldest entry first, like a real paper MAR sheet.
   const sorted = useMemo(
-    () => [...entries].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)),
-    [entries]
+    () => [...classified].sort((a, b) => new Date(a.entry.created_at) - new Date(b.entry.created_at)),
+    [classified]
   )
 
-  const pageCount = Math.max(1, Math.ceil(sorted.length / ROWS_PER_PAGE))
+  // Split into "Pending / Missed / Discontinued" (scheduled, not yet given)
+  // and "Given" (administered). Both groups preserve chronological order.
+  // The "Given" group is shown first because that is what the nurse has
+  // already done; the pending group follows with the status badge so the
+  // nurse sees at a glance what is still owed.
+  const givenRows = useMemo(() => sorted.filter(r => r.status === 'given'), [sorted])
+  const pendingRows = useMemo(
+    () => sorted.filter(r => r.status !== 'given'),
+    [sorted]
+  )
+  const displayRows = useMemo(
+    () => [...givenRows, ...pendingRows],
+    [givenRows, pendingRows]
+  )
+
+  const pageCount = Math.max(1, Math.ceil(displayRows.length / ROWS_PER_PAGE))
   const [page, setPage] = useState(1)
 
   // If records are added/removed elsewhere and the current page no
@@ -89,7 +133,7 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
     setPage(p => Math.min(Math.max(p, 1), pageCount))
   }, [pageCount])
 
-  const pageEntries = sorted.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE)
+  const pageEntries = displayRows.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE)
   const emptyRowCount = Math.max(0, ROWS_PER_PAGE - pageEntries.length)
 
   // A dose is "overdue" when its next_dose time has passed and no later
@@ -99,7 +143,8 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
   const now = new Date()
   const latestEntryPerDrug = useMemo(() => {
     const map = new Map()
-    for (const e of sorted) {
+    for (const r of sorted) {
+      const e = r.entry
       const key = e.drug_name?.trim().toLowerCase()
       if (!key) continue
       const existing = map.get(key)
@@ -208,7 +253,7 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
         await addEntry(payload)
         showToast('Medication added to chart')
         // Jump to whichever page the new record will land on.
-        setPage(Math.ceil((sorted.length + 1) / ROWS_PER_PAGE))
+        setPage(Math.ceil((displayRows.length + 1) / ROWS_PER_PAGE))
       }
       setShowForm(false)
     } catch (err) {
@@ -273,15 +318,19 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
       </div>`
 
     const pagesHtml = Array.from({ length: totalPages }).map((_, pIdx) => {
-      const rows = sorted.slice(pIdx * ROWS_PER_PAGE, (pIdx + 1) * ROWS_PER_PAGE)
-      const filledRowsHtml = rows.map((e, i) => {
+      const rows = displayRows.slice(pIdx * ROWS_PER_PAGE, (pIdx + 1) * ROWS_PER_PAGE)
+      const filledRowsHtml = rows.map((r, i) => {
+        const e = r.entry
         const overdue = isOverdue(e)
+        const statusBadge = r.status && r.status !== 'given'
+          ? `<span class="mar-status-badge mar-status-${r.status}">${r.status.toUpperCase()}</span> `
+          : ''
         return `
         <tr class="${overdue ? 'mar-row-overdue' : ''}">
           <td>${pIdx * ROWS_PER_PAGE + i + 1}</td>
           <td>${escapeHtml(e.entry_date || '')}</td>
           <td>${escapeHtml(formatTime12h(e.entry_time))}</td>
-          <td class="med-cell">${escapeHtml(e.drug_name)}</td>
+          <td class="med-cell">${statusBadge}${escapeHtml(e.drug_name)}</td>
           <td>${escapeHtml(e.dosage || '')}</td>
           <td>${escapeHtml(e.route || '')}</td>
           <td>${escapeHtml(e.frequency || '')}</td>
@@ -456,14 +505,27 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
               </tr>
             </thead>
             <tbody>
-              {pageEntries.map((e, i) => {
+              {pageEntries.map((row, i) => {
+                const e = row.entry
                 const overdue = isOverdue(e)
+                const status = row.status
                 return (
-                  <tr key={e.id} className={`mar-row-filled${overdue ? ' mar-row-overdue' : ''}`} onClick={() => openEditForm(e)} tabIndex={0} role="button" aria-label={`Edit medication entry ${e.drug_name}`} onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openEditForm(e) } }}>
+                  <tr
+                    key={e.id}
+                    className={`mar-row-filled mar-row-status-${status}${overdue ? ' mar-row-overdue' : ''}`}
+                    onClick={() => openEditForm(e)}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`Edit medication entry ${e.drug_name} (${status})`}
+                    onKeyDown={ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openEditForm(e) } }}
+                  >
                     <td className="mar-col-num">{(page - 1) * ROWS_PER_PAGE + i + 1}</td>
                     <td>{e.entry_date || ''}</td>
                     <td>{e.entry_time ? formatTime12h(e.entry_time) : ''}</td>
                     <td className="mar-med-cell">
+                      <span className={`mar-status-badge mar-status-${status}`} title={`Status: ${status}`}>
+                        {status === 'given' ? '✓' : status === 'missed' ? '!' : status === 'discontinued' ? '×' : '○'}
+                      </span>
                       {e.drug_name}
                       {e.prescription_id && (() => {
                         const rx = prescriptions.find(r => r.id === e.prescription_id)
