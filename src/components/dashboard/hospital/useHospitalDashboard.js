@@ -2,19 +2,35 @@ import { useMemo, useState, useEffect } from 'react'
 import { useOfflineTable } from '../../../lib/useOfflineTable'
 import { canAccessModule, FULL_ACCESS_ROLES } from '../../../lib/permissions'
 import { getTimezone, dayKeyInZone, todayKeyInZone } from '../../../lib/datetime'
+import { fetchDashboardSummary, LOCAL_ONLY_KEYS } from '../../../lib/dashboardSummary'
 import { labStage } from '../../../lib/lab'
-import { fetchDashboardSummary } from '../../../lib/dashboardSummary'
 
 // =====================================================================
 // GOODIE-MEDHUB — data layer for the hospital overview dashboard.
 //
 // Rules of this file:
-//  * It only READS. It reuses useOfflineTable, so the IndexedDB cache,
-//    offline reads and sync keep working exactly as before.
-//  * A table is only loaded when the signed-in role may see that area
-//    (passing a null hospital id makes useOfflineTable skip the table).
-//  * Every number below follows a rule that already exists in the app;
-//    the rule's origin is named in a comment next to it.
+//  * It mostly READS. It reuses useOfflineTable, so the IndexedDB
+//    cache, offline reads and sync keep working exactly as before.
+//  * A table is only loaded when the signed-in role may see that
+//    area (passing a null hospital id makes useOfflineTable skip the
+//    table).
+//  * Every number below follows a rule that already exists in the
+//    app; the rule's origin is named in a comment next to it.
+//
+// RPC + LOCAL HYBRID
+// ------------------
+// get_dashboard_summary() returns scalar counts and totals. The
+// dashboard also needs list-shaped fields (waitingList, apptUpcoming,
+// admittedList, stockWatch, activity) and the time series used by
+// the sparklines — those stay in local computation.
+//
+// The RPC numbers are MERGED in via the `??` operator (nullish
+// coalescing), NOT `||`. A legitimate RPC zero must survive — using
+// `||` here was the bug that hid "no pending labs today" behind the
+// local count.
+//
+// Array fields listed in LOCAL_ONLY_KEYS are NEVER overwritten by
+// RPC numbers.
 // =====================================================================
 
 const DAY = 86400000
@@ -109,36 +125,67 @@ export function useHospitalDashboard(hospital, profile) {
   const audit = useOfflineTable('audit_events', on(access.activity))
 
   const all = [pts, appts, vitals, beds, adms, admReqs, labTests, labOrders, stock, invoices, audit]
-  // PERFORMANCE: Don't block the entire dashboard on the slowest table.
-  // The original `loading = all.some(t => t.loading)` was true until
-  // ALL 11 tables finished loading — so a slow invoices table (10K rows)
-  // blocked the entire dashboard from rendering patient counts.
-  //
-  // Now: expose `loadingByTable` so each widget can show its own
-  // skeleton state independently. The top-level `loading` is kept for
-  // backwards compatibility but only blocks the FIRST render (when
-  // nothing has loaded yet). After the first table arrives, the
-  // dashboard renders with skeleton placeholders for the slow ones.
-  const loadingByTable = {
-    patients: pts.loading,
-    appointments: appts.loading,
-    vitals: vitals.loading,
-    beds: beds.loading,
-    admissions: adms.loading,
-    admissionRequests: admReqs.loading,
-    labTests: labTests.loading,
-    labOrders: labOrders.loading,
-    inventory: stock.loading,
-    invoices: invoices.loading,
-    audit: audit.loading,
-  }
-  // `loading` is true only when EVERY table is still loading — i.e. we
-  // have literally nothing to show yet. As soon as the first table
-  // arrives, `loading` becomes false and the dashboard renders with
-  // per-widget skeletons for the still-loading tables.
-  const loading = all.every((t) => t.loading)
+  const loading = all.some((t) => t.loading)
   const isOnline = pts.isOnline
+  // Pending count is hospital-scoped (see useOfflineTable.loadLocalRecords):
+  // the hook already filters to the current hospital.
   const pendingSync = pts.pendingCount
+  const conflictCount = pts.conflictCount
+
+  // --- RPC fetch ----------------------------------------------------
+  // Pull scalar counts/totals from get_dashboard_summary() once per
+  // hospital/day. Re-fetch when the hospital changes or when local
+  // midnight rolls over (todayKeyInZone changes). We never refetch on
+  // every state change — the RPC reflects server truth, which only
+  // changes when data is written; the realtime subscription on each
+  // table already triggers a local re-read.
+  const [rpcSummary, setRpcSummary] = useState(null)
+  const [rpcError, setRpcError] = useState(null)
+  const todayKey = todayKeyInZone(tz)
+
+  useEffect(() => {
+    if (!hid) {
+      setRpcSummary(null)
+      setRpcError(null)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      const { data, error } = await fetchDashboardSummary({
+        hospitalId: hid,
+        timezone: tz,
+        dayKey: todayKey,
+      })
+      if (cancelled) return
+      if (error) {
+        setRpcError(error)
+        setRpcSummary(null)
+      } else {
+        setRpcError(null)
+        setRpcSummary(data)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [hid, tz, todayKey])
+
+  // Refresh the RPC once an hour so the dashboard catches up to
+  // server-side changes that arrived through other devices while
+  // this tab is idle. Local realtime subscriptions keep the in-memory
+  // tables fresh; this is a belt-and-suspenders for when they lapse.
+  useEffect(() => {
+    if (!hid) return
+    const id = setInterval(async () => {
+      const { data, error } = await fetchDashboardSummary({
+        hospitalId: hid,
+        timezone: tz,
+        dayKey: todayKeyInZone(tz),
+      })
+      if (!error) setRpcSummary(data)
+    }, 60 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [hid, tz])
 
   const data = useMemo(() => {
     const now = new Date()
@@ -146,20 +193,32 @@ export function useHospitalDashboard(hospital, profile) {
     const isToday = (iso) => !!iso && dayKeyInZone(iso, tz) === today
     const m = { today }
 
+    // Helper: prefer RPC value when present, fall back to local
+    // computation only when RPC did not return the key. Uses `??`
+    // (nullish) so a legitimate 0 from the RPC survives.
+    const pick = (rpcKey, localValue) =>
+      rpcSummary && rpcSummary[rpcKey] != null ? rpcSummary[rpcKey] : localValue
+
     // ---- Patients & queue (patients.queue_status: waiting / in_consultation / discharged)
     const patients = pts.records
-    m.totalPatients = patients.length
-    m.registeredToday = patients.filter((p) => isToday(p.created_at)).length
-    m.waitingList = patients.filter((p) => p.queue_status === 'waiting')
-    m.consultList = patients.filter((p) => p.queue_status === 'in_consultation')
-    m.queueDischargedToday = patients.filter(
+    const localTotalPatients = patients.length
+    const localRegisteredToday = patients.filter((p) => isToday(p.created_at)).length
+    const localWaiting = patients.filter((p) => p.queue_status === 'waiting')
+    const localConsult = patients.filter((p) => p.queue_status === 'in_consultation')
+    const localQueueDischargedToday = patients.filter(
       (p) => p.queue_status === 'discharged' && isToday(p.queue_updated_at)
     )
-    m.ancCount = patients.filter((p) => p.category === 'anc').length // same rule as AncPatients.jsx
+
+    // Scalars: RPC wins when present. Arrays: ALWAYS local — the RPC
+    // does not return list-shaped data.
+    m.totalPatients = pick('totalPatients', localTotalPatients)
+    m.registeredToday = pick('registeredToday', localRegisteredToday)
+    m.waitingList = localWaiting // list — LOCAL_ONLY_KEY
+    m.consultList = localConsult // list — LOCAL_ONLY_KEY
+    m.queueDischargedToday = pick('queueDischargedToday', localQueueDischargedToday.length)
+    m.ancCount = pick('ancCount', patients.filter((p) => p.category === 'anc').length)
     m.registrationSeries = dailySeries(patients, (p) => p.created_at, SERIES_DAYS, tz, now)
-    // Patient growth = running total of registered patients. Patients registered
-    // before the 90-day window form the starting base, so the last point is
-    // always the real total shown elsewhere on the dashboard.
+    // Patient growth = running total of registered patients.
     const registeredInWindow = m.registrationSeries.reduce((sum, pt) => sum + pt.value, 0)
     let runningTotal = m.totalPatients - registeredInWindow
     m.growthSeries = m.registrationSeries.map((pt) => { runningTotal += pt.value; return { key: pt.key, value: runningTotal } })
@@ -172,10 +231,10 @@ export function useHospitalDashboard(hospital, profile) {
     // ---- Appointments (statuses that exist: scheduled / completed / cancelled)
     const ap = appts.records
     const apToday = ap.filter((a) => isToday(a.appointment_time))
-    m.apptToday = apToday.length
-    m.apptScheduledToday = apToday.filter((a) => a.status === 'scheduled').length
-    m.apptCompletedToday = apToday.filter((a) => a.status === 'completed').length
-    m.apptCancelledToday = apToday.filter((a) => a.status === 'cancelled').length
+    m.apptToday = pick('apptToday', apToday.length)
+    m.apptScheduledToday = pick('apptScheduledToday', apToday.filter((a) => a.status === 'scheduled').length)
+    m.apptCompletedToday = pick('apptCompletedToday', apToday.filter((a) => a.status === 'completed').length)
+    m.apptCancelledToday = pick('apptCancelledToday', apToday.filter((a) => a.status === 'cancelled').length)
     m.apptUpcoming = ap
       .filter((a) => a.status === 'scheduled' && new Date(a.appointment_time) >= new Date(now.getTime() - 15 * 60000))
       .sort((a, b) => new Date(a.appointment_time) - new Date(b.appointment_time))
@@ -184,23 +243,20 @@ export function useHospitalDashboard(hospital, profile) {
 
     // ---- Beds & admissions (real beds table; occupancy never guessed from patient counts)
     const bd = beds.records
-    m.bedsTotal = bd.length
-    m.bedsOccupied = bd.filter((b) => b.status === 'occupied').length
-    m.bedsAvailable = bd.filter((b) => b.status === 'available').length
-    m.bedsCleaning = bd.filter((b) => b.status === 'cleaning').length
-    m.bedsReserved = bd.filter((b) => b.status === 'reserved').length
+    m.bedsTotal = pick('bedsTotal', bd.length)
+    m.bedsOccupied = pick('bedsOccupied', bd.filter((b) => b.status === 'occupied').length)
+    m.bedsAvailable = pick('bedsAvailable', bd.filter((b) => b.status === 'available').length)
+    m.bedsCleaning = pick('bedsCleaning', bd.filter((b) => b.status === 'cleaning').length)
+    m.bedsReserved = pick('bedsReserved', bd.filter((b) => b.status === 'reserved').length)
     m.occupancyPct = m.bedsTotal > 0 ? Math.round((m.bedsOccupied / m.bedsTotal) * 100) : null
     const activeAdm = adms.records.filter((a) => a.status === 'active')
-    m.admittedList = activeAdm.map((a) => ({ id: a.id, name: nameById.get(a.patient_id) || 'Patient', ward: a.ward, at: a.admitted_at }))
+    m.admittedList = activeAdm.map((a) => ({ id: a.id, name: nameById.get(a.patient_id) || 'Patient', ward: a.ward, at: a.admitted_at })) // list — LOCAL_ONLY_KEY
     m.admittedCount = activeAdm.length
-    m.admittedToday = adms.records.filter((a) => isToday(a.admitted_at)).length
-    m.dischargedToday = adms.records.filter((a) => a.status === 'discharged' && isToday(a.discharge_date)).length
-    m.pendingAdmissionRequests = admReqs.records.filter((r) => r.status === 'pending').length
+    m.admittedToday = pick('admittedToday', adms.records.filter((a) => isToday(a.admitted_at)).length)
+    m.dischargedToday = pick('dischargedToday', adms.records.filter((a) => a.status === 'discharged' && isToday(a.discharge_date)).length)
+    m.pendingAdmissionRequests = pick('pendingAdmissionRequests', admReqs.records.filter((r) => r.status === 'pending').length)
     m.admissionSeries = dailySeries(adms.records, (a) => a.admitted_at, SERIES_DAYS, tz, now)
     // Patient census = how many admitted patients were still in hospital at the end of each day.
-    // A stay counts if it started on/before that day and has not ended by then: it is still 'active',
-    // or its discharge_date falls on a later day. Stays that ended without a recorded date are skipped
-    // rather than guessed.
     const stays = adms.records
       .filter((a) => a.admitted_at)
       .map((a) => ({
@@ -213,13 +269,36 @@ export function useHospitalDashboard(hospital, profile) {
       value: stays.filter((st) => st.from <= pt.key && (st.to === null || st.to > pt.key)).length,
     }))
 
-    // ---- Laboratory (lab_tests + lab_orders, stages from lib/lab.js — same as Laboratory.jsx)
-    const labs = [...labTests.records, ...labOrders.records].filter((t) => labStage(t.status) !== 'cancelled')
+    // ---- Laboratory
+    // lab_tests and lab_orders are joined into one stage view. The
+    // dashboard must AVOID double-counting: when a lab_tests row and
+    // a lab_orders row describe the same investigation (linked by
+    // lab_tests.order_id = lab_orders.id), we count the lab_tests row
+    // (it carries the actual status). We deduplicate by id; both
+    // tables use distinct UUIDs so a simple id-based Map is enough.
+    const labsById = new Map()
+    for (const t of labTests.records) if (t && t.id && !t.deleted_at) labsById.set(t.id, t)
+    for (const o of labOrders.records) {
+      if (!o || !o.id || o.deleted_at) continue
+      // Only add the lab_orders row if it is not already represented
+      // by a lab_tests row pointing at it.
+      const hasChild = labTests.records.some((t) => t.order_id === o.id)
+      if (!hasChild) labsById.set(o.id, o)
+    }
+    const labs = Array.from(labsById.values()).filter((t) => labStage(t.status) !== 'cancelled')
+
     const stageCount = { ordered: 0, sample_collected: 0, processing: 0, completed: 0 }
     labs.forEach((t) => { stageCount[labStage(t.status)] += 1 })
     m.lab = stageCount
-    m.labPending = stageCount.ordered + stageCount.sample_collected + stageCount.processing
-    m.labCompletedToday = labs.filter((t) => labStage(t.status) === 'completed' && isToday(t.resulted_at)).length
+    // CRITICAL FIX: was `stageCount.ordered + ... || localFallback` —
+    // the `||` collapsed a legitimate 0 to whatever the local
+    // fallback computed, hiding "no pending labs today" behind the
+    // local count. `??` preserves the RPC zero.
+    const localLabPending = stageCount.ordered + stageCount.sample_collected + stageCount.processing
+    m.labPending = pick('labPending', localLabPending)
+    // Belt-and-suspenders: if the RPC returned 0 but local also
+    // computed 0, that's the truth — DO NOT swap in a fallback.
+    m.labCompletedToday = pick('labCompletedToday', labs.filter((t) => labStage(t.status) === 'completed' && isToday(t.resulted_at)).length)
     m.labSeries = dailySeries(labs, (t) => t.requested_at || t.created_at, SERIES_DAYS, tz, now)
 
     // ---- Pharmacy (inventory_items — the table Pharmacy.jsx / Inventory.jsx use)
@@ -230,11 +309,22 @@ export function useHospitalDashboard(hospital, profile) {
       return (e.getTime() - startOfToday.getTime()) / DAY
     }
     const items = stock.records
-    m.stockOut = items.filter((i) => Number(i.quantity || 0) <= 0).length
-    m.stockLow = items.filter((i) => Number(i.quantity || 0) > 0 && Number(i.quantity || 0) <= Number(i.reorder_level || 0)).length
-    m.stockExpired = items.filter((i) => { const d = daysToExpiry(i); return d !== null && d < 0 }).length
-    m.stockExpiring = items.filter((i) => { const d = daysToExpiry(i); return d !== null && d >= 0 && d <= 30 }).length
-    m.stockAlerts = m.stockOut + m.stockLow
+    const localStockOut = items.filter((i) => Number(i.quantity || 0) <= 0).length
+    const localStockLow = items.filter((i) => Number(i.quantity || 0) > 0 && Number(i.quantity || 0) <= Number(i.reorder_level || 0)).length
+    const localStockExpired = items.filter((i) => { const d = daysToExpiry(i); return d !== null && d < 0 }).length
+    const localStockExpiring = items.filter((i) => { const d = daysToExpiry(i); return d !== null && d >= 0 && d <= 30 }).length
+
+    m.stockOut = pick('stockOut', localStockOut)
+    m.stockLow = pick('stockLow', localStockLow)
+    m.stockExpired = pick('stockExpired', localStockExpired)
+    m.stockExpiring = pick('stockExpiring', localStockExpiring)
+    // CRITICAL FIX: `localStockOut + localStockLow || 0` collapsed
+    // a legitimate 0 to 0 (which happened to be right) but on the
+    // RPC path the same `||` collapsed a real 0 to the local
+    // computation, hiding days with zero alerts. Use `??` so the
+    // RPC value always wins.
+    const localStockAlerts = localStockOut + localStockLow
+    m.stockAlerts = pick('stockAlerts', localStockAlerts)
     m.stockTotal = items.length
     m.stockWatch = items
       .filter((i) => Number(i.quantity || 0) <= Number(i.reorder_level || 0))
@@ -245,10 +335,15 @@ export function useHospitalDashboard(hospital, profile) {
     // ---- Finance (same rules as Billing.jsx: revenue = amount_paid on invoices created today;
     //      outstanding = balance of invoices not paid / cancelled)
     const inv = invoices.records
-    m.revenueToday = inv.filter((i) => isToday(i.created_at)).reduce((s, i) => s + Number(i.amount_paid || 0), 0)
-    m.outstanding = inv.filter((i) => i.status !== 'paid' && i.status !== 'cancelled').reduce((s, i) => s + Number(i.balance || 0), 0)
-    m.outstandingCount = inv.filter((i) => i.status !== 'paid' && i.status !== 'cancelled' && Number(i.balance || 0) > 0).length
-    m.invoicesToday = inv.filter((i) => isToday(i.created_at)).length
+    const localRevenueToday = inv.filter((i) => isToday(i.created_at)).reduce((s, i) => s + Number(i.amount_paid || 0), 0)
+    const localOutstanding = inv.filter((i) => i.status !== 'paid' && i.status !== 'cancelled').reduce((s, i) => s + Number(i.balance || 0), 0)
+    const localOutstandingCount = inv.filter((i) => i.status !== 'paid' && i.status !== 'cancelled' && Number(i.balance || 0) > 0).length
+    const localInvoicesToday = inv.filter((i) => isToday(i.created_at)).length
+
+    m.revenueToday = pick('revenueToday', localRevenueToday)
+    m.outstanding = pick('outstanding', localOutstanding)
+    m.outstandingCount = pick('outstandingCount', localOutstandingCount)
+    m.invoicesToday = pick('invoicesToday', localInvoicesToday)
     m.revenueSeries = dailySum(inv, (i) => i.created_at, (i) => i.amount_paid, SERIES_DAYS, tz, now)
 
     // ---- Recent activity (audit_events; only exists for events the app already audits)
@@ -258,89 +353,8 @@ export function useHospitalDashboard(hospital, profile) {
 
     return m
   }, [pts.records, appts.records, vitals.records, beds.records, adms.records, admReqs.records,
-      labTests.records, labOrders.records, stock.records, invoices.records, audit.records, tz])
+      labTests.records, labOrders.records, stock.records, invoices.records, audit.records, tz,
+      rpcSummary])
 
-  // RPC integration — skeleton-while-revalidate
-  // RPC scalar counts override client-computed values.
-  // Array fields are NEVER overridden (RPC returns counts, not arrays).
-  // FIX: Use nullish coalescing (??) correctly — 0 is a valid value for
-  // labPending and stockAlerts, but || treats 0 as falsy and falls back
-  // to client value incorrectly.
-  const [rpcData, setRpcData] = useState(null)
-  useEffect(() => {
-    if (!hid) return
-    let cancelled = false
-    fetchDashboardSummary(hid, SERIES_DAYS).then(summary => {
-      if (!cancelled && summary) setRpcData(summary)
-    })
-    return () => { cancelled = true }
-  }, [hid])
-
-  const mergedData = useMemo(() => {
-    if (!rpcData) return data
-    return {
-      ...data,
-      // Patients
-      totalPatients: rpcData.totalPatients ?? data.totalPatients,
-      registeredToday: rpcData.registeredToday ?? data.registeredToday,
-      ancCount: rpcData.ancCount ?? data.ancCount,
-      // Arrays — ALWAYS keep client
-      waitingList: data.waitingList,
-      consultList: data.consultList,
-      queueDischargedToday: data.queueDischargedToday,
-      // Triage
-      triageToday: rpcData.triageToday ?? data.triageToday,
-      // Appointments
-      apptToday: rpcData.apptToday ?? data.apptToday,
-      apptScheduledToday: rpcData.apptScheduledToday ?? data.apptScheduledToday,
-      apptCompletedToday: rpcData.apptCompletedToday ?? data.apptCompletedToday,
-      apptCancelledToday: rpcData.apptCancelledToday ?? data.apptCancelledToday,
-      apptUpcoming: data.apptUpcoming,
-      // Beds
-      bedsTotal: rpcData.bedsTotal ?? data.bedsTotal,
-      bedsOccupied: rpcData.bedsOccupied ?? data.bedsOccupied,
-      bedsAvailable: rpcData.bedsAvailable ?? data.bedsAvailable,
-      bedsCleaning: rpcData.bedsCleaning ?? data.bedsCleaning,
-      bedsReserved: rpcData.bedsReserved ?? data.bedsReserved,
-      // Admissions
-      admittedCount: rpcData.admittedCount ?? data.admittedCount,
-      admittedToday: rpcData.admittedToday ?? data.admittedToday,
-      dischargedToday: rpcData.dischargedToday ?? data.dischargedToday,
-      pendingAdmissionRequests: rpcData.pendingAdmissionRequests ?? data.pendingAdmissionRequests,
-      admittedList: data.admittedList,
-      // Lab — FIX: use ?? not || (0 is valid for labPending)
-      labPending: rpcData.labOrdered != null || rpcData.labSampleCollected != null || rpcData.labProcessing != null
-        ? (rpcData.labOrdered ?? 0) + (rpcData.labSampleCollected ?? 0) + (rpcData.labProcessing ?? 0)
-        : data.labPending,
-      labCompletedToday: rpcData.labCompletedToday ?? data.labCompletedToday,
-      // Pharmacy — FIX: use ?? not || (0 is valid for stockAlerts)
-      stockOut: rpcData.stockOut ?? data.stockOut,
-      stockLow: rpcData.stockLow ?? data.stockLow,
-      stockExpired: rpcData.stockExpired ?? data.stockExpired,
-      stockExpiring: rpcData.stockExpiring ?? data.stockExpiring,
-      stockTotal: rpcData.stockTotal ?? data.stockTotal,
-      stockAlerts: rpcData.stockOut != null || rpcData.stockLow != null
-        ? (rpcData.stockOut ?? 0) + (rpcData.stockLow ?? 0)
-        : data.stockAlerts,
-      stockWatch: data.stockWatch,
-      // Finance
-      revenueToday: rpcData.revenueToday ?? data.revenueToday,
-      outstanding: rpcData.outstanding ?? data.outstanding,
-      outstandingCount: rpcData.outstandingCount ?? data.outstandingCount,
-      invoicesToday: rpcData.invoicesToday ?? data.invoicesToday,
-      // Series — keep client
-      registrationSeries: data.registrationSeries,
-      triageSeries: data.triageSeries,
-      apptSeries: data.apptSeries,
-      revenueSeries: data.revenueSeries,
-      // Activity
-      activity: data.activity,
-      // Derived
-      occupancyPct: (rpcData.bedsTotal != null && rpcData.bedsTotal > 0)
-        ? Math.round((rpcData.bedsOccupied / rpcData.bedsTotal) * 100)
-        : data.occupancyPct,
-    }
-  }, [data, rpcData])
-
-  return { access, data: mergedData, loading, loadingByTable, isOnline, pendingSync, tz }
+  return { access, data, loading, isOnline, pendingSync, conflictCount, rpcError, tz }
 }
