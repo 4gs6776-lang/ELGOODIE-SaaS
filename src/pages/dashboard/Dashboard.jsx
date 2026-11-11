@@ -32,7 +32,18 @@ import {
   subscribeSyncErrors,
   retryTableQueue,
   skipStuckSyncItem,
+  getAllConflicts,
 } from '../../lib/useOfflineTable';
+// =====================================================================
+// CONFLICT REVIEW PANEL (lazy-loaded)
+// ---------------------------------------------------------------------
+// The panel is only opened on demand (when a user clicks the
+// "Conflicts" button), so we lazy-load it to keep the initial
+// dashboard bundle lean. The Suspense boundary at the bottom of
+// the component renders the existing `.dash-empty-state` fallback
+// while the chunk streams in.
+// =====================================================================
+const ConflictReviewPanel = lazy(() => import('../../components/ConflictReviewPanel'))
 // =====================================================================
 // LAZY-LOADED PAGE MODULES
 // ---------------------------------------------------------------------
@@ -255,6 +266,17 @@ export default function Dashboard(){
   const [syncPanelOpen, setSyncPanelOpen] = useState(false)
   const [syncActionBusy, setSyncActionBusy] = useState(false)
 
+  // ---- Conflict Review state ------------------------------------------
+  // `conflicts` mirrors the locally-staged conflicts for the active
+  // hospital (see useOfflineTable.getAllConflicts). The list is
+  // refreshed on every local change via subscribeSyncErrors (which
+  // fires on every IndexedDB write). The ConflictReviewPanel reads
+  // its own data on open — this counter is only used to badge the
+  // toolbar button.
+  const [conflicts, setConflicts] = useState([])
+  const [conflictPanelOpen, setConflictPanelOpen] = useState(false)
+  const conflictCount = conflicts.length
+
   const [activeMenu, setActiveMenu] = useState(null)
   const headerMenuRef = useRef(null)
 
@@ -337,6 +359,34 @@ export default function Dashboard(){
 
   useEffect(() => computeWeeklyCounts(patients), [patients])
   useEffect(() => subscribeSyncErrors(setSyncErrors), [])
+
+  // Refresh the conflict badge on every local change + online event.
+  // subscribeSyncErrors fires on IndexedDB writes, online/offline
+  // transitions — exactly the moments a conflict can appear or
+  // disappear. The callback fetches the hospital-scoped conflict
+  // list and updates the counter; the ConflictReviewPanel does its
+  // OWN detailed fetch when opened.
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      if (cancelled) return
+      try {
+        const list = await getAllConflicts(hospital?.id)
+        if (!cancelled) setConflicts(list || [])
+      } catch (_err) {
+        // Silent — the panel will surface its own errors when opened.
+      }
+    }
+    refresh()
+    // subscribeSyncErrors returns an unsubscribe function and calls
+    // the handler immediately, so we piggy-back on it for the same
+    // trigger events (online/offline + local change).
+    const unsub = subscribeSyncErrors(refresh)
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [hospital?.id])
   useEffect(() => {
     if (allowedKeys && !allowedKeys.includes(tab)) setTab('overview')
     // Also covers deep links (e.g. a reminder pointing at a module the plan lacks).
@@ -1359,6 +1409,36 @@ export default function Dashboard(){
             </div>
           )}
 
+          {/* ---- Conflict review alert ----
+               Uses the same .dash-sync-alert class as the sync-needs-
+               attention alert above so the visual treatment is
+               identical. The only difference is the inline border
+               color (gold) to distinguish conflicts from generic
+               pending syncs. The button opens the ConflictReviewPanel
+               (lazy-loaded above) which surfaces both-side changes
+               with two-step confirmation and role-based PII masking. */}
+          {conflictCount > 0 && (
+            <div
+              className="dash-sync-alert"
+              style={{ borderColor: 'rgba(245, 158, 11, 0.4)', background: 'rgba(245, 158, 11, 0.08)' }}
+            >
+              <div>
+                <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--gold)' }}>
+                  <AppIcon name="alert" size={14} /> Conflicts need review
+                </strong>
+                <span>
+                  {conflictCount} record{conflictCount === 1 ? '' : 's'} {conflictCount === 1 ? 'was' : 'were'} changed on the server while you were editing.
+                </span>
+              </div>
+              <button
+                onClick={() => setConflictPanelOpen(true)}
+                style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: 'var(--gold)' }}
+              >
+                Review conflicts
+              </button>
+            </div>
+          )}
+
           {syncPanelOpen && stuckTables.length > 0 && (
             <div className="dash-sync-panel">
               <div className="dash-panel-title">Sync queue</div>
@@ -1682,6 +1762,19 @@ export default function Dashboard(){
       ) : toast && (
         <div className="dash-toast">{toast}</div>
       )}
+
+      {/* ---- Conflict Review Panel ----
+           Lazy-loaded (see the `const ConflictReviewPanel = lazy(...)`
+           at the top of the file). The Suspense fallback reuses the
+           existing `.dash-empty-state` class so no new CSS is
+           introduced. The panel is hospital-scoped via useAuth()
+           internally — we only need to pass `open` and `onClose`. */}
+      <Suspense fallback={<div className="dash-empty-state">Loading…</div>}>
+        <ConflictReviewPanel
+          open={conflictPanelOpen}
+          onClose={() => setConflictPanelOpen(false)}
+        />
+      </Suspense>
 
       {/* Popover Menu Styling */}
       <style>{`
