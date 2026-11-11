@@ -1,0 +1,293 @@
+/* =====================================================================
+   ConflictReviewPanel + OfflineFirst styles
+   ---------------------------------------------------------------------
+   These styles are ADDITIVE to the existing Liquid Glass theme — they
+   do not redefine any existing class. The Conflict Review panel uses
+   the existing .cr-overlay, .cr-modal, .cr-modal-header, .cr-close,
+   .cr-toast, .cr-empty, .cr-loading, .cr-btn classes already shipped
+   in src/theme/components.css and src/components/OfflineFirst.css.
+   This file only adds the NEW classes specific to the corrected
+   ConflictReviewPanel: .cr-modal-wide, .cr-split, .cr-list,
+   .cr-list-item, .cr-detail, .cr-diff-table, .cr-blocked-banner,
+   .cr-confirm, etc.
+   ===================================================================== */
+
+.cr-modal-wide {
+  max-width: 980px;
+  width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+}
+
+.cr-split {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  min-height: 420px;
+}
+
+@media (max-width: 720px) {
+  .cr-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* LEFT: conflict list ------------------------------------------------ */
+.cr-list {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-y: auto;
+  max-height: 70vh;
+  background: var(--bg-card);
+}
+
+.cr-list-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.cr-list-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.cr-list-item.active {
+  background: var(--bg-card-hover);
+  border-left: 3px solid var(--teal);
+}
+
+.cr-list-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.cr-list-table {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ivory);
+  text-transform: capitalize;
+}
+
+.cr-list-patient {
+  font-size: 13px;
+  color: var(--ivory);
+  margin-bottom: 4px;
+}
+
+.cr-list-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.cr-list-blocked {
+  background: rgba(245, 158, 11, 0.18);
+  color: #f59e0b;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+/* Severity badges */
+.cr-sev {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.cr-sev-critical { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+.cr-sev-warning  { background: rgba(245, 158, 11, 0.18); color: #f59e0b; }
+.cr-sev-info     { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
+
+/* RIGHT: detail ------------------------------------------------------ */
+.cr-detail {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--bg-card);
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+.cr-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+.cr-detail-table {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ivory);
+  text-transform: capitalize;
+}
+
+.cr-detail-patient {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.cr-detail-meta {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  line-height: 1.6;
+}
+
+.cr-meta-label {
+  font-weight: 600;
+  color: var(--ivory);
+}
+
+.cr-muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.cr-blocked-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #f59e0b;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.cr-diff-section h4 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 12px 0 8px;
+}
+
+.cr-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cr-diff-table th,
+.cr-diff-table td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.cr-diff-table th {
+  background: var(--bg-card-hover);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.cr-diff-field {
+  font-weight: 600;
+  color: var(--ivory);
+  white-space: nowrap;
+}
+
+.cr-strat {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.06);
+}
+.cr-strat-clinical { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+.cr-strat-money    { background: rgba(245, 158, 11, 0.18); color: #f59e0b; }
+.cr-strat-status   { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
+.cr-strat-reference{ background: rgba(168, 85, 247, 0.18); color: #a855f7; }
+.cr-strat-meta     { background: rgba(156, 163, 175, 0.18); color: #9ca3af; }
+
+.cr-diff-local { background: rgba(239, 68, 68, 0.06); }
+.cr-diff-server { background: rgba(59, 130, 246, 0.06); }
+
+.cr-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.cr-confirm {
+  width: 100%;
+  background: var(--bg-card-hover);
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.cr-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cr-audit-note {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 12px;
+  text-align: right;
+}
+
+.cr-audit-note code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Buttons already exist in components.css; we add a primary variant
+   for confirmation. */
+.cr-btn-primary {
+  background: var(--teal, #14b8a6);
+  color: white;
+  border: none;
+}
+.cr-btn-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.cr-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cr-btn-secondary {
+  background: transparent;
+  color: var(--ivory);
+  border: 1px solid var(--line);
+}
+.cr-btn-secondary:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+}
+.cr-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
