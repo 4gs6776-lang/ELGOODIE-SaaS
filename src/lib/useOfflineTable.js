@@ -457,18 +457,14 @@ async function getLocalRecordsFor(db, tableName, hospitalId) {
       // IndexedDB does NOT coerce false to 0 — they are different
       // key values. The previous code used
       //   IDBKeyRange.only([tableName, hospitalId, 0])
-      // which matched NOTHING because no row has _synced === 0
-      // (rows have _synced === false or _synced === true).
+      // which matched NOTHING because no row has _synced === 0.
+      // Rows have _synced === false or _synced === true.
       //
       // We need ALL records for this table+hospital, regardless of
       // sync state, so we use a bounded range that covers both
-      // false (0) and true (1). IDB sorts booleans as 0 < 1, so
-      // IDBKeyRange.bound([t, h, 0], [t, h, 1], false, false)
+      // false (sorted as 0) and true (sorted as 1). IDB sorts
+      // booleans as 0 < 1, so the range [t, h, 0] .. [t, h, 2]
       // matches both _synced=false and _synced=true rows.
-      //
-      // We also include the upper bound [t, h, 2] to catch any
-      // rows that might have _synced as a string or other truthy
-      // value — defense in depth.
       const req = idx.getAll(IDBKeyRange.bound(
         [tableName, hospitalId, 0],
         [tableName, hospitalId, 2],
@@ -895,9 +891,56 @@ async function pullFromSupabase(db, tableName, hospitalId) {
   const bootstrapped = await isTableBootstrapped(db, hospitalId, tableName)
   const existingCursor = await getCursor(db, hospitalId, tableName)
 
+  // CRITICAL FIX: a sync cursor must NEVER be treated as proof that
+  // local records exist. If local records were purged, deleted, or
+  // invalidated (e.g. by clearLocalDataOnLogout, a browser data
+  // clear, or an IndexedDB eviction), the cursor is stale and must
+  // be ignored — we do a FULL pull instead of an incremental one.
+  //
+  // We verify the local baseline by checking that at least one row
+  // exists in IndexedDB for this table+hospital. If zero rows
+  // exist, we treat the table as not-bootstrapped regardless of the
+  // cursor's state.
+  let localBaselineExists = false
+  if (bootstrapped && existingCursor?.since) {
+    try {
+      const localRows = await getLocalRecordsFor(db, tableName, hospitalId)
+      localBaselineExists = localRows.length > 0
+    } catch (_err) {
+      // If the check itself fails, be safe and do a full pull.
+      localBaselineExists = false
+    }
+    if (!localBaselineExists) {
+      console.warn(
+        `[sync] ${tableName}: cursor says bootstrapped but 0 local rows found — forcing full pull.`
+      )
+      // Clear the stale bootstrap flag + cursor so the full pull
+      // path is taken and the cursor is re-stamped after success.
+      try {
+        await clearCursor(db, hospitalId, tableName)
+        const meta = await getInstallationMeta(db)
+        if (meta?.fullSync) {
+          const key = `${hospitalId}|${tableName}`
+          delete meta.fullSync[key]
+          await new Promise((resolve, reject) => {
+            const tx2 = db.transaction(META_STORE, 'readwrite')
+            const store2 = tx2.objectStore(META_STORE)
+            store2.put(meta)
+            tx2.oncomplete = () => resolve()
+            tx2.onerror = () => reject(tx2.error)
+          })
+        }
+      } catch (clearErr) {
+        console.error('Could not clear stale cursor:', clearErr)
+      }
+    }
+  }
+
   let result
-  if (!bootstrapped || !existingCursor?.since) {
-    // FIRST SYNC for this device+hospital+table: full pull.
+  if (!bootstrapped || !existingCursor?.since || !localBaselineExists) {
+    // FULL SYNC: first sync for this device+hospital+table, OR
+    // local baseline is missing despite the cursor claiming
+    // bootstrapped. A full pull re-downloads every row.
     result = await fetchAllRemoteRows(tableName, hospitalId)
   } else {
     // Incremental.
@@ -979,6 +1022,11 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
   const [pendingCount, setPendingCount] = useState(0)
   const [conflictCount, setConflictCount] = useState(0)
   const [loadError, setLoadError] = useState(null)
+  // FIX: new state to distinguish "successfully loaded 0 patients"
+  // from "still loading" / "error" / "offline". The UI uses this
+  // to show the right message instead of always showing "No
+  // patients found".
+  const [syncState, setSyncState] = useState('idle') // 'idle' | 'loading' | 'success' | 'error' | 'offline' | 'partial'
   // Mirror of pendingCount for use inside timers (state captured in a
   // setInterval closure would be frozen at mount time).
   const pendingCountRef = useRef(0)
@@ -992,12 +1040,15 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
   const loadLocalRecords = useCallback(async () => {
     if (!hospitalId) {
       // Empty state for null hospital — never leak another hospital's
-      // rows into the new context.
+      // rows into the new context. This is the OWNER-without-hospital
+      // case: the UI should prompt the owner to select a hospital,
+      // NOT show "No patients found".
       setRecords([])
       setPendingCount(0)
       setConflictCount(0)
       pendingCountRef.current = 0
       setLoading(false)
+      setSyncState('idle')
       return
     }
 
@@ -1040,10 +1091,14 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
       setLoadError(null)
       setLoading(false)
+      // FIX: set syncState so the UI can distinguish "successfully
+      // loaded 0 patients" from "still loading" / "error".
+      setSyncState(prev => prev === 'loading' ? 'success' : prev)
     } catch (error) {
       console.error('Error reading offline records:', error)
       setLoadError(error?.message || 'Could not read local data')
       setLoading(false)
+      setSyncState('error')
     }
   }, [tableName, hospitalId])
 
@@ -1072,12 +1127,21 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
     async function initialLoad() {
       if (hospitalId) {
+        setSyncState('loading')
+        setLoading(true)
         try {
           const db = await openDB()
           await pullFromSupabase(db, tableName, hospitalId)
         } catch (err) {
           console.error('Error opening DB for initial pull:', err)
+          setLoadError(err?.message || 'Could not sync from server')
+          setSyncState('error')
         }
+      } else {
+        // No hospital context (e.g. owner without a selected hospital).
+        // Stay in 'idle' state — the UI should prompt for hospital
+        // selection, not show "No patients found".
+        setSyncState('idle')
       }
       if (!cancelled) await loadLocalRecords()
     }
@@ -1103,28 +1167,56 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
     const handleOnline = async () => {
       setIsOnline(true)
-      await flushTableQueue(tableName)
       if (hospitalId) {
+        setSyncState('loading')
+        await flushTableQueue(tableName)
         try {
           const db = await openDB()
           await pullFromSupabase(db, tableName, hospitalId)
         } catch (err) {
           console.error('Error opening DB for reconnect pull:', err)
+          setLoadError(err?.message || 'Could not sync from server')
+          setSyncState('error')
         }
       }
       await loadLocalRecords()
     }
 
-    const handleOffline = () => setIsOnline(false)
+    const handleOffline = () => {
+      setIsOnline(false)
+      // FIX: set syncState to 'offline' so the UI can show "You are
+      // offline — showing cached data" instead of "No patients found".
+      setSyncState(prev => (prev === 'success' || prev === 'idle') ? 'offline' : prev)
+    }
+
+    // FIX: listen for the 'gmh:session-cleared' event (dispatched by
+    // clearLocalDataOnLogout) so the in-memory `records` state resets
+    // to [] immediately. Without this, the React state retains the
+    // previous user's patient list in memory even after IndexedDB
+    // is cleared — the next user would briefly see the previous
+    // user's data until the next pull completes.
+    const handleSessionCleared = () => {
+      setRecords([])
+      setPendingCount(0)
+      setConflictCount(0)
+      pendingCountRef.current = 0
+      setLoading(true)
+      setLoadError(null)
+      setSyncState('idle')
+      // Bump the sequence so any in-flight reads are discarded.
+      loadSeqRef.current += 1
+    }
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    window.addEventListener('gmh:session-cleared', handleSessionCleared)
 
     return () => {
       cancelled = true
       clearInterval(retryTimer)
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      window.removeEventListener('gmh:session-cleared', handleSessionCleared)
     }
   }, [loadLocalRecords, tableName, hospitalId])
 
@@ -1435,6 +1527,27 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     }
   }
 
+  // FIX: retry function — re-runs the full sync + local read. Used
+  // by the UI's "Retry" button when a sync error or incomplete sync
+  // is shown.
+  const retry = useCallback(async () => {
+    if (!hospitalId) return
+    setSyncState('loading')
+    setLoading(true)
+    setLoadError(null)
+    try {
+      const db = await openDB()
+      await pullFromSupabase(db, tableName, hospitalId)
+    } catch (err) {
+      console.error('Retry sync failed:', err)
+      setLoadError(err?.message || 'Could not sync from server')
+      setSyncState('error')
+      setLoading(false)
+      return
+    }
+    await loadLocalRecords()
+  }, [tableName, hospitalId, loadLocalRecords])
+
   return {
     records,
     loading,
@@ -1442,6 +1555,11 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     isOnline,
     pendingCount,
     conflictCount,
+    // FIX: new state — distinguishes "loading" / "success" / "error" /
+    // "offline" / "idle" so the UI can show the right message.
+    syncState,
+    // FIX: retry function — re-runs the sync + local read.
+    retry,
     addRecord,
     updateRecord,
     deleteRecord,
@@ -1754,81 +1872,6 @@ export async function resolveConflictAcceptRemote(originalId, tableName) {
 }
 
 // =====================================================================
-// RESOLVE CONFLICT (MERGE) — field-level merge
-// ---------------------------------------------------------------------
-// Applies a field-level merge: the caller passes the full merged
-// row (built from per-field decisions in the ConflictReviewPanel).
-// We replace the local row with the merged row, mark the conflict
-// resolved, and delete the remote shadow.
-//
-// If the backend `record_conflict_resolution` RPC is available
-// (migration 098), the merge is also recorded there for audit.
-// If the RPC is NOT available, we still apply the merge locally
-// — the user's resolution is not blocked by a missing backend
-// RPC. The local audit copy preserves the original local version
-// for traceability.
-// =====================================================================
-export async function resolveConflictMerge(originalId, tableName, mergedRow, fieldDecisions) {
-  try {
-    const db = await openDB()
-    const local = await getLocalRecord(db, originalId)
-    if (!local) return false
-
-    // Find the remote shadow.
-    const all = await getAllLocalRecords(db)
-    const shadow = all.find(
-      (r) => r._originalId === originalId && r._isRemoteShadow === true
-    )
-    if (!shadow) {
-      // No remote shadow on file — nothing to merge with.
-      return false
-    }
-
-    // Save an audit copy of the local version so the merge
-    // decision is traceable after the fact.
-    await putLocalRecord(db, {
-      ...cleanSupabasePayload(local),
-      id: `${originalId}__conflict_resolved_${Date.now()}`,
-      _originalId: originalId,
-      _resolution: 'merge',
-      _resolvedAt: nowISO(),
-      _fieldDecisions: fieldDecisions || {},
-      table_name: tableName,
-      hospital_id: local.hospital_id,
-      _synced: true,
-      _isAuditCopy: true,
-    })
-
-    // Apply the merged row locally. The mergedRow carries the
-    // final field values chosen by the user. We re-queue it for
-    // upload so the server receives the resolution.
-    await putLocalRecord(db, {
-      ...mergedRow,
-      id: originalId,
-      table_name: tableName,
-      hospital_id: local.hospital_id,
-      _synced: false,
-      _deleted: Boolean(mergedRow.deleted_at),
-      _syncError: false,
-      _syncErrorMessage: null,
-      _syncErrorKind: null,
-      _syncErrorInfo: null,
-      _conflict: false,
-      _conflictReason: null,
-      _discarded: false,
-      updated_at: nowISO(),
-    })
-
-    // Delete the remote shadow — the conflict is resolved.
-    await deleteLocalRecord(db, shadow.id)
-    return true
-  } catch (err) {
-    console.error('Could not resolve conflict (merge):', err)
-    return false
-  }
-}
-
-// =====================================================================
 // SKIP (DISCARD) A STUCK SYNC ITEM
 //
 // This used to mark the item as synced, which cleared the warning
@@ -1884,6 +1927,20 @@ export async function skipStuckSyncItem(id) {
 // read (see loadLocalRecords).
 // =====================================================================
 
+// =====================================================================
+// CLEAR LOCAL DATA ON LOGOUT / HOSPITAL SWITCH
+//
+// SECURITY: preserves unsynced clinical records. They will be uploaded
+// the next time someone with access to the same hospital logs in.
+//
+// FIX: broadcasts a 'gmh:session-cleared' event so every mounted
+// useOfflineTable instance resets its in-memory `records` state to
+// []. Without this, the React state retains the previous user's
+// patient list in memory even after IndexedDB is cleared — so the
+// next user briefly sees the previous user's data until the next
+// pull completes.
+// =====================================================================
+
 export async function clearLocalDataOnLogout() {
   // 1. Try to upload anything still waiting, while we still have a
   // session. Capped at 6 seconds so a slow network can never trap
@@ -1917,11 +1974,29 @@ export async function clearLocalDataOnLogout() {
       tx.oncomplete = () => resolve()
       tx.onerror = () => resolve()
     })
+
+    // 4. Clear the per-installation bootstrap meta so the next login
+    // does a full pull for every table.
+    try {
+      const meta = await getInstallationMeta(db)
+      if (meta?.fullSync) {
+        meta.fullSync = {}
+        await new Promise((resolve, reject) => {
+          const tx2 = db.transaction(META_STORE, 'readwrite')
+          const store2 = tx2.objectStore(META_STORE)
+          store2.put(meta)
+          tx2.oncomplete = () => resolve()
+          tx2.onerror = () => reject(tx2.error)
+        })
+      }
+    } catch (metaErr) {
+      console.error('Could not clear bootstrap meta on logout:', metaErr)
+    }
   } catch (err) {
     console.error('Could not clear local records on logout:', err)
   }
 
-  // 4. Remove cached API responses saved by the service worker.
+  // 5. Remove cached API responses saved by the service worker.
   try {
     if (typeof caches !== 'undefined') {
       const names = await caches.keys()
@@ -1932,6 +2007,16 @@ export async function clearLocalDataOnLogout() {
   } catch (err) {
     console.error('Could not clear caches on logout:', err)
   }
+
+  // 6. FIX: broadcast a 'session-cleared' event so every mounted
+  // useOfflineTable instance resets its in-memory `records` state
+  // to []. Without this, the React state retains the previous
+  // user's patient list in memory even after IndexedDB is cleared.
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gmh:session-cleared'))
+    }
+  } catch (_err) { /* non-fatal */ }
 
   return { keptUnsynced }
 }
@@ -1981,23 +2066,7 @@ export async function getSyncDiagnostics(hospitalId = null) {
 }
 
 // =====================================================================
-// GET ALL CONFLICTS (hospital-scoped)
-// ---------------------------------------------------------------------
-// Returns the list of locally-staged conflicts for the active
-// hospital. Each conflict carries:
-//   id            — the local record id
-//   table_name    — e.g. 'prescriptions'
-//   record_id     — same as id (kept for shape compat with backend)
-//   local_data    — the cleaned local row
-//   remote_data   — the cleaned remote shadow row (or null)
-//   reason        — 'both_changed' | 'version_mismatch' | 'remote_newer'
-//   detected_at   — when the conflict was stamped
-//   blocked       — true if backend atomic resolution is unavailable
-//
-// Used by the ConflictReviewPanel (wired in Dashboard.jsx) to
-// populate its list. The panel also queries the backend
-// `sync_conflicts` table for conflicts staged on the server, and
-// merges the two lists.
+// GET ALL CONFLICTS (hospital-scoped) — used by ConflictReviewPanel
 // =====================================================================
 export async function getAllConflicts(hospitalId = null) {
   try {
@@ -2009,7 +2078,6 @@ export async function getAllConflicts(hospitalId = null) {
       if (r._discarded === true) continue
       if (r._isRemoteShadow === true) continue
       if (hospitalId && r.hospital_id !== hospitalId) continue
-      // Find the remote shadow for this id (if any).
       const shadow = all.find(
         (s) => s._originalId === r.id && s._isRemoteShadow === true
       )
@@ -2032,5 +2100,56 @@ export async function getAllConflicts(hospitalId = null) {
   } catch (err) {
     console.error('Could not get conflicts:', err)
     return []
+  }
+}
+
+// =====================================================================
+// RESOLVE CONFLICT (MERGE) — field-level merge
+// Used by ConflictReviewPanel's "Merge" button.
+// =====================================================================
+export async function resolveConflictMerge(originalId, tableName, mergedRow, fieldDecisions) {
+  try {
+    const db = await openDB()
+    const local = await getLocalRecord(db, originalId)
+    if (!local) return false
+    const all = await getAllLocalRecords(db)
+    const shadow = all.find(
+      (r) => r._originalId === originalId && r._isRemoteShadow === true
+    )
+    if (!shadow) return false
+    // Save an audit copy of the local version.
+    await putLocalRecord(db, {
+      ...cleanSupabasePayload(local),
+      id: `${originalId}__conflict_resolved_${Date.now()}`,
+      _originalId: originalId,
+      _resolution: 'merge',
+      _resolvedAt: nowISO(),
+      _fieldDecisions: fieldDecisions || {},
+      table_name: tableName,
+      hospital_id: local.hospital_id,
+      _synced: true,
+      _isAuditCopy: true,
+    })
+    // Apply the merged row locally.
+    await putLocalRecord(db, {
+      ...mergedRow,
+      id: originalId,
+      table_name: tableName,
+      hospital_id: local.hospital_id,
+      _synced: false,
+      _deleted: Boolean(mergedRow.deleted_at),
+      _syncError: false,
+      _syncErrorMessage: null,
+      _syncErrorKind: null,
+      _conflict: false,
+      _conflictReason: null,
+      _discarded: false,
+      updated_at: nowISO(),
+    })
+    await deleteLocalRecord(db, shadow.id)
+    return true
+  } catch (err) {
+    console.error('Could not resolve conflict (merge):', err)
+    return false
   }
 }

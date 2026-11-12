@@ -215,14 +215,12 @@ export async function fetchDashboardSummary({ hospitalId, timezone, dayKey } = {
       // FIX: suppress the 404 (RPC not found) after the first
       // occurrence per session. The RPC may not be deployed on
       // every Supabase project — the frontend falls back to local
-      // computation, so the 404 is noisy but harmless. Logging it
-      // every 5 minutes (the hourly refresh timer) spams the
-      // console. We log once, then silently fall back.
+      // computation, so the 404 is noisy but harmless.
       const code = error.code || ''
       const status = error.status || (error.context?.status) || 0
       const isMissingRpc =
-        code === 'PGRST202' ||                     // function not found
-        code === '42883' ||                        // undefined_function
+        code === 'PGRST202' ||
+        code === '42883' ||
         status === 404 ||
         /could not find the function|does not exist|not found/i.test(error.message || '')
       if (isMissingRpc) {
@@ -230,15 +228,11 @@ export async function fetchDashboardSummary({ hospitalId, timezone, dayKey } = {
           missingKeyWarnings.add('__rpc_missing__')
           console.info(
             '[dashboardSummary] get_dashboard_summary RPC is not deployed on this Supabase project. ' +
-            'Falling back to local computation. This message will not repeat. ' +
-            'Coordinate with the backend owner if you want the RPC speed-up.'
+            'Falling back to local computation. This message will not repeat.'
           )
         }
-        // Return as a soft "empty" so the caller falls back to local
-        // computation without surfacing an error to the UI.
         return { data: null, error: null, reason: 'rpc_missing' }
       }
-      // Any other error — preserve the original error object.
       return { data: null, error, reason: 'rpc_error' }
     }
 
