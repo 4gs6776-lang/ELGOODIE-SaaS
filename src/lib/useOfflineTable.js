@@ -451,10 +451,30 @@ async function getLocalRecordsFor(db, tableName, hospitalId) {
     const store = tx.objectStore(STORE_NAME)
     if (store.indexNames.contains('table_hospital_synced')) {
       const idx = store.index('table_hospital_synced')
-      // IDBKeyRange.only expects the exact same array shape as the
-      // index keyPath — null hospitalId would throw DataError, so we
-      // refuse the call earlier (see loadLocalRecords).
-      const req = idx.getAll(IDBKeyRange.only([tableName, hospitalId, 0]))
+      // CRITICAL FIX: the compound index keyPath is
+      // ['table_name', 'hospital_id', '_synced']. The _synced
+      // field is a BOOLEAN (true/false), NOT a number (0/1).
+      // IndexedDB does NOT coerce false to 0 — they are different
+      // key values. The previous code used
+      //   IDBKeyRange.only([tableName, hospitalId, 0])
+      // which matched NOTHING because no row has _synced === 0
+      // (rows have _synced === false or _synced === true).
+      //
+      // We need ALL records for this table+hospital, regardless of
+      // sync state, so we use a bounded range that covers both
+      // false (0) and true (1). IDB sorts booleans as 0 < 1, so
+      // IDBKeyRange.bound([t, h, 0], [t, h, 1], false, false)
+      // matches both _synced=false and _synced=true rows.
+      //
+      // We also include the upper bound [t, h, 2] to catch any
+      // rows that might have _synced as a string or other truthy
+      // value — defense in depth.
+      const req = idx.getAll(IDBKeyRange.bound(
+        [tableName, hospitalId, 0],
+        [tableName, hospitalId, 2],
+        false,
+        false
+      ))
       req.onsuccess = () => resolve(req.result || [])
       req.onerror = () => reject(req.error)
     } else {
