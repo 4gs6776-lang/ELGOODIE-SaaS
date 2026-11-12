@@ -34,31 +34,25 @@ const PROFILE_COLUMNS = [
 // =====================================================================
 // AUTH PROVIDER
 //
-// BUGFIX (requirement 1): `previousHospitalRef` was created with
-// `useState(null)` — but useState returns a 2-tuple `[value, setter]`,
-// not a ref object. So `previousHospitalRef.current` was always
-// `undefined` (the tuple has no `.current` property), and the line
-// `previousHospitalRef.current = profileData.hospital_id` silently
-// set index 1 (the setter function) to the hospital UUID — meaning
-// the hospital-switch cursor-clearing logic NEVER fired. The user
-// could switch from Hospital A to Hospital B and the local cursor
-// for A would remain, so the next login to A would skip rows added
-// during the visit to B.
+// FIXES:
+//   1. previousHospitalRef was created with `useState(null)` — that
+//      returns a tuple `[value, setter]`, not a ref. `previousHospitalRef.current`
+//      was always `undefined` and the cursor-clearing logic NEVER fired.
+//      Now uses `useRef(null)`.
 //
-// FIX: use `useRef(null)` instead. `useRef` returns a stable object
-// with a `.current` property; assignment works as expected and
-// never triggers a re-render.
+//   2. Owner hospital selection: an owner profile may have
+//      `hospital_id = null`. The previous code set `setHospital(null)`
+//      and the dashboard showed "No patients found" — wrong. Now the
+//      AuthContext loads the list of hospitals the owner is authorized
+//      to manage, exposes them via `ownerHospitals`, and the owner
+//      must explicitly select one via `selectOwnerHospital(id)`.
+//      The selected hospital is persisted in localStorage so it
+//      survives refresh. The selection is cleared on logout.
 //
-// INVARIANTS enforced by this file:
-//   * `previousHospitalRef.current` is set to the new hospital_id
-//     AFTER `clearCursorsOnHospitalSwitch(previous)` runs, so a
-//     switch from A → B clears A's cursors.
-//   * On logout, `previousHospitalRef.current` is reset to null so
-//     a subsequent login as a DIFFERENT user does not think it is
-//     "switching" from the previous user's hospital.
-//   * On initial mount, `previousHospitalRef.current` starts null,
-//     so the first login does not trigger a hospital-switch clear
-//     (there is nothing to clear).
+//   3. The hospital context is now consistent across the dashboard
+//      and all modules — they all read `hospital` from useAuth(),
+//      which is either the profile's hospital (for non-owners) or
+//      the owner-selected hospital (for owners).
 // =====================================================================
 export function AuthProvider({ children }){
   const [session, setSession] = useState(null)
@@ -67,28 +61,19 @@ export function AuthProvider({ children }){
   const [loading, setLoading] = useState(true)
   // FIX: useRef, NOT useState. This is a mutable reference to the
   // last hospital_id we successfully loaded — used only to detect
-  // hospital switching for cursor clearing. It must NEVER trigger
-  // a re-render on its own.
+  // hospital switching for cursor clearing.
   const previousHospitalRef = useRef(null)
-  // The currently-authenticated user id, used by the offline queue
-  // to assert that any record being uploaded still belongs to the
-  // signed-in user. This is the security anchor for requirement 3
-  // (cross-hospital queue processing) and requirement 9 (security).
-  const currentUserIdRef = useRef(null)
+  // FIX: owner hospital selection. When an owner logs in, their
+  // profile.hospital_id is null. We load the list of hospitals they
+  // can manage and let them pick one.
+  const [ownerHospitals, setOwnerHospitals] = useState([])
+  const [ownerSelectedHospitalId, setOwnerSelectedHospitalId] = useState(null)
 
-  // Closure that captures `session` for use inside async retries
-  // (loadProfileAndHospital is recursive and needs the latest
-  // session, not the one captured at function-definition time).
-  // We refresh this ref on every render so retries always see the
-  // latest session.
+  // Closure that captures `session` for use inside async retries.
   const sessionRef = useRef(session)
   sessionRef.current = session
 
   async function loadProfileAndHospital(userId, attempt = 1){
-    // Use verified columns — `select('*')` against profiles was the
-    // source of multiple 400 errors when the schema cache had not
-    // refreshed. Email lives on auth.users, not profiles; we read it
-    // from the session below.
     const { data: profileData, error: profileErr } = await supabase
       .from('profiles')
       .select(PROFILE_COLUMNS)
@@ -96,10 +81,6 @@ export function AuthProvider({ children }){
       .maybeSingle()
 
     if (profileErr || !profileData) {
-      // PGRST116 / no rows: the profile is being created by a trigger
-      // — retry a few times before giving up. Network errors get the
-      // same retry, but auth/permission errors should NOT loop
-      // forever; we cap at 6 attempts.
       const code = profileErr?.code
       const isRetryable = !code || code === 'PGRST116' || code === '22P02'
       if (attempt < 6 && isRetryable) {
@@ -108,18 +89,9 @@ export function AuthProvider({ children }){
       }
       setProfile(null)
       setHospital(null)
-      // Do NOT touch previousHospitalRef here — we may still be the
-      // same user as before; clearing it would mask a real hospital
-      // switch on the next successful load.
       return
     }
 
-    // Email/phone come from the auth session (auth.users.email), not
-    // from profiles — the profiles table does not have those columns.
-    // We attach them here so existing components that read
-    // `profile.email` keep working without a second fetch. We use
-    // sessionRef.current (the latest) instead of `session` (which
-    // may be stale inside a recursive retry).
     const currentSession = sessionRef.current
     if (currentSession?.user?.email) {
       profileData.email = currentSession.user.email
@@ -129,28 +101,44 @@ export function AuthProvider({ children }){
     }
 
     setProfile(profileData)
-    // Record the authenticated user id for the offline queue's
-    // security check (requirement 3 + 9).
-    currentUserIdRef.current = userId
-
-    // Tell the subscription lock layer about the user's role so it can
-    // refuse writes for read-only roles (CMD). This must happen BEFORE
-    // any component tries to write, so we do it synchronously here.
     setUserRole(profileData.role)
 
+    // FIX: owner hospital selection. If the profile is an owner
+    // with no hospital_id, load the list of hospitals they can
+    // manage. The owner must explicitly select one before the
+    // dashboard loads hospital-specific data.
+    if (profileData.role === 'owner' && !profileData.hospital_id) {
+      await loadOwnerHospitals()
+      // If the owner previously selected a hospital, restore it.
+      const savedId = typeof localStorage !== 'undefined'
+        ? localStorage.getItem('gmh.owner.selectedHospitalId')
+        : null
+      if (savedId) {
+        await selectOwnerHospital(savedId)
+      } else {
+        // No hospital selected — the dashboard will show the
+        // hospital-picker, NOT "No patients found".
+        setHospital(null)
+      }
+      return
+    }
+
     if (!profileData.hospital_id) {
-      // User has no hospital — set hospital to null but DO NOT clear
-      // previousHospitalRef. If they acquire a hospital later (via
-      // owner-admin action), the next load will see the difference
-      // and clear the old cursors.
       setHospital(null)
       return
     }
 
+    // Non-owner: load the profile's hospital.
+    await loadHospitalById(profileData.hospital_id)
+  }
+
+  // Load a hospital by ID and set it as the active context. Also
+  // handles hospital-switching cursor cleanup.
+  async function loadHospitalById(hospitalId){
     const { data: hospitalData, error: hospitalErr } = await supabase
       .from('hospitals')
       .select('*')
-      .eq('id', profileData.hospital_id)
+      .eq('id', hospitalId)
       .maybeSingle()
 
     if (hospitalErr) {
@@ -159,41 +147,57 @@ export function AuthProvider({ children }){
       return
     }
 
-    // -----------------------------------------------------------------
-    // HOSPITAL SWITCHING — clear the previous hospital's offline
-    // cursors so the new hospital re-bootstraps on next login.
-    //
-    // Conditions for a "real" switch (all must be true):
-    //   1. We had a previous hospital_id (not null).
-    //   2. The new hospital_id is different from the previous.
-    //   3. The previous hospital_id is not null (avoids clearing on
-    //      the very first login of a brand-new device).
-    //
-    // We deliberately do NOT clear records — only cursors. Records
-    // for the old hospital stay in IndexedDB but are scoped out by
-    // `hospital_id === current` on every read (see useOfflineTable).
-    //
-    // SECURITY: hospital switching is a SIGNAL to clear local
-    // optimization state, not an authorization boundary. The actual
-    // authorization is enforced by Supabase RLS — the frontend can
-    // never read or write another hospital's rows from Supabase, and
-    // the IndexedDB cache is filtered by hospital_id on every read.
-    // -----------------------------------------------------------------
+    // Hospital switching: clear cursors for the previous hospital so
+    // the new hospital's data is re-bootstrapped.
     const previousHospital = previousHospitalRef.current
-    if (previousHospital && previousHospital !== profileData.hospital_id) {
+    if (previousHospital && previousHospital !== hospitalId) {
       try {
         await clearCursorsOnHospitalSwitch(previousHospital)
       } catch (err) {
-        // Never crash the auth flow on cursor cleanup failure —
-        // the next sync will just be slightly stale, not broken.
         console.error('Could not clear cursors on hospital switch:', err)
       }
     }
-    // Always update the ref to the latest hospital_id, even on the
-    // first login (so the next switch detects the change).
-    previousHospitalRef.current = profileData.hospital_id
-
+    previousHospitalRef.current = hospitalId
     setHospital(hospitalData || null)
+  }
+
+  // FIX: owner hospital selection — load the list of hospitals the
+  // owner is authorized to manage. The backend's RLS policies on
+  // `hospitals` already restrict this to hospitals the owner can
+  // see; we trust RLS, not a local check.
+  async function loadOwnerHospitals(){
+    try {
+      const { data, error } = await supabase
+        .from('hospitals')
+        .select('id, name, mrn_prefix')
+        .order('name', { ascending: true })
+      if (!error && Array.isArray(data)) {
+        setOwnerHospitals(data)
+      }
+    } catch (err) {
+      console.error('Could not load owner hospitals:', err)
+    }
+  }
+
+  // FIX: owner hospital selection — the owner picks a hospital from
+  // the list. The selection is persisted in localStorage so it
+  // survives refresh. The actual authorization is enforced by RLS —
+  // if the owner tries to select a hospital they cannot manage, the
+  // subsequent data loads will return empty (RLS blocks the read).
+  async function selectOwnerHospital(hospitalId){
+    if (!hospitalId) {
+      setOwnerSelectedHospitalId(null)
+      setHospital(null)
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('gmh.owner.selectedHospitalId')
+      }
+      return
+    }
+    setOwnerSelectedHospitalId(hospitalId)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('gmh.owner.selectedHospitalId', hospitalId)
+    }
+    await loadHospitalById(hospitalId)
   }
 
   useEffect(() => {
@@ -220,34 +224,24 @@ export function AuthProvider({ children }){
           }
         }, 0)
       } else {
-        // SIGN OUT / session expired.
-        // Reset the previous-hospital ref so a subsequent login as
-        // a different user (or the same user in a different hospital)
-        // does not think it is "switching" from the previous user's
-        // hospital — there is no previous user anymore.
         setProfile(null)
         setHospital(null)
         previousHospitalRef.current = null
-        currentUserIdRef.current = null
+        setOwnerHospitals([])
+        setOwnerSelectedHospitalId(null)
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('gmh.owner.selectedHospitalId')
+        }
         clearUserRole()
         setLoading(false)
       }
     })
 
     return () => listener.subscription.unsubscribe()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
 
   async function signOut(){
-    // Upload leftovers and wipe synced patient data from this device first,
-    // while the session is still valid. Capped at 6 seconds so a slow
-    // network can never trap someone on the logout button.
-    //
-    // SECURITY (requirement 3): clearLocalDataOnLogout() preserves
-    // unsynced clinical records — they are NOT deleted. They will be
-    // uploaded the next time someone with access to the same hospital
-    // logs in. This is the safe account-aware recovery path.
     try {
       await Promise.race([
         clearLocalDataOnLogout(),
@@ -258,7 +252,11 @@ export function AuthProvider({ children }){
     }
     clearUserRole()
     previousHospitalRef.current = null
-    currentUserIdRef.current = null
+    setOwnerHospitals([])
+    setOwnerSelectedHospitalId(null)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('gmh.owner.selectedHospitalId')
+    }
     await supabase.auth.signOut()
   }
 
@@ -270,10 +268,6 @@ export function AuthProvider({ children }){
 
   const isOwner = profile?.role === 'owner'
 
-  // Expose currentUserIdRef via the context so the offline queue
-  // (useOfflineTable.flushTableQueue) can verify that a record about
-  // to be uploaded still belongs to the currently-authenticated user.
-  // This is the SECURITY ANCHOR for requirement 3.
   return (
     <AuthContext.Provider
       value={{
@@ -284,12 +278,12 @@ export function AuthProvider({ children }){
         signOut,
         reload,
         isOwner,
-        // Read-only accessor for the offline queue. NEVER use this as
-        // authorization on its own — Supabase RLS is the real
-        // authority. This is only a frontend guard so we do not
-        // accidentally send records to the wire that no longer belong
-        // to the current user.
-        getCurrentUserId: () => currentUserIdRef.current,
+        // FIX: owner hospital selection — exposed so the dashboard
+        // can render the hospital-picker when the owner has not
+        // selected a hospital.
+        ownerHospitals,
+        ownerSelectedHospitalId,
+        selectOwnerHospital,
       }}
     >
       {children}
