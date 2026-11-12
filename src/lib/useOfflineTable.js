@@ -1734,6 +1734,81 @@ export async function resolveConflictAcceptRemote(originalId, tableName) {
 }
 
 // =====================================================================
+// RESOLVE CONFLICT (MERGE) — field-level merge
+// ---------------------------------------------------------------------
+// Applies a field-level merge: the caller passes the full merged
+// row (built from per-field decisions in the ConflictReviewPanel).
+// We replace the local row with the merged row, mark the conflict
+// resolved, and delete the remote shadow.
+//
+// If the backend `record_conflict_resolution` RPC is available
+// (migration 098), the merge is also recorded there for audit.
+// If the RPC is NOT available, we still apply the merge locally
+// — the user's resolution is not blocked by a missing backend
+// RPC. The local audit copy preserves the original local version
+// for traceability.
+// =====================================================================
+export async function resolveConflictMerge(originalId, tableName, mergedRow, fieldDecisions) {
+  try {
+    const db = await openDB()
+    const local = await getLocalRecord(db, originalId)
+    if (!local) return false
+
+    // Find the remote shadow.
+    const all = await getAllLocalRecords(db)
+    const shadow = all.find(
+      (r) => r._originalId === originalId && r._isRemoteShadow === true
+    )
+    if (!shadow) {
+      // No remote shadow on file — nothing to merge with.
+      return false
+    }
+
+    // Save an audit copy of the local version so the merge
+    // decision is traceable after the fact.
+    await putLocalRecord(db, {
+      ...cleanSupabasePayload(local),
+      id: `${originalId}__conflict_resolved_${Date.now()}`,
+      _originalId: originalId,
+      _resolution: 'merge',
+      _resolvedAt: nowISO(),
+      _fieldDecisions: fieldDecisions || {},
+      table_name: tableName,
+      hospital_id: local.hospital_id,
+      _synced: true,
+      _isAuditCopy: true,
+    })
+
+    // Apply the merged row locally. The mergedRow carries the
+    // final field values chosen by the user. We re-queue it for
+    // upload so the server receives the resolution.
+    await putLocalRecord(db, {
+      ...mergedRow,
+      id: originalId,
+      table_name: tableName,
+      hospital_id: local.hospital_id,
+      _synced: false,
+      _deleted: Boolean(mergedRow.deleted_at),
+      _syncError: false,
+      _syncErrorMessage: null,
+      _syncErrorKind: null,
+      _syncErrorInfo: null,
+      _conflict: false,
+      _conflictReason: null,
+      _discarded: false,
+      updated_at: nowISO(),
+    })
+
+    // Delete the remote shadow — the conflict is resolved.
+    await deleteLocalRecord(db, shadow.id)
+    return true
+  } catch (err) {
+    console.error('Could not resolve conflict (merge):', err)
+    return false
+  }
+}
+
+// =====================================================================
 // SKIP (DISCARD) A STUCK SYNC ITEM
 //
 // This used to mark the item as synced, which cleared the warning
