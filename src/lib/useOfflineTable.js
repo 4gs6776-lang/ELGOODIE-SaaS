@@ -656,11 +656,6 @@ const OVERLAP_MS = 5 * 60 * 1000 // 5 minutes
 // FULL PULL — every row for the hospital, ordered by id. Returns
 // { rows, complete }. `complete` is false if the safety limit was
 // hit (we never mark that as a successful bootstrap).
-//
-// FIX: this function does NOT filter by `updated_at` — some tables
-// (e.g. patient_wallet_transactions) do not have an `updated_at`
-// column and would fail with code 42703 (undefined_column). The
-// full pull fetches ALL rows for the hospital, ordered by id.
 async function fetchAllRemoteRows(tableName, hospitalId) {
   const rows = []
   for (let page = 0; page < PULL_MAX_PAGES; page += 1) {
@@ -1887,5 +1882,60 @@ export async function getSyncDiagnostics(hospitalId = null) {
   } catch (err) {
     console.error('Could not get sync diagnostics:', err)
     return { installationId: inst, totalRecords: 0, pending: 0, conflicts: 0, discarded: 0, errors: 0 }
+  }
+}
+
+// =====================================================================
+// GET ALL CONFLICTS (hospital-scoped)
+// ---------------------------------------------------------------------
+// Returns the list of locally-staged conflicts for the active
+// hospital. Each conflict carries:
+//   id            — the local record id
+//   table_name    — e.g. 'prescriptions'
+//   record_id     — same as id (kept for shape compat with backend)
+//   local_data    — the cleaned local row
+//   remote_data   — the cleaned remote shadow row (or null)
+//   reason        — 'both_changed' | 'version_mismatch' | 'remote_newer'
+//   detected_at   — when the conflict was stamped
+//   blocked       — true if backend atomic resolution is unavailable
+//
+// Used by the ConflictReviewPanel (wired in Dashboard.jsx) to
+// populate its list. The panel also queries the backend
+// `sync_conflicts` table for conflicts staged on the server, and
+// merges the two lists.
+// =====================================================================
+export async function getAllConflicts(hospitalId = null) {
+  try {
+    const db = await openDB()
+    const all = await getAllLocalRecords(db)
+    const conflicts = []
+    for (const r of all) {
+      if (r._conflict !== true) continue
+      if (r._discarded === true) continue
+      if (r._isRemoteShadow === true) continue
+      if (hospitalId && r.hospital_id !== hospitalId) continue
+      // Find the remote shadow for this id (if any).
+      const shadow = all.find(
+        (s) => s._originalId === r.id && s._isRemoteShadow === true
+      )
+      conflicts.push({
+        source: 'local',
+        id: r.id,
+        table_name: r.table_name,
+        record_id: r.id,
+        local_data: cleanSupabasePayload(r),
+        remote_data: shadow ? cleanSupabasePayload(shadow) : null,
+        reason: r._conflictReason || 'unknown',
+        remote_updated_at: r._conflictRemoteUpdatedAt || null,
+        remote_version: r._conflictRemoteVersion || null,
+        detected_at: r._conflictDetectedAt || r.updated_at || null,
+        blocked: Boolean(r._conflictResolutionBlocked),
+        blocked_reason: r._conflictResolutionBlockedReason || null,
+      })
+    }
+    return conflicts
+  } catch (err) {
+    console.error('Could not get conflicts:', err)
+    return []
   }
 }
