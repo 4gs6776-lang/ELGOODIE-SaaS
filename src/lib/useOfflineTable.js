@@ -17,14 +17,9 @@ import {
 } from './useTableCache'
 
 const DB_NAME = 'HospitalOfflineDB'
-// v3 → v5: adds compound index ['table_name','hospital_id'] for fast
-// scoped reads without the boolean-_synced problem. Also adds the
-// 'bootstrap_meta' store for tracking remote row counts per table.
-// Existing records are preserved — the upgrade only adds indexes.
-const DB_VERSION = 5
+const DB_VERSION = 3
 
 const STORE_NAME = 'offline_records'
-const META_STORE = 'bootstrap_meta'
 
 // Tables that must NEVER be hard-deleted (clinical history is referenced
 // by child rows: vitals, lab orders, prescriptions, invoices...).
@@ -91,30 +86,11 @@ function openDB() {
 
     request.onupgradeneeded = (event) => {
       const db = event.target.result
-      const oldVersion = event.oldVersion
-
-      // Create the offline_records store if it doesn't exist (fresh DB)
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
         store.createIndex('table_name', 'table_name', { unique: false })
         store.createIndex('hospital_id', 'hospital_id', { unique: false })
         store.createIndex('synced', '_synced', { unique: false })
-        // v5: compound index using ONLY string/UUID keys — never boolean.
-        // This allows IDBKeyRange.only([tableName, hospitalId]) which is
-        // O(log n) instead of O(n) full-scan + JS filter.
-        store.createIndex('table_hospital', ['table_name', 'hospital_id'], { unique: false })
-      } else if (oldVersion < 5) {
-        // Upgrade from v3/v4 — add the compound index to the existing store.
-        const store = event.target.transaction.objectStore(STORE_NAME)
-        if (!store.indexNames.contains('table_hospital')) {
-          store.createIndex('table_hospital', ['table_name', 'hospital_id'], { unique: false })
-        }
-      }
-
-      // v5: bootstrap_meta store — tracks remote row counts so we can
-      // distinguish a legitimately empty table from lost local data.
-      if (!db.objectStoreNames.contains(META_STORE)) {
-        db.createObjectStore(META_STORE, { keyPath: 'key' })
       }
     }
 
@@ -244,6 +220,8 @@ function classifyError(error) {
   if (isForeignKeyViolation(error)) return 'reference'
   if (error?.code === '23505' || /duplicate key value/i.test(error?.message || '')) return 'conflict'
   if (error?.code === '42501' || /row-level security/i.test(error?.message || '')) return 'permission'
+  // B1-2A: Also catch JWT/auth errors so they are surfaced clearly
+  if (error?.code === 'PGRST301' || /jwt/i.test(error?.message || '') || /token/i.test(error?.message || '')) return 'auth'
   return 'transient'
 }
 
@@ -263,6 +241,13 @@ function friendlyErrorMessage(error, tableName, op = 'write') {
   }
   if (error?.code === '23505' || /duplicate key value/i.test(error?.message || '')) {
     return 'A record with this unique reference already exists on the server. The duplicate is being reconciled automatically — no action needed.'
+  }
+  // B1-2A: Show authorization failures clearly — do NOT report as successful sync
+  if (error?.code === '42501' || /row-level security/i.test(error?.message || '')) {
+    return `Authorization denied: your role does not have permission to ${op} this "${tableName}" record. The change was saved locally but will not sync until your account has the required access. Contact your administrator.`
+  }
+  if (error?.code === 'PGRST301' || /jwt/i.test(error?.message || '') || /token/i.test(error?.message || '')) {
+    return 'Your session has expired. Please log out and log back in — your changes are saved locally and will sync after re-login.'
   }
   return error?.message || 'Synchronization failed'
 }
@@ -333,7 +318,7 @@ async function getLocalRecord(db, id) {
 }
 
 // ============================================================
-// GET ALL LOCAL RECORDS (full scan — use sparingly)
+// GET ALL LOCAL RECORDS
 // ============================================================
 
 async function getAllLocalRecords(db) {
@@ -344,118 +329,6 @@ async function getAllLocalRecords(db) {
     request.onsuccess = () => resolve(request.result || [])
     request.onerror = () => reject(request.error)
   })
-}
-
-// ============================================================
-// GET LOCAL RECORDS FOR A SPECIFIC TABLE + HOSPITAL (indexed)
-//
-// Uses the compound index ['table_name', 'hospital_id'] with
-// IDBKeyRange.only([tableName, hospitalId]). This is O(log n)
-// instead of the previous O(n) full-scan + JS filter.
-//
-// IMPORTANT: the compound index uses ONLY string/UUID keys — never
-// the boolean _synced field. Boolean values in IndexedDB compound
-// indexes are unreliable (true/false sort as 0/1 but IDBKeyRange
-// queries with numeric literals don't match boolean values).
-// ============================================================
-
-async function getLocalRecordsFor(db, tableName, hospitalId) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly')
-    const store = tx.objectStore(STORE_NAME)
-    if (store.indexNames.contains('table_hospital')) {
-      const idx = store.index('table_hospital')
-      const req = idx.getAll(IDBKeyRange.only([tableName, hospitalId]))
-      req.onsuccess = () => resolve(req.result || [])
-      req.onerror = () => reject(req.error)
-    } else {
-      // Fallback for old DB versions that haven't upgraded yet
-      const req = store.getAll()
-      req.onsuccess = () => {
-        const out = (req.result || []).filter(
-          (r) => r.table_name === tableName && r.hospital_id === hospitalId
-        )
-        resolve(out)
-      }
-      req.onerror = () => reject(req.error)
-    }
-  })
-}
-
-// ============================================================
-// BOOTSTRAP METADATA
-//
-// Tracks the remote row count after a successful full pull. This
-// lets us distinguish a legitimately empty table (remoteRowCount=0,
-// localCount=0 — correct) from lost local data (remoteRowCount=47,
-// localCount=0 — needs recovery pull).
-//
-// Also stores the bootstrap timestamp so we know when the last
-// successful full pull happened.
-// ============================================================
-
-function bootstrapKey(hospitalId, tableName) {
-  return `${hospitalId}|${tableName}`
-}
-
-async function getBootstrapMeta(db, hospitalId, tableName) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(META_STORE, 'readonly')
-    const store = tx.objectStore(META_STORE)
-    const req = store.get(bootstrapKey(hospitalId, tableName))
-    req.onsuccess = () => resolve(req.result || null)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-async function setBootstrapMeta(db, hospitalId, tableName, remoteRowCount) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(META_STORE, 'readwrite')
-    const store = tx.objectStore(META_STORE)
-    const record = {
-      key: bootstrapKey(hospitalId, tableName),
-      hospitalId,
-      tableName,
-      remoteRowCount,
-      bootstrappedAt: nowISO(),
-      updatedAt: nowISO(),
-    }
-    store.put(record)
-    tx.oncomplete = () => resolve(record)
-    tx.onerror = () => reject(tx.error)
-  })
-}
-
-async function isTableBootstrapped(db, hospitalId, tableName) {
-  const meta = await getBootstrapMeta(db, hospitalId, tableName)
-  return Boolean(meta?.bootstrappedAt)
-}
-
-// ============================================================
-// SINGLE-FLIGHT GUARD
-//
-// Prevents duplicate full pulls when multiple useOfflineTable
-// instances mount simultaneously for the same (hospitalId, tableName).
-// The first caller does the pull; subsequent callers await the same
-// promise and get the same result.
-// ============================================================
-
-const inflightPulls = new Map()
-
-function getPullKey(hospitalId, tableName) {
-  return `${hospitalId}|${tableName}`
-}
-
-function getOrCreatePull(hospitalId, tableName, pullFn) {
-  const key = getPullKey(hospitalId, tableName)
-  if (inflightPulls.has(key)) {
-    return inflightPulls.get(key)
-  }
-  const promise = pullFn().finally(() => {
-    inflightPulls.delete(key)
-  })
-  inflightPulls.set(key, promise)
-  return promise
 }
 
 // ============================================================
@@ -518,46 +391,36 @@ async function fetchAllRemoteRows(tableName, hospitalId) {
 async function pullFromSupabase(db, tableName, hospitalId) {
   if (!navigator.onLine || !supabase?.from || !hospitalId) return
 
-  // Single-flight guard: if another component already started a pull
-  // for this (hospitalId, tableName), await the same promise instead
-  // of duplicating the network request.
-  await getOrCreatePull(hospitalId, tableName, async () => {
-    try {
-      const remoteRows = await fetchAllRemoteRows(tableName, hospitalId)
+  try {
+    const remoteRows = await fetchAllRemoteRows(tableName, hospitalId)
 
-      if (!remoteRows) return
+    if (!remoteRows) return
 
-      const localRows = await getLocalRecordsFor(db, tableName, hospitalId)
-      const localById = new Map(localRows.map((r) => [r.id, r]))
+    const localRows = await getAllLocalRecords(db)
+    const localById = new Map(localRows.map((r) => [r.id, r]))
 
-      for (const remote of remoteRows) {
-        const local = localById.get(remote.id)
+    for (const remote of remoteRows) {
+      const local = localById.get(remote.id)
 
-        // Don't overwrite a record that has local changes waiting to sync
-        // (e.g. an edit or delete made offline that hasn't gone up yet).
-        if (local && local._synced === false) continue
+      // Don't overwrite a record that has local changes waiting to sync
+      // (e.g. an edit or delete made offline that hasn't gone up yet).
+      if (local && local._synced === false) continue
 
-        await putLocalRecord(db, {
-          ...remote,
-          table_name: tableName,
-          hospital_id: hospitalId,
-          _synced: true,
-          _deleted: Boolean(remote.deleted_at),
-          _syncError: false,
-          _syncErrorMessage: null,
-          _syncErrorKind: null,
-        })
-      }
-
-      // Store bootstrap metadata: remote row count + timestamp.
-      // This lets us distinguish a legitimately empty table
-      // (remoteRowCount=0) from lost local data (remoteRowCount>0
-      // but localCount=0 after a purge).
-      await setBootstrapMeta(db, hospitalId, tableName, remoteRows.length)
-    } catch (err) {
-      console.error(`Error pulling ${tableName} from Supabase:`, err)
+      await putLocalRecord(db, {
+        ...remote,
+        table_name: tableName,
+        hospital_id: hospitalId,
+        _synced: true,
+        // Soft-deleted rows stay in the local store but are hidden from lists.
+        _deleted: Boolean(remote.deleted_at),
+        _syncError: false,
+        _syncErrorMessage: null,
+        _syncErrorKind: null,
+      })
     }
-  })
+  } catch (err) {
+    console.error(`Error pulling ${tableName} from Supabase:`, err)
+  }
 }
 
 // ============================================================
@@ -588,19 +451,20 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     const seq = ++loadSeqRef.current
     try {
       const db = await openDB()
-      // Use the compound index for O(log n) scoped reads instead of
-      // O(n) full-scan + JS filter.
-      const scoped = await getLocalRecordsFor(db, tableName, hospitalId)
+      const all = await getAllLocalRecords(db)
       if (seq !== loadSeqRef.current) return // a newer read superseded this one
 
-      const filtered = scoped.filter(
-        (record) => !record._deleted && !record.deleted_at
+      const filtered = all.filter(
+        (record) =>
+          record.table_name === tableName &&
+          record.hospital_id === hospitalId &&
+          !record._deleted &&
+          !record.deleted_at
       )
 
       setRecords(filtered)
 
-      // Pending count is scoped to this table + hospital
-      const pending = scoped.filter(
+      const pending = all.filter(
         (record) => record._synced === false && record._discarded !== true
       )
       setPendingCount(pending.length)
@@ -680,27 +544,13 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
     const handleOffline = () => setIsOnline(false)
 
-    // Reset in-memory state when the session is cleared (logout).
-    // Without this, the React `records` state retains the previous
-    // user's patient list even after IndexedDB is cleared.
-    const handleSessionCleared = () => {
-      setRecords([])
-      setPendingCount(0)
-      pendingCountRef.current = 0
-      setLoading(true)
-      setLoadError(null)
-      loadSeqRef.current += 1  // invalidate any in-flight reads
-    }
-
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
-    window.addEventListener('gmh:session-cleared', handleSessionCleared)
 
     return () => {
       clearInterval(retryTimer)
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
-      window.removeEventListener('gmh:session-cleared', handleSessionCleared)
       // Unsubscribe from cross-component cache invalidation
       if (unsubscribe) unsubscribe()
     }
@@ -781,9 +631,8 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     // known count (the device only holds what has synced to it).
     if (tableName === 'patients') {
       const countDb = await openDB()
-      const localRows = await getLocalRecordsFor(countDb, 'patients', hospitalId)
-      const localCount = localRows.filter(
-        (r) => !r._deleted && !r.deleted_at
+      const localCount = (await getAllLocalRecords(countDb)).filter(
+        (r) => r.table_name === 'patients' && r.hospital_id === hospitalId && !r._deleted && !r.deleted_at
       ).length
       const serverCount = getEntitlements().usage?.patients ?? 0
       assertWithinPlanLimit('patients', Math.max(localCount, serverCount))
@@ -1229,7 +1078,6 @@ export async function clearLocalDataOnLogout() {
   }
 
   // 2. Delete every record that is safely on the server.
-  // PRESERVE unsynced records (they will sync on next login).
   let keptUnsynced = 0
   try {
     const db = await openDB()
@@ -1241,33 +1089,11 @@ export async function clearLocalDataOnLogout() {
       }
       await deleteLocalRecord(db, record.id)
     }
-
-    // Clear bootstrap metadata so next login does a fresh full pull.
-    try {
-      const tx = db.transaction(META_STORE, 'readwrite')
-      tx.objectStore(META_STORE).clear()
-      await new Promise((resolve) => { tx.oncomplete = () => resolve(); tx.onerror = () => resolve() })
-    } catch (_e) { /* non-fatal */ }
   } catch (err) {
     console.error('Could not clear local records on logout:', err)
   }
 
-  // 3. Clear the in-memory table cache so the next user does not see
-  // the previous user's cached data. This was previously dead code —
-  // clearAllCache was imported but never called.
-  try {
-    clearAllCache()
-  } catch (_e) { /* non-fatal */ }
-
-  // 4. Broadcast session-cleared so mounted useOfflineTable hooks
-  // reset their React state.
-  try {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gmh:session-cleared'))
-    }
-  } catch (_e) { /* non-fatal */ }
-
-  // 5. Remove cached API responses saved by the service worker.
+  // 3. Remove cached API responses saved by the service worker.
   try {
     if (typeof caches !== 'undefined') {
       const names = await caches.keys()
@@ -1278,46 +1104,4 @@ export async function clearLocalDataOnLogout() {
   }
 
   return { keptUnsynced }
-}
-
-// ============================================================
-// CLEAR CURSORS ON HOSPITAL SWITCH
-//
-// This version does not have per-device cursors (no sync_cursors
-// store). The function exists as a no-op so AuthContext.jsx
-// (which imports it) resolves at build time. If per-device
-// cursors are added later, implement the actual cursor clearing
-// here.
-// ============================================================
-export async function clearCursorsOnHospitalSwitch(_oldHospitalId) {
-  // No-op in this version — no cursors to clear.
-  // The useTableCache TTL (5 min) handles cache invalidation.
-  return
-}
-
-// ============================================================
-// CONFLICT RESOLUTION STUBS
-//
-// The ELGOODIE-SaaS version of AuthContext.jsx and Dashboard.jsx
-// import these functions. This version (1c38d27a) does not have
-// per-device cursors, _version columns, or sync_conflicts table,
-// so conflict detection/resolution is not active. These stubs
-// exist so the imports resolve at build time. They return empty
-// results — no conflicts can exist without the conflict
-// infrastructure.
-// ============================================================
-export async function getAllConflicts(_hospitalId) {
-  return []
-}
-
-export async function resolveConflictAcceptLocal(_originalId, _tableName) {
-  return false
-}
-
-export async function resolveConflictAcceptRemote(_originalId, _tableName) {
-  return false
-}
-
-export async function resolveConflictMerge(_originalId, _tableName, _mergedRow, _fieldDecisions) {
-  return false
 }
