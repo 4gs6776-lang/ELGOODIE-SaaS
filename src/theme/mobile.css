@@ -173,251 +173,71 @@ img, svg{ max-width:100%; }
 
   .dash-brand-sub{ display:none; }
 }
-/* =====================================================================
-   G-MEDHUB V2 — MOBILE DASHBOARD OVERVIEW FIX
-   =====================================================================
-   Append this file's contents to src/theme/mobile.css (BEFORE the
-   "mobile.css MUST be imported last" rule, OR just append to the end
-   of mobile.css).
 
-   WHY:
-   The hospital dashboard overview (.hd-root) was designed for
-   desktop. On phones (≤600px wide):
-     • .hd-pulse-grid used minmax(140px,1fr) — 3 cols × 140px = 420px
-       overflowed 390px phone screens, causing horizontal clipping.
-     • .hd-bottom used minmax(250px,1fr) — 1 card per row is fine,
-       but the cards stretched too wide.
-     • .hd-top and .hd-mid switched to 1 column at 1100px, but the
-       nested grids inside them still used desktop sizes.
-     • .hd-kpis (2-col KPI grid) was fine but had no mobile padding.
-     • .hd-head h1 was 22px — fine on desktop, too big on phones.
-     • .hd-flow (patient flow) at 760px switched to 2 cols, but
-       the stage links were hidden — leaving empty space.
-     • .hd-bars (sparkline chart) had a fixed height that didn't
-       shrink on mobile.
+/* ---------------------------------------------------------
+   5. HOSPITAL DASHBOARD OVERVIEW (hd-* classes)
+   ---------------------------------------------------------
+   The hospital overview redesign uses entirely new class names
+   (hd-root, hd-card, hd-panel, hd-pulse-grid, hd-sub-card,
+   hd-top, hd-mid, hd-duo, hd-flow, hd-head, etc.) that are NOT
+   covered by the existing dash-* mobile rules above. Without
+   these rules, the overview's grids, cards, and text overflow
+   or get cut off on phones.
+   --------------------------------------------------------- */
 
-   WHAT THIS FIX DOES:
-     1. Reduces minmax() minimums on phones so cards reflow naturally
-     2. Adds proper mobile padding to overview panels
-     3. Shrinks typography for mobile readability
-     4. Forces single-column layout for all overview grids on phones
-     5. Adjusts sparkline chart height for mobile
-     6. Ensures the "Hospital pulse" + KPI cards don't overflow
-     7. Makes panel headers stack vertically on phones
-   ===================================================================== */
-
-/* ============================================================
-   ≤900px (tablets / large phones)
-   ============================================================ */
-
-@media (max-width: 900px) {
-  /* Reduce minmax() minimums so grids reflow earlier */
-  .hd-pulse-grid {
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
-  }
-  .hd-bottom {
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
-  }
-  /* Slightly smaller heading */
-  .hd-head h1 { font-size: 19px !important; }
-  /* Tighter panel padding */
-  .hd-panel { padding: 14px 14px !important; }
+/* ≤900px: single-column grids, smaller padding */
+@media (max-width:900px){
+  .hd-root{ gap:10px; padding-bottom:20px; }
+  .hd-head{ flex-direction:column; align-items:flex-start; gap:8px; }
+  .hd-head h1{ font-size:18px; }
+  .hd-head p{ font-size:11px; }
+  .hd-status{ font-size:10.5px; padding:5px 9px; }
+  .hd-top, .hd-mid, .hd-duo{ grid-template-columns:minmax(0,1fr); gap:10px; }
+  .hd-panel{ padding:12px 14px; }
+  .hd-panel-head{ flex-wrap:wrap; gap:8px; }
+  .hd-pulse-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .hd-sub-card{ min-height:140px; padding:10px; }
+  .hd-sub-card .hd-label{ font-size:10px; }
+  .hd-sub-card .hd-num{ font-size:18px; }
+  .hd-flow{ grid-auto-flow:row; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .hd-stage-link{ display:none; }
+  .hd-row-main{ font-size:12px; }
+  .hd-row-meta, .hd-row-time{ font-size:10.5px; }
+  .hd-seg button{ font-size:10.5px; padding:4px 8px; }
+  .hd-bottom{ grid-template-columns:minmax(0,1fr); }
+  .hd-bars{ height:120px; }
 }
 
-/* ============================================================
-   ≤600px (phones)
-   ============================================================ */
-
-@media (max-width: 600px) {
-  /* ---- Layout: force single-column for all overview grids ---- */
-  .hd-top,
-  .hd-mid,
-  .hd-bottom,
-  .hd-pulse-grid,
-  .hd-kpis {
-    grid-template-columns: 1fr !important;
-    gap: 10px !important;
-  }
-
-  /* The patient flow grid was already 2-col at 760px — force 1-col on phones */
-  .hd-flow {
-    grid-template-columns: 1fr !important;
-    gap: 8px !important;
-  }
-  /* Restore the stage links that were hidden at 760px — on phones we
-     have room for them again in a single-column layout */
-  .hd-stage-link { display: flex !important; }
-
-  /* ---- KPIs: 2-column grid on phones (compact) ---- */
-  /* Override the 1fr above specifically for KPIs — they look better
-     as 2 columns of small cards on phones */
-  .hd-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 8px !important;
-  }
-  .hd-kpi {
-    padding: 10px 12px !important;
-    min-height: 0 !important;
-  }
-  .hd-kpi-value {
-    font-size: 22px !important;
-  }
-  /* KPI wide cards still span 2 columns */
-  .hd-kpi.wide { grid-column: span 2 !important; }
-
-  /* ---- Pulse panel (Hospital pulse card) ---- */
-  .hd-pulse-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 8px !important;
-  }
-  .hd-pulse { padding: 14px 14px !important; }
-
-  /* ---- Heading + typography ---- */
-  .hd-head {
-    flex-direction: column;
-    align-items: flex-start !important;
-    gap: 6px !important;
-  }
-  .hd-head h1 {
-    font-size: 18px !important;
-    letter-spacing: -0.01em !important;
-  }
-  .hd-head p {
-    font-size: 11.5px !important;
-  }
-
-  /* ---- Panel headers: stack vertically ---- */
-  .hd-panel-head {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 8px !important;
-  }
-  .hd-panel-head h3 {
-    font-size: 13px !important;
-  }
-  .hd-panel-head p {
-    font-size: 11px !important;
-  }
-
-  /* ---- Panel padding (tighter) ---- */
-  .hd-panel {
-    padding: 12px 12px !important;
-    border-radius: 16px !important;
-  }
-
-  /* ---- Sparkline chart height (smaller on phones) ---- */
-  .hd-bars {
-    height: 110px !important;
-  }
-
-  /* ---- Activity chart container ---- */
-  .hd-chart-wrap,
-  .hd-chart {
-    min-height: 180px !important;
-  }
-
-  /* ---- Patient flow stages (smaller pills) ---- */
-  .hd-stage {
-    padding: 8px 10px !important;
-    font-size: 11.5px !important;
-  }
-  .hd-stage-n {
-    font-size: 16px !important;
-  }
-
-  /* ---- Recent activity rows ---- */
-  .hd-row {
-    padding: 8px 10px !important;
-    font-size: 12px !important;
-  }
-  .hd-row-main {
-    font-size: 12px !important;
-    white-space: normal !important;  /* allow wrapping on phones */
-    overflow: visible !important;
-    text-overflow: clip !important;
-  }
-  .hd-row-meta,
-  .hd-row-time {
-    font-size: 10.5px !important;
-  }
-
-  /* ---- Sub-cards inside pulse panel ---- */
-  .hd-sub-card {
-    padding: 10px 12px !important;
-    border-radius: 12px !important;
-  }
-
-  /* ---- Segmented controls (filters) ---- */
-  .hd-seg {
-    flex-wrap: wrap !important;
-    gap: 4px !important;
-  }
-  .hd-seg button {
-    padding: 6px 10px !important;
-    font-size: 11px !important;
-  }
-
-  /* ---- Chips ---- */
-  .hd-chip,
-  .hd-status {
-    font-size: 11px !important;
-    padding: 4px 9px !important;
-  }
-
-  /* ---- Empty state ---- */
-  .hd-empty {
-    padding: 14px 10px !important;
-    font-size: 12px !important;
-  }
-
-  /* ---- Foot text ---- */
-  .hd-foot {
-    font-size: 10.5px !important;
-  }
-
-  /* ---- Backdrop filter: reduce blur on mobile for performance ---- */
-  .hd-root .hd-card,
-  .hd-root .hd-sub-card,
-  .hd-root .hd-panel {
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
-    backdrop-filter: blur(20px) saturate(150%);
-  }
+/* ≤600px: even tighter, smaller fonts, single-column sub-cards */
+@media (max-width:600px){
+  .hd-root{ gap:8px; }
+  .hd-head h1{ font-size:16px; }
+  .hd-panel{ padding:10px 12px; border-radius:12px; }
+  .hd-pulse-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+  .hd-sub-card{ min-height:120px; padding:8px; border-radius:10px; }
+  .hd-sub-card .hd-label{ font-size:9.5px; }
+  .hd-sub-card .hd-num{ font-size:16px; }
+  .hd-flow{ grid-template-columns:1fr; }
+  .hd-bars{ height:100px; gap:3px; }
+  .hd-bar-labels{ font-size:7.5px; }
+  .hd-spark{ display:none; }
+  .hd-seg{ width:100%; }
+  .hd-seg button{ flex:1; text-align:center; }
+  .hd-row-main{ font-size:11px; white-space:normal; }
+  .hd-timeline{ font-size:11px; }
+  .hd-meter i{ height:4px; }
 }
 
-/* ============================================================
-   ≤420px (small phones — iPhone SE, older Androids)
-   ============================================================ */
-
-@media (max-width: 420px) {
-  /* KPIs: 1 column on very small phones (cards full-width) */
-  .hd-kpis {
-    grid-template-columns: 1fr !important;
-  }
-  .hd-kpi.wide { grid-column: 1 !important; }
-
-  /* Pulse grid: 1 column */
-  .hd-pulse-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  /* Heading: even smaller */
-  .hd-head h1 {
-    font-size: 16px !important;
-  }
-
-  /* KPI value: smaller */
-  .hd-kpi-value {
-    font-size: 20px !important;
-  }
-
-  /* Panel padding: tighter */
-  .hd-panel {
-    padding: 10px 10px !important;
-  }
-
-  /* Sparkline: even shorter */
-  .hd-bars {
-    height: 90px !important;
-  }
+/* ≤420px: minimum viable layout */
+@media (max-width:420px){
+  .hd-head h1{ font-size:15px; }
+  .hd-head p{ font-size:10px; }
+  .hd-panel{ padding:8px 10px; }
+  .hd-pulse-grid{ gap:5px; }
+  .hd-sub-card{ min-height:100px; padding:7px; }
+  .hd-sub-card .hd-label{ font-size:9px; }
+  .hd-sub-card .hd-num{ font-size:14px; }
+  .hd-row-main{ font-size:10.5px; }
+  .hd-row-meta, .hd-row-time{ font-size:9.5px; }
+  .hd-seg button{ font-size:9.5px; padding:3px 6px; }
 }
-
