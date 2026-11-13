@@ -1244,6 +1244,100 @@ export async function clearLocalDataOnLogout() {
 }
 
 // =====================================================================
+// ELGOODIE-COMPATIBILITY STUBS
+//
+// The ELGOODIE-SaaS branch of this codebase exports several functions
+// that the V2 branch does not have (cursor tracking, conflict resolution,
+// sync diagnostics). If the user deploys the V2 useOfflineTable.js but
+// keeps the ELGOODIE AuthContext.jsx (or any other ELGOODIE component
+// that imports these functions), the Vite build fails with:
+//
+//   "clearCursorsOnHospitalSwitch" is not exported by "src/lib/useOfflineTable.js"
+//
+// To make the V2 patch build regardless of which sibling files are
+// present, we export no-op stubs for every ELGOODIE-only function.
+// Each stub logs a one-time warning so the user knows it's a stub,
+// then returns a safe empty value. None of these affect the V2 data
+// flow — they only exist so the import statements resolve.
+// =====================================================================
+
+const _stubWarned = new Set()
+function stubWarn(name) {
+  if (_stubWarned.has(name)) return
+  _stubWarned.add(name)
+  console.warn(
+    `[useOfflineTable] "${name}" is a no-op stub in the V2 branch. ` +
+    `It exists only so ELGOODIE-SaaS components can import it without breaking the build. ` +
+    `This message will not repeat.`
+  )
+}
+
+// ELGOODIE tracks per-table sync cursors so incremental pulls can resume
+// from where the last pull left off. V2 does a full pull every time, so
+// there are no cursors to clear. The stub is a safe no-op.
+export async function clearCursorsOnHospitalSwitch(oldHospitalId) {
+  if (!oldHospitalId) return
+  stubWarn('clearCursorsOnHospitalSwitch')
+  // V2 has no cursor store — nothing to clear. The next pull will
+  // re-download everything for the new hospital anyway.
+  return
+}
+
+// ELGOODIE: resets the cursor for a single table so the next sync is a
+// full pull. V2 always does a full pull, so this is a no-op.
+export async function resetTableCursor(tableName, hospitalId) {
+  stubWarn('resetTableCursor')
+  return
+}
+
+// ELGOODIE: returns diagnostics for the sync queue panel. V2's queue
+// panel uses getAllSyncErrors() instead. This stub returns zeros so
+// the panel renders without crashing.
+export async function getSyncDiagnostics(hospitalId = null) {
+  stubWarn('getSyncDiagnostics')
+  return {
+    installationId: 'v2-stub',
+    totalRecords: 0,
+    pending: 0,
+    conflicts: 0,
+    discarded: 0,
+    errors: 0,
+  }
+}
+
+// ELGOODIE: returns conflict-stuck records for the ConflictReviewPanel.
+// V2 does not have conflict detection (no _conflict field), so this
+// returns an empty array.
+export async function getAllConflicts(hospitalId = null) {
+  stubWarn('getAllConflicts')
+  return []
+}
+
+// ELGOODIE: conflict resolution actions. V2 has no conflicts to resolve.
+export async function resolveConflictAcceptLocal(originalId, tableName) {
+  stubWarn('resolveConflictAcceptLocal')
+  return { ok: false, reason: 'no-conflict-feature-in-v2' }
+}
+
+export async function resolveConflictAcceptRemote(originalId, tableName) {
+  stubWarn('resolveConflictAcceptRemote')
+  return { ok: false, reason: 'no-conflict-feature-in-v2' }
+}
+
+export async function resolveConflictMerge(originalId, tableName, mergedRow, fieldDecisions) {
+  stubWarn('resolveConflictMerge')
+  return { ok: false, reason: 'no-conflict-feature-in-v2' }
+}
+
+// ELGOODIE's AuthContext calls setActiveSession() to stamp the current
+// user on the sync layer. V2 doesn't need this — the Supabase client
+// manages the session internally. Stub so the import resolves.
+export function setActiveSession(session) {
+  stubWarn('setActiveSession')
+  return
+}
+
+// =====================================================================
 // FORCE RESYNC — nuclear option for when IndexedDB is broken or stale.
 //
 // Deletes the ENTIRE IndexedDB database, clears the in-memory cache,
