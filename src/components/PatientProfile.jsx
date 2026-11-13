@@ -1,28 +1,55 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabaseClient'
 import { useOfflineTable } from '../lib/useOfflineTable'
-import { canEditPatientDetails } from '../lib/permissions'
+import { useRealtimeAlert } from '../lib/useRealtimeAlert'
 import MedicationChart from './MedicationChart'
 import AppIcon from './icons'
 import PatientWallet from './PatientWallet'
 import { writeAudit } from '../lib/audit'
 import { formatDateTime, getTimezone } from '../lib/datetime'
 import { computePatientStatement } from '../lib/billingService'
+import { canWithDb } from '../lib/permissions'
 
 const TABS = ['Overview', 'Vitals', 'Wallet', 'History', 'Items Given', 'Prescriptions', 'Drug Chart', 'Pharmacy', 'Billing', 'Statement', 'Edit Info']
 // Full-screen patient dashboard, opened by clicking a patient anywhere in
 // the app. Reuses the same offline-first tables every other module reads —
 // nothing new is stored here except through those existing hooks.
-export default function PatientProfile({ patientId, onClose }){
+export default function PatientProfile({ patientId, patient: initialPatient, onClose }){
   const { profile, hospital } = useAuth()
   const timezone = getTimezone(hospital)
   const { records: patients, addRecord: addPatient, updateRecord: updatePatient, loadError: patientsLoadError } = useOfflineTable('patients', hospital?.id)
-  const { records: vitals, addRecord: addVitals } = useOfflineTable('patient_vitals', hospital?.id)
+  const { records: vitals, addRecord: addVitals, updateRecord: updateVitals } = useOfflineTable('patient_vitals', hospital?.id)
   const { records: prescriptions, addRecord: addPrescription, updateRecord: updatePrescription } = useOfflineTable('prescriptions', hospital?.id)
   const { records: pharmacyItems, updateRecord: updatePharmacyItem } = useOfflineTable('pharmacy_items', hospital?.id)
   const { records: invoices, addRecord: addInvoice, updateRecord: updateInvoice } = useOfflineTable('invoices', hospital?.id)
-  const { records: admissionRequests } = useOfflineTable('admission_requests', hospital?.id)
+  // admission_requests — also expose syncFromServer so the realtime
+  // listener can refresh this table when a discharge happens elsewhere
+  // in the app (e.g., from the Admissions module). Without this, the
+  // PatientProfile would keep showing the stale "Currently Admitted"
+  // card until the user closes + reopens it.
+  const { records: admissionRequests, syncFromServer: syncAdmissionRequests } = useOfflineTable('admission_requests', hospital?.id)
+  // C-FIX: Load admissions table so we can derive the admission card from
+  // the linked admission's status, not from admission_requests.status.
+  // A patient is "currently admitted" only if they have an admission_requests
+  // row with status='converted' AND the linked admissions row has status='active'.
+  // If the admission is 'discharged', the card is hidden.
+  const { records: admissions } = useOfflineTable('admissions', hospital?.id)
   const { records: drugChartEntries, addRecord: addDrugChartEntry, updateRecord: updateDrugChartEntry, deleteRecord: deleteDrugChartEntry } = useOfflineTable('patient_drug_charts', hospital?.id)
+  // Medication administrations — needed so MedicationChart can
+  // classify each row as 'pending' / 'given' / 'missed' /
+  // 'discontinued'. Without this, the chart cannot tell whether a
+  // dose has actually been administered.
+  const { records: medicationAdministrations } = useOfflineTable('medication_administrations', hospital?.id)
+
+  // ---- DB-backed role permissions (RBAC) ----
+  // FIX: Load the hospital_role_permissions table so we can check
+  // can_edit for the patients module. Before this fix, the "Edit Info"
+  // tab was only hidden from doctors — every other role (billing, lab,
+  // pharmacist, etc.) could edit patient details even if the admin set
+  // can_edit=false in Settings → Role Permissions.
+  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
+  const canEditPatient = canWithDb(profile?.role, 'edit', 'patients', dbRolePerms)
 
   // ---- Pharmacy requests (free-text med requests to pharmacy) ----
   const { addRecord: addPharmacyRequest } = useOfflineTable('pharmacy_requests', hospital?.id)
@@ -41,14 +68,16 @@ export default function PatientProfile({ patientId, onClose }){
   const { records: radiologyScans } = useOfflineTable('radiology_scans', hospital?.id)
   const { records: appointments } = useOfflineTable('appointments', hospital?.id)
 
-  // B1-2A: "Edit Info" tab is only visible to roles that can edit patient
-  // details: front_desk, nurse, admin, owner (per canEditPatientDetails).
-  // Doctors, billing, pharmacist, lab, CMD and staff can VIEW patient info
-  // via the other tabs but cannot edit demographic fields.
-  const canEditPatient = canEditPatientDetails(profile?.role)
-  const visibleTabs = canEditPatient
-    ? TABS
-    : TABS.filter(t => t !== 'Edit Info')
+  // FIX: The "Edit Info" tab is now gated by DB-backed permissions.
+  // - Admin/owner: always can edit (FULL_ACCESS_ROLES)
+  // - Doctors: never can edit (hardcoded — doctors only view)
+  // - All other roles: check canWithDb(role, 'edit', 'patients', dbRolePerms)
+  //   If the admin set can_edit=false for this role+module in Settings →
+  //   Role Permissions, the tab is hidden and patient details are read-only.
+  const isDoctor = profile?.role === 'doctor'
+  const visibleTabs = (isDoctor || !canEditPatient)
+    ? TABS.filter(t => t !== 'Edit Info')
+    : TABS
 
   const [tab, setTab] = useState('Overview')
   const [toast, setToast] = useState(null)
@@ -59,7 +88,22 @@ export default function PatientProfile({ patientId, onClose }){
   const [pharmSaving, setPharmSaving] = useState(false)
   const [pharmError, setPharmError] = useState('')
 
-  const patient = patients.find(p => p.id === patientId)
+  // ---- Patient Portal Account modal state ----
+  // Lets staff create a portal login account for this patient.
+  const [showPortalModal, setShowPortalModal] = useState(false)
+  const [portalEmail, setPortalEmail] = useState('')
+  const [portalPassword, setPortalPassword] = useState('')
+  const [portalSaving, setPortalSaving] = useState(false)
+  const [portalError, setPortalError] = useState('')
+  const [portalSuccess, setPortalSuccess] = useState('')
+
+  // Use the patient passed in as a prop if available — eliminates the
+  // first-render race where useOfflineTable returns [] and the lookup
+  // fails for 6 seconds until "Couldn't load this patient" fires.
+  // The parent (Dashboard, Nursing, HmoPatients, etc.) already has the
+  // patient record in scope — pass it through so we don't have to
+  // re-fetch it.
+  const patient = initialPatient || patients.find(p => p.id === patientId)
 
   // ---- Phase 5: Folder expiry computation (category-based) ----
   // Personal + Emergency: 3 years
@@ -186,6 +230,27 @@ export default function PatientProfile({ patientId, onClose }){
     return () => clearTimeout(timer)
   }, [patientId])
 
+  // ---------------------------------------------------------------
+  // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after
+  // discharge) — listen for UPDATEs on admission_requests so the open
+  // profile refreshes automatically when a discharge happens elsewhere
+  // (e.g., from the Admissions module).
+  //
+  // Without this listener, the user would have to close + reopen the
+  // profile to see the discharge reflected. With it, the "Currently
+  // Admitted" card disappears within ~1 second of the discharge.
+  //
+  // Listens for UPDATE events specifically (not INSERT) because
+  // discharge is an UPDATE on the admission_requests.status field.
+  // ---------------------------------------------------------------
+  useRealtimeAlert('admission_requests', hospital?.id, () => {
+    // Pull fresh rows from Supabase → IndexedDB → React state.
+    // This refreshes the admissionRequests array, which re-runs the
+    // activeAdmissionRequest filter (now excluding 'discharged'), and
+    // the AdmissionStatusCard disappears.
+    if (syncAdmissionRequests) syncAdmissionRequests()
+  }, { event: 'UPDATE' })
+
   function showToast(msg){
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
@@ -252,14 +317,55 @@ export default function PatientProfile({ patientId, onClose }){
     .filter(e => e.patient_id === patient.id)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
+  // Patient-scoped medication administrations — used by MedicationChart
+  // to classify each chart row as 'pending' / 'given' / 'missed' /
+  // 'discontinued'. Filtered by patient_id so a different patient's
+  // administrations never bleed into this chart.
+  const patientMedicationAdministrations = (medicationAdministrations || [])
+    .filter(a => a.patient_id === patient.id)
+
   // NEW: Filter stock records for this patient
   const patientStockRecords = stockRecords
     .filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
+  // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after discharge)
+  // -----------------------------------------------------------------
+  // Previously this filter excluded only 'cancelled' and 'rejected' —
+  // but NOT 'discharged'. So once a patient was admitted (status set
+  // to 'converted' on the admission_request), the card kept showing
+  // "CURRENTLY ADMITTED" forever, even after the patient was
+  // discharged.
+  //
+  // Now we also exclude 'discharged' so the card disappears when the
+  // patient is discharged.
+  // C-FIX: Derive the admission card from the linked admissions table.
+  // A patient shows the "Currently Admitted" card ONLY if:
+  //   1. They have an admission_requests row with status='converted'
+  //   2. AND the linked admissions row (matched by admission_request_id)
+  //      has status='active'
+  // If the admission is 'discharged', the card is hidden.
+  // Pending requests (status='pending' or 'approved') still show their card.
   const activeAdmissionRequest = admissionRequests
-    .filter(r => r.patient_id === patient.id && r.status !== 'cancelled' && r.status !== 'rejected')
+    .filter(r => {
+      if (r.patient_id !== patient.id) return false
+      if (r.status === 'cancelled' || r.status === 'rejected') return false
+      // For 'converted' requests, check the linked admission's status
+      if (r.status === 'converted') {
+        const linkedAdmission = admissions.find(a => a.admission_request_id === r.id)
+        // Only show if the linked admission is still 'active'
+        return linkedAdmission && linkedAdmission.status === 'active'
+      }
+      // 'pending' and 'approved' requests always show
+      return true
+    })
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null
+
+  // C-FIX: Find the most recent discharge from the admissions table
+  // (not admission_requests — we no longer write 'discharged' there).
+  const recentDischarge = admissions
+    .filter(a => a.patient_id === patient.id && a.status === 'discharged')
+    .sort((a, b) => new Date(b.discharge_date || b.updated_at || b.created_at) - new Date(a.discharge_date || a.updated_at || a.created_at))[0] || null
 
   function findPharmacyMatch(drugName){
     if (!drugName) return null
@@ -306,7 +412,7 @@ export default function PatientProfile({ patientId, onClose }){
               )}
             </div>
             <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-              {patient.age ? `${patient.age} yrs` : ''}{patient.gender ? ` · ${patient.gender}` : ''}{patient.hospital_number ? ` · #${patient.hospital_number}` : ''}
+              {patient.hospital_number ? `MRN: ${patient.hospital_number}` : ''}{patient.hospital_number && (patient.age || patient.gender) ? ' · ' : ''}{patient.age ? `${patient.age} yrs` : ''}{patient.gender ? ` · ${patient.gender}` : ''}
               {folderExpiry && ` · Registered ${new Date(patient.created_at).toLocaleDateString('en-NG')}`}
               {folderExpiry && ` · Expires ${folderExpiry.expiresAt.toLocaleDateString('en-NG')}`}
               {patient.folder_renewal_count > 0 && ` · Renewed ${patient.folder_renewal_count}×`}
@@ -320,6 +426,20 @@ export default function PatientProfile({ patientId, onClose }){
               title="Send a medication request to Pharmacy"
             >
               Send to Pharmacy
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ width: 'auto', padding: '6px 12px', fontSize: 11.5, background: 'var(--blue)', color: '#fff' }}
+              onClick={() => {
+                setPortalError('')
+                setPortalSuccess('')
+                setPortalEmail(patient?.email || '')
+                setPortalPassword('')
+                setShowPortalModal(true)
+              }}
+              title="Create a Patient Portal account for this patient"
+            >
+              Create Portal Account
             </button>
             <button
               onClick={onClose}
@@ -455,6 +575,7 @@ export default function PatientProfile({ patientId, onClose }){
               updatePatient={updatePatient}
               showToast={showToast}
               prescriptions={patientPrescriptions}
+              medicationAdministrations={patientMedicationAdministrations}
             />
           )}
           {tab === 'Pharmacy' && (
@@ -587,6 +708,160 @@ export default function PatientProfile({ patientId, onClose }){
             </div>
           </div>
         )}
+
+        {/* ---- Create Portal Account modal ---- */}
+        {showPortalModal && patient && (
+          <div className="dash-modal-backdrop" style={{ zIndex: 80 }} onClick={e => { if (e.target === e.currentTarget) setShowPortalModal(false) }}>
+            <div className="card dash-modal" style={{ maxWidth: 440 }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: 14 }}>
+                <div>
+                  <div className="dash-modal-title" style={{ paddingBottom: 0 }}>Create Portal Account</div>
+                  <div style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 700, marginTop: 2 }}>For {patient.full_name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>MRN: {patient.hospital_number || '—'}</div>
+                </div>
+                <button className="dash-icon-btn" onClick={() => setShowPortalModal(false)} aria-label="Close"><AppIcon name="close" size={18} /></button>
+              </div>
+              <div className="dash-modal-body">
+                {portalError && <div className="error-box" role="alert" style={{ marginBottom: 12 }}>{portalError}</div>}
+                {portalSuccess && (
+                  <div style={{ marginBottom: 12, padding: '12px 14px', borderRadius: 8, background: 'rgba(24,217,155,0.08)', border: '1px solid var(--mint-border)', fontSize: 12.5, color: 'var(--mint)' }}>
+                    ✅ {portalSuccess}
+                  </div>
+                )}
+                <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+                  This creates a login account the patient can use on the Patient Portal app.
+                  The patient logs in with their <b>Full Name</b>, <b>Hospital</b>, <b>Hospital Number (MRN)</b>, and the password you set below — they do NOT need to remember the email.
+                </p>
+                <form id="portal-form" onSubmit={async (e) => {
+                  e.preventDefault()
+                  setPortalError(''); setPortalSuccess('')
+                  if (!portalEmail.trim()) { setPortalError('Email is required.'); return }
+                  if (!portalPassword || portalPassword.length < 6) { setPortalError('Password must be at least 6 characters.'); return }
+                  setPortalSaving(true)
+                  try {
+                    // ---------------------------------------------------------------
+                    // Create the portal account via the create-portal-account
+                    // Edge Function (server-side).
+                    //
+                    // WHY NOT supabase.auth.signUp()?
+                    //   signUp() creates the user AND replaces the current
+                    //   browser session with the new user's session — so the
+                    //   staff member gets logged out (their profiles row is
+                    //   no longer found for the new auth.uid).
+                    //
+                    //   The Edge Function uses the SERVICE ROLE KEY (server-
+                    //   side only, never exposed to the browser) to call
+                    //   supabase.auth.admin.createUser(), which creates the
+                    //   user WITHOUT touching the caller's session.
+                    //
+                    // The Edge Function also:
+                    //   - Verifies the caller's JWT (only authenticated staff
+                    //     can call it)
+                    //   - Verifies the caller's role is in the allowed list
+                    //   - Verifies the patient belongs to the caller's
+                    //     hospital (multi-tenant isolation)
+                    //   - Checks for an existing patient_users link
+                    //   - Checks for an existing auth user with the same email
+                    //   - Creates the auth user with email_confirm: true
+                    //     (skips email-confirmation flow)
+                    //   - Inserts the patient_users row with patient_name +
+                    //     mrn so lookup_portal_email can resolve them later
+                    //   - Rolls back the auth user if the link insert fails
+                    // ---------------------------------------------------------------
+                    const { data: fnData, error: fnError } = await supabase.functions.invoke(
+                      'create-portal-account',
+                      {
+                        body: {
+                          email: portalEmail.trim(),
+                          password: portalPassword,
+                          patient_id: patient.id,
+                          hospital_id: patient.hospital_id,
+                          patient_name: patient.full_name,
+                          mrn: patient.hospital_number || null,
+                        },
+                      }
+                    )
+
+                    if (fnError) {
+                      setPortalError(fnError.message || 'Edge Function call failed.')
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    if (fnData?.error) {
+                      setPortalError(fnData.error || 'Could not create portal account.')
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    if (!fnData?.user_id) {
+                      setPortalError('Account creation returned no user ID. Please try again.')
+                      setPortalSaving(false)
+                      return
+                    }
+
+                    // Step 2: Audit
+                    writeAudit({
+                      hospitalId: hospital?.id, actor: profile,
+                      action: 'patient.portal_account_created',
+                      entityType: 'patient', entityId: patient.id,
+                      patientId: patient.id,
+                      summary: `Created portal account for ${patient.full_name} (${patient.hospital_number || 'no MRN'}) — email: ${portalEmail.trim()}`,
+                      metadata: {
+                        patient_id: patient.id,
+                        hospital_number: patient.hospital_number,
+                        portal_email: portalEmail.trim(),
+                        auth_user_id: fnData.user_id,
+                        created_via: 'edge-function',
+                      },
+                    })
+
+                    setPortalSuccess(`Portal account created! Patient should log in with their Full Name, Hospital, Hospital Number (${patient.hospital_number || '—'}), and the password you set. They do NOT need their email to log in.`)
+                    setPortalEmail(''); setPortalPassword('')
+                  } catch (err) {
+                    setPortalError(err.message || 'Could not create portal account.')
+                  } finally {
+                    setPortalSaving(false)
+                  }
+                }}>
+                  <div className="field">
+                    <label>Email Address *</label>
+                    <input
+                      type="email"
+                      value={portalEmail}
+                      onChange={e => setPortalEmail(e.target.value)}
+                      placeholder="patient@email.com"
+                      autoFocus
+                      required
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      Pre-filled from patient record. Change if needed.
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Temporary Password *</label>
+                    <input
+                      type="text"
+                      value={portalPassword}
+                      onChange={e => setPortalPassword(e.target.value)}
+                      placeholder="e.g. patient123"
+                      required
+                      style={{ width: '100%', fontFamily: 'var(--font-mono, monospace)' }}
+                    />
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      Minimum 6 characters. Patient can change this after logging in.
+                    </div>
+                  </div>
+                </form>
+              </div>
+              <div className="dash-modal-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowPortalModal(false)} disabled={portalSaving}>Close</button>
+                <button type="submit" form="portal-form" className="btn btn-primary" disabled={portalSaving}>{portalSaving ? 'Creating…' : 'Create Account'}</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -616,6 +891,11 @@ const ADMISSION_STATUS_MAP = {
   pending: { heading: 'ADMISSION RECOMMENDED', label: 'Awaiting Admission', color: 'var(--gold)' },
   approved: { heading: 'ADMISSION APPROVED', label: 'Admission Approved', color: 'var(--teal)' },
   converted: { heading: 'CURRENTLY ADMITTED', label: 'Currently Admitted', color: 'var(--teal)' },
+  // NEW: when the patient has been discharged, the activeAdmissionRequest
+  // filter will exclude this row, so the AdmissionStatusCard returns null
+  // and the card disappears. The map entry is here for safety in case
+  // any code path passes a 'discharged' request to AdmissionStatusCard.
+  discharged: { heading: 'RECENTLY DISCHARGED', label: 'Discharged', color: 'var(--muted)' },
 }
 
 function AdmissionStatusCard({ request }){
@@ -653,6 +933,7 @@ function OverviewTab({ patient, latestConsultation, activePrescriptions, outstan
     <div>
       <AdmissionStatusCard request={admissionRequest} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+        {detailRow('Hospital No. (MRN)', patient.hospital_number)}
         {detailRow('Registered', patient.created_at ? new Date(patient.created_at).toLocaleString() : null)}
         {detailRow('Gender', patient.gender)}
         {detailRow('Date of Birth', patient.date_of_birth ? new Date(patient.date_of_birth).toLocaleDateString() : null)}
@@ -1608,11 +1889,22 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
 
     setSaving(true)
     try {
+      // CRITICAL: status 'waiting' would auto-send this patient to the
+      // DoctorWorkbench queue (DoctorWorkbench.jsx:233 filters on
+      // v.status === 'waiting'). Recording vitals from the Patient
+      // Profile is a HISTORY append, not a triage action — use
+      // 'recorded' so the vitals save to the patient's history
+      // WITHOUT appearing in the doctor's queue.
+      //
+      // If staff wants to send the patient to the doctor, they should
+      // click the "Send to Doctor" button below the vitals table,
+      // which calls handleSendToDoctor() and explicitly sets
+      // status='waiting' + assigned_doctor.
       await addVitals({
         patient_id: patient.id,
         patient_name: patient.full_name,
         ...newVitals,
-        status: 'waiting',
+        status: 'recorded',
         recorded_at: new Date().toISOString(),
         created_by: profile.id,
       })
@@ -1621,16 +1913,45 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
         action: 'vitals.recorded_from_profile',
         entityType: 'patient_vitals', entityId: null,
         patientId: patient.id,
-        summary: `Vitals recorded for ${patient.full_name} from patient profile`,
-        metadata: { ...newVitals, source: 'patient_profile' },
+        summary: `Vitals recorded for ${patient.full_name} from patient profile (history only — not sent to doctor queue)`,
+        metadata: { ...newVitals, source: 'patient_profile', status: 'recorded' },
       })
-      showToast('Vitals recorded')
+      showToast('Vitals recorded — saved to history only')
       setShowAddModal(false)
       setNewVitals({ temperature: '', blood_pressure: '', pulse_rate: '', respiratory_rate: '', spo2: '', weight: '', height: '', nurse_notes: '', urgency: 'Routine' })
     } catch (err) {
       setFormError(err.message || 'Could not save vitals.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Send to Doctor Queue — explicit action.
+  // Only called when staff clicks the "Send to Doctor" button below
+  // the vitals table. Sets status='waiting' so DoctorWorkbench picks
+  // it up.
+  // ---------------------------------------------------------------
+  async function handleSendToDoctor(vitalsId) {
+    if (!vitalsId) return
+    if (!patient?.id) { showToast('Patient not loaded.'); return }
+    if (!profile?.id) { showToast('Account still loading.'); return }
+    try {
+      await updateVitals(vitalsId, {
+        status: 'waiting',
+        queue_status: 'sent_to_doctor',
+      })
+      writeAudit({
+        hospitalId: hospital?.id, actor: profile,
+        action: 'vitals.sent_to_doctor_from_profile',
+        entityType: 'patient_vitals', entityId: vitalsId,
+        patientId: patient.id,
+        summary: `Vitals for ${patient.full_name} explicitly sent to doctor queue from patient profile`,
+        metadata: { vitals_id: vitalsId, action: 'send_to_doctor' },
+      })
+      showToast(`Sent to doctor queue`)
+    } catch (err) {
+      showToast(err.message || 'Could not send to doctor queue.')
     }
   }
 
@@ -1664,6 +1985,8 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
                 <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Wt</th>
                 <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Urgency</th>
                 <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Doctor</th>
+                <th style={{ textAlign: 'left', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Status</th>
+                <th style={{ textAlign: 'right', fontSize: 11, color: 'var(--muted)', padding: '0 12px 12px', textTransform: 'uppercase', letterSpacing: 1 }}>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -1688,10 +2011,31 @@ function VitalsTab({ patient, allVitals, history, profile, hospital, addVitals, 
                         </span>
                       </td>
                       <td style={{ padding: 12, fontSize: 11.5, color: 'var(--muted)' }}>{v.assigned_doctor || '—'}</td>
+                      <td style={{ padding: 12 }}>
+                        {v.status === 'waiting' ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(24,217,155,0.18)', color: 'var(--mint)', textTransform: 'uppercase' }}>In Doctor Queue</span>
+                        ) : v.status === 'completed' ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(0,168,255,0.18)', color: 'var(--blue)', textTransform: 'uppercase' }}>Completed</span>
+                        ) : (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: 'rgba(150,150,150,0.18)', color: 'var(--muted)', textTransform: 'uppercase' }}>Recorded</span>
+                        )}
+                      </td>
+                      <td style={{ padding: 12, textAlign: 'right' }}>
+                        {v.status !== 'waiting' && v.status !== 'completed' && (
+                          <button
+                            className="btn btn-ghost"
+                            style={{ width: 'auto', padding: '5px 10px', fontSize: 11, color: 'var(--mint)', borderColor: 'var(--mint-border)' }}
+                            onClick={(e) => { e.stopPropagation(); handleSendToDoctor(v.id) }}
+                            title="Send this vitals record to the doctor's queue"
+                          >
+                            <AppIcon name="send" size={12} /> Send to Doctor
+                          </button>
+                        )}
+                      </td>
                     </tr>
                     {expanded && (
                       <tr key={v.id + '-expanded'} style={{ background: 'var(--bg-elevated)' }}>
-                        <td colSpan={9} style={{ padding: 14 }}>
+                        <td colSpan={11} style={{ padding: 14 }}>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
                             {v.chief_complaints && (
                               <div>
