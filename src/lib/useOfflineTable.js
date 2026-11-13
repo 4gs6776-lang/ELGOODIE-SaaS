@@ -1105,3 +1105,36 @@ export async function clearLocalDataOnLogout() {
 
   return { keptUnsynced }
 }
+
+// ============================================================
+// COMPATIBILITY EXPORTS
+//
+// The deployed AuthContext.jsx (ELGOODIE-SaaS version) imports
+// clearCursorsOnHospitalSwitch from useOfflineTable. This version
+// (1c38d27a) does not have per-device cursors, so this is a no-op.
+// The export exists so the build resolves.
+// ============================================================
+export async function clearCursorsOnHospitalSwitch(_oldHospitalId) {
+  // No-op — no cursors to clear in this version.
+  // The useTableCache TTL (5 min) handles cache invalidation.
+  return
+}
+
+// The deployed Dashboard.jsx and ConflictReviewPanel.jsx also import
+// these conflict-resolution functions. This version does not have
+// the conflict infrastructure, so they return empty/false.
+export async function getAllConflicts(_hospitalId) {
+  return []
+}
+
+export async function resolveConflictAcceptLocal(_originalId, _tableName) {
+  return false
+}
+
+export async function resolveConflictAcceptRemote(_originalId, _tableName) {
+  return false
+}
+
+export async function resolveConflictMerge(_originalId, _tableName, _mergedRow, _fieldDecisions) {
+  return false
+}
