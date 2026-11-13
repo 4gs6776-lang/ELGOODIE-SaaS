@@ -59,8 +59,26 @@ img, svg{ max-width:100%; }
 @media (max-width:900px){
   .dash-content{ padding:16px 14px 48px; }
 
-  /* Sidebar drawer */
+  /* Sidebar drawer — CRITICAL FIX:
+     The dashboard.css rule uses transform:translateX(-105%) to hide
+     the sidebar, but transform does NOT remove the element from the
+     flex layout. The sidebar still occupies 245px of flex space,
+     pushing the content to the right and causing the "half cut"
+     appearance on mobile. We must use position:fixed (already set
+     by dashboard.css) + width:0 + overflow:hidden to actually
+     remove it from the flex flow. When .open is toggled, we
+     restore the width. */
   .dash-sidebar{
+    position:fixed !important;
+    width:0 !important;
+    min-width:0 !important;
+    flex-shrink:0;
+    overflow:hidden;
+    z-index:50;
+    transition:width .25s ease, transform .25s ease;
+  }
+  .dash-sidebar.open{
+    width:245px !important;
     max-width:85vw;
     box-shadow:20px 0 50px -20px rgba(0,0,0,.65);
   }
