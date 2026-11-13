@@ -399,34 +399,17 @@ export default function Admissions(){
         pharmacy_cleared: false,
         doctor_signed: false,
       })
-      // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after discharge)
-      // -----------------------------------------------------------------
-      // PatientProfile.jsx:273 reads from `admission_requests` to decide
-      // whether to render the "Currently Admitted" card. The filter
-      // excluded 'cancelled' and 'rejected' but NOT 'converted', so
-      // the card kept showing after discharge.
+      // B-FIX: Do NOT write status='discharged' or discharge_reason to
+      // admission_requests. The admission_requests.status stays 'converted'.
+      // Discharge info (discharge_date, discharge_reason) is stored ONLY in
+      // the admissions table. PatientProfile derives the admission card
+      // from the linked admission's status — if admissions.status='discharged',
+      // the card is hidden.
       //
-      // The discharge was updating `admissions.status='discharged'` but
-      // never touched `admission_requests` (where the row was sitting
-      // at status='converted' from when the patient was admitted).
-      //
-      // Now we also flip the linked admission_request to 'discharged'
-      // so PatientProfile's filter (which we'll also patch to exclude
-      // 'discharged') hides the card.
-      if (admission.admission_request_id) {
-        try {
-          await updateRequest(admission.admission_request_id, {
-            status: 'discharged',
-            reviewed_at: new Date().toISOString(),
-            discharge_reason: dischargeReason.trim() || null,
-          })
-        } catch (reqErr) {
-          // Non-fatal — the admission itself is already discharged.
-          // The PatientProfile card might still show "admitted" until
-          // the next refresh, but the patient's bed is free.
-          console.warn('Failed to update admission_request status on discharge:', reqErr.message)
-        }
-      }
+      // The previous code wrote status='discharged' to admission_requests,
+      // which is an invalid status for that table (only 'pending', 'approved',
+      // 'converted', 'cancelled', 'rejected' are valid). This caused sync
+      // errors on every discharge.
       writeAudit({
         hospitalId: hospital?.id,
         actor: profile,
