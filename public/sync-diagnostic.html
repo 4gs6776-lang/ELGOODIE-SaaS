@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>G-MedHub Sync Diagnostic</title>
+<style>
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #0a0f1a; color: #e0e6ed; margin: 0; padding: 20px; }
+  h1 { color: #c9a961; font-size: 22px; margin-bottom: 8px; }
+  h2 { color: #4c8dff; font-size: 16px; margin-top: 24px; margin-bottom: 8px; }
+  .note { color: #8b9bb4; font-size: 13px; margin-bottom: 16px; line-height: 1.5; }
+  .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .card.ok { border-color: #10b981; }
+  .card.fail { border-color: #ef4444; }
+  .card.warn { border-color: #f59e0b; }
+  pre { background: #0d1117; border: 1px solid #1f2937; border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 12px; line-height: 1.5; margin: 0; white-space: pre-wrap; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #1f2937; }
+  th { color: #8b9bb4; font-weight: 600; }
+  button { background: #c9a961; color: #0a0f1a; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 700; cursor: pointer; margin-right: 8px; }
+  button:hover { background: #d4b87a; }
+  button.danger { background: #ef4444; color: #fff; }
+  button.danger:hover { background: #dc2626; }
+  .status { font-weight: 700; font-size: 14px; }
+  .status.ok { color: #10b981; }
+  .status.fail { color: #ef4444; }
+  .status.warn { color: #f59e0b; }
+  input { background: #0d1117; border: 1px solid #1f2937; border-radius: 6px; padding: 8px 12px; color: #e0e6ed; font-size: 13px; width: 320px; }
+  label { display: inline-block; width: 140px; color: #8b9bb4; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>G-MedHub Sync Diagnostic Tool</h1>
+<p class="note">
+  This page checks whether your Supabase data is reachable and whether IndexedDB
+  is working correctly. Fill in your Supabase URL and anon key below (the same
+  values you set as VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel),
+  then click "Run Diagnostic". The results will tell you exactly which part of
+  the data pipeline is broken.
+</p>
+
+<div style="margin-bottom: 16px;">
+  <label>Supabase URL:</label>
+  <input id="supabaseUrl" placeholder="https://kzkvtzoqrxwekngmltrt.supabase.co" value="https://kzkvtzoqrxwekngmltrt.supabase.co">
+</div>
+<div style="margin-bottom: 16px;">
+  <label>Supabase Anon Key:</label>
+  <input id="supabaseKey" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." style="width: 500px;">
+</div>
+
+<div style="margin-bottom: 16px;">
+  <button onclick="runDiagnostic()">Run Diagnostic</button>
+  <button onclick="clearIndexedDB()" class="danger">Clear IndexedDB (Force Resync)</button>
+</div>
+
+<div id="results"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+let supabase = null;
+
+function getSupabase() {
+  const url = document.getElementById('supabaseUrl').value.trim();
+  const key = document.getElementById('supabaseKey').value.trim();
+  if (!url || !key) {
+    alert('Please enter your Supabase URL and anon key.');
+    return null;
+  }
+  if (!supabase) {
+    supabase = supabase.createClient(url, key);
+  }
+  return supabase;
+}
+
+function card(cls, title, html) {
+  return `<div class="card ${cls}"><div class="status ${cls}">${title}</div><div style="margin-top:8px;">${html}</div></div>`;
+}
+
+function tableFromRows(rows) {
+  if (!rows || rows.length === 0) return '<em>(empty)</em>';
+  const cols = Object.keys(rows[0]).slice(0, 6);
+  let html = '<table><thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead><tbody>';
+  for (const r of rows.slice(0, 10)) {
+    html += '<tr>' + cols.map(c => `<td>${JSON.stringify(r[c] ?? null).slice(0, 80)}</td>`).join('') + '</tr>';
+  }
+  html += '</tbody></table>';
+  if (rows.length > 10) html += `<p style="color:#8b9bb4;font-size:12px;">Showing first 10 of ${rows.length} rows.</p>`;
+  return html;
+}
+
+async function runDiagnostic() {
+  const results = document.getElementById('results');
+  results.innerHTML = '<p style="color:#8b9bb4;">Running diagnostic...</p>';
+  let html = '';
+
+  const sb = getSupabase();
+  if (!sb) return;
+
+  // 1. Check IndexedDB
+  html += '<h2>1. IndexedDB Check</h2>';
+  try {
+    if (indexedDB.databases) {
+      const dbs = await indexedDB.databases();
+      const gmhDb = dbs.find(d => d.name === 'HospitalOfflineDB');
+      if (gmhDb) {
+        html += card('warn', `HospitalOfflineDB exists at version ${gmhDb.version}`,
+          `<p>The browser has a database named <code>HospitalOfflineDB</code> at version <strong>${gmhDb.version}</strong>.<br>` +
+          `Your V2 code uses DB_VERSION = 5. ${gmhDb.version > 5 ? '<strong style="color:#ef4444;">VersionError — this is why no data loads!</strong> Click "Clear IndexedDB" below.' : 'OK.'}</p>`);
+      } else {
+        html += card('ok', 'No HospitalOfflineDB yet (fresh start)',
+          '<p>No database exists yet. The app will create one on first load.</p>');
+      }
+      html += card('ok', 'All IndexedDB databases', tableFromRows(dbs));
+    } else {
+      html += card('warn', 'indexedDB.databases() not supported',
+        '<p>Your browser does not support listing IndexedDB databases. Try opening the database manually below.</p>');
+    }
+  } catch (err) {
+    html += card('fail', 'IndexedDB check failed', `<pre>${err.message}</pre>`);
+  }
+
+  // 2. Try to open and read IndexedDB
+  html += '<h2>2. IndexedDB Open & Read</h2>';
+  try {
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('HospitalOfflineDB', 5);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+      req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('offline_records')) {
+          d.createObjectStore('offline_records', { keyPath: 'id' });
+        }
+      };
+    });
+    const tx = db.transaction('offline_records', 'readonly');
+    const store = tx.objectStore('offline_records');
+    const all = await new Promise((resolve, reject) => {
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    const byTable = {};
+    for (const r of all) {
+      if (!byTable[r.table_name]) byTable[r.table_name] = 0;
+      byTable[r.table_name]++;
+    }
+    html += card('ok', `IndexedDB opened OK — ${all.length} record(s) total`,
+      '<p>Records by table:</p>' + tableFromRows([byTable]));
+
+    if (all.length === 0) {
+      html += card('fail', 'IndexedDB is EMPTY',
+        '<p>The database opened successfully but contains 0 records. This means the pull from Supabase has never succeeded.<br>' +
+        'Check step 4 below — if the Supabase read works but IndexedDB is empty, the issue is in the app\'s pull code (DB_VERSION mismatch or RLS blocking the read inside the app context).</p>');
+    }
+    db.close();
+  } catch (err) {
+    html += card('fail', `IndexedDB open FAILED: ${err.name}`,
+      `<pre>${err.message}\n\nStack: ${err.stack || '(no stack)'}\n\nThis is likely a VersionError. The browser\'s database version is higher than what the code expects. Click "Clear IndexedDB" to delete the database and start fresh.</pre>`);
+  }
+
+  // 3. Check Supabase auth session
+  html += '<h2>3. Supabase Auth Session</h2>';
+  let userId = null;
+  try {
+    const { data, error } = await sb.auth.getSession();
+    if (error) {
+      html += card('fail', 'Auth error', `<pre>${error.message}</pre>`);
+    } else if (data?.session) {
+      userId = data.session.user.id;
+      html += card('ok', `Logged in as: ${data.session.user.email}`,
+        `<p>User ID: <code>${userId}</code></p>`);
+    } else {
+      html += card('warn', 'No active session',
+        '<p>You are not logged in. Open the app and log in first, then come back to this page (in the same browser tab) and run the diagnostic again.<br>' +
+        'If you opened this page in a new tab, the Supabase session cookie may not be shared. Instead, run the diagnostic from the app\'s browser console:<br>' +
+        '<code>window.__gmhDiagnoseSync()</code></p>');
+    }
+  } catch (err) {
+    html += card('fail', 'Session check failed', `<pre>${err.message}</pre>`);
+  }
+
+  // 4. Try a direct read of patients (uses RLS)
+  html += '<h2>4. Direct Supabase Read of <code>patients</code> (RLS-checked)</h2>';
+  let hospitalId = null;
+  try {
+    const { data, error } = await sb.from('patients').select('id, full_name, hospital_id, created_at').limit(10);
+    if (error) {
+      html += card('fail', `RLS blocked the read: ${error.code || 'unknown'}`,
+        `<pre>${error.message}\n\nThis is the ROOT CAUSE. The RPC (get_dashboard_summary) bypasses RLS because it is SECURITY DEFINER, so the dashboard shows 47 patients. But the app's pullFromSupabase() uses a direct .from('patients').select('*') which is subject to RLS. The RLS policy is:\n\n  hospital_id = current_hospital_id() or is_owner()\n\nIf current_hospital_id() returns NULL (no profile row, or profile.hospital_id is NULL), the policy evaluates to NULL (not TRUE) and silently filters out ALL rows.\n\nFIX: Run this SQL in Supabase to check the user's profile:\n  select id, hospital_id, role from profiles where id = auth.uid();\n\nIf no row is returned, the profile does not exist — create it.\nIf hospital_id is NULL, set it to the correct hospital.</pre>`);
+    } else if (data.length === 0) {
+      html += card('warn', 'Read succeeded but returned 0 rows',
+        '<p>RLS allowed the read but the table is empty (for this hospital), OR RLS silently filtered everything out.<br>' +
+        'Check step 6 to see if the user has a profile with a hospital_id set.</p>');
+    } else {
+      hospitalId = data[0].hospital_id;
+      html += card('ok', `Read OK — ${data.length} patient(s) returned`,
+        '<p>The direct read works. If the app still shows "No patients yet", the issue is IndexedDB (step 2), not RLS.</p>' +
+        tableFromRows(data));
+    }
+  } catch (err) {
+    html += card('fail', 'Read failed', `<pre>${err.message}</pre>`);
+  }
+
+  // 5. Try the dashboard RPC (bypasses RLS)
+  html += '<h2>5. Dashboard RPC <code>get_dashboard_summary</code> (bypasses RLS)</h2>';
+  try {
+    const { data, error } = await sb.rpc('get_dashboard_summary', {
+      p_hospital_id: hospitalId || '00000000-0000-0000-0000-000000000000',
+      p_days: 7,
+    });
+    if (error) {
+      html += card('fail', `RPC failed: ${error.code || 'unknown'}`,
+        `<pre>${error.message}\n\nIf the error is "Could not find the function" (PGRST202), the RPC is not deployed. Run migration 100_performance_infrastructure_v2.sql in Supabase.\n\nIf the error is "Hospital ID mismatch", the user's profile.hospital_id does not match the hospital_id passed to the RPC. This confirms the profile is misconfigured.</pre>`);
+    } else {
+      const row = Array.isArray(data) ? data[0] : data;
+      html += card('ok', 'RPC returned data',
+        '<p>This is why the dashboard shows 47 patients — the RPC bypasses RLS. But the app modules read from IndexedDB, which is empty because the direct RLS-checked read (step 4) is blocked.</p>' +
+        tableFromRows([row]));
+    }
+  } catch (err) {
+    html += card('fail', 'RPC failed', `<pre>${err.message}</pre>`);
+  }
+
+  // 6. Check the user's profile
+  if (userId) {
+    html += '<h2>6. User Profile Check</h2>';
+    try {
+      const { data, error } = await sb.from('profiles').select('id, hospital_id, role, full_name').eq('id', userId).maybeSingle();
+      if (error) {
+        html += card('fail', `Profile read failed: ${error.code || 'unknown'}`, `<pre>${error.message}</pre>`);
+      } else if (data) {
+        html += card(data.hospital_id ? 'ok' : 'fail',
+          `Profile: ${data.full_name || '(no name)'} — role: ${data.role || '(none)'}`,
+          '<p>Profile details:</p>' + tableFromRows([data]));
+        if (!data.hospital_id) {
+          html += card('fail', 'PROFILE HAS NO hospital_id!',
+            '<p><strong>This is the root cause.</strong> The RLS helper <code>current_hospital_id()</code> reads <code>hospital_id</code> from <code>profiles</code>. Since this profile has <code>hospital_id = NULL</code>, the RLS policy <code>hospital_id = current_hospital_id()</code> evaluates to <code>NULL</code> (not TRUE), and RLS silently blocks ALL reads.</p>' +
+            '<p><strong>FIX:</strong> Run this SQL in Supabase:</p>' +
+            '<pre>update profiles set hospital_id = \'&lt;your-hospital-id&gt;\' where id = \'' + userId + '\';</pre>' +
+            '<p>To find your hospital ID:</p>' +
+            '<pre>select id, name from hospitals limit 5;</pre>');
+        }
+        if (!data.role) {
+          html += card('warn', 'Profile has no role',
+            '<p>The user has no role set. This may prevent the AuthContext from loading the hospital context.</p>');
+        }
+      } else {
+        html += card('fail', 'NO PROFILE ROW FOUND',
+          '<p><strong>This is the root cause.</strong> The user exists in <code>auth.users</code> but has no row in <code>profiles</code>. The RLS helper <code>current_hospital_id()</code> returns NULL, and <code>is_owner()</code> returns FALSE. Every RLS policy that depends on these functions silently blocks the read.</p>' +
+          '<p><strong>FIX:</strong> Run this SQL in Supabase:</p>' +
+          '<pre>-- Find the hospital\nselect id, name from hospitals limit 5;\n\n-- Insert a profile for this user\ninsert into profiles (id, hospital_id, role, full_name)\nvalues (\'' + userId + '\',\n  \'&lt;hospital-id-from-above&gt;\',\n  \'admin\',\n  \'User Name\'\n) on conflict (id) do update set hospital_id = excluded.hospital_id, role = excluded.role;</pre>');
+      }
+    } catch (err) {
+      html += card('fail', 'Profile check failed', `<pre>${err.message}</pre>`);
+    }
+  }
+
+  // 7. Summary
+  html += '<h2>Summary & Fix</h2>';
+  html += card('warn', 'Most likely cause: DB_VERSION mismatch or missing profile',
+    '<p><strong>If step 1 shows a database version higher than 5:</strong> Click "Clear IndexedDB" below, then reload the app.</p>' +
+    '<p><strong>If step 6 shows no profile or no hospital_id:</strong> Run the SQL fix in step 6.</p>' +
+    '<p><strong>If step 4 returns 0 rows but step 5 returns data:</strong> RLS is blocking the app\'s direct reads. Fix the profile (step 6) so <code>current_hospital_id()</code> returns the correct hospital ID.</p>' +
+    '<p><strong>If step 2 shows IndexedDB is empty but steps 4-5 work:</strong> The pull is failing inside the app. Open the app\'s browser console and look for <code>[sync] Pull of patients failed</code> messages. Then run <code>window.__gmhForceResync()</code> in the console.</p>');
+
+  results.innerHTML = html;
+}
+
+async function clearIndexedDB() {
+  if (!confirm('This will DELETE the entire HospitalOfflineDB database. Any unsynced local changes will be lost. Continue?')) return;
+  try {
+    await new Promise((resolve, reject) => {
+      const req = indexedDB.deleteDatabase('HospitalOfflineDB');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => { alert('Delete blocked by another tab. Close all tabs of the app and try again.'); resolve(); };
+    });
+    alert('IndexedDB deleted. Close this page, open the app, and log in. The data will be re-pulled from Supabase.');
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+}
+</script>
+</body>
+</html>
