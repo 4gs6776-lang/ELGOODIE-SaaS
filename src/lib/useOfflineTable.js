@@ -20,12 +20,14 @@ import { getInstallationId } from './installationId'
 // =====================================================================
 
 const DB_NAME = 'HospitalOfflineDB'
-// v3 → v4: adds a compound index (table_name, hospital_id, _synced) so
-// hospital-scoped pending counts and per-table pulls do not have to
-// scan the whole store. v4 also adds the `sync_cursors` and
-// `installations` stores. Existing data is preserved: IndexedDB
-// upgrades run only the missing createObjectStore / createIndex calls.
-const DB_VERSION = 4
+// v4 → v5: the sync-engine-repair delivery upgraded some browsers to v5
+// (adding a compound index 'table_hospital' and a 'bootstrap_meta' store).
+// IndexedDB CANNOT open a version lower than what already exists — it
+// throws VersionError. We must set DB_VERSION to 5 so the DB opens
+// successfully on browsers that were previously upgraded. The
+// onupgradeneeded handler below handles both v4→v5 upgrades and
+// no-op cases (when the DB is already at v5).
+const DB_VERSION = 5
 
 const STORE_NAME = 'offline_records'
 const CURSOR_STORE = 'sync_cursors'      // keyed by `${installationId}|${hospitalId}|${tableName}`
@@ -109,37 +111,44 @@ function openDB() {
         store.createIndex('table_name', 'table_name', { unique: false })
         store.createIndex('hospital_id', 'hospital_id', { unique: false })
         store.createIndex('synced', '_synced', { unique: false })
-        // v4 compound index — speeds up the hospital-scoped pending
-        // count and the hospital-scoped reads (the hot path on every
-        // dashboard mount).
+        // v4 compound index
         store.createIndex('table_hospital_synced', ['table_name', 'hospital_id', '_synced'], {
           unique: false,
         })
-      } else if (oldVersion < 4) {
-        // Already exists from an older install; just add the compound
-        // index. createIndex is idempotent against the name but throws
-        // if the name is taken with a different keyPath, so we probe.
+        // v5: compound index using ONLY string/UUID keys (never boolean _synced)
+        store.createIndex('table_hospital', ['table_name', 'hospital_id'], {
+          unique: false,
+        })
+      } else {
         const store = event.target.transaction.objectStore(STORE_NAME)
+        // v4: add table_hospital_synced if missing
         if (!store.indexNames.contains('table_hospital_synced')) {
           store.createIndex('table_hospital_synced', ['table_name', 'hospital_id', '_synced'], {
             unique: false,
           })
         }
+        // v5: add table_hospital if missing (the sync-engine-repair index)
+        if (!store.indexNames.contains('table_hospital')) {
+          store.createIndex('table_hospital', ['table_name', 'hospital_id'], {
+            unique: false,
+          })
+        }
       }
 
-      // Per-device cursor store (new in v4). Each device tracks its own
-      // position per (hospital, table) — see installationId.js for why
-      // we never touch the backend shared cursor.
+      // Per-device cursor store (new in v4).
       if (!db.objectStoreNames.contains(CURSOR_STORE)) {
         db.createObjectStore(CURSOR_STORE, { keyPath: 'key' })
       }
 
-      // Per-installation metadata: when did this device first see this
-      // hospital? Has it ever completed a full pull for this table?
-      // Used to enforce "no incremental sync before a complete initial
-      // pull" (requirement 1).
+      // Per-installation metadata (new in v4).
       if (!db.objectStoreNames.contains(META_STORE)) {
         db.createObjectStore(META_STORE, { keyPath: 'installationId' })
+      }
+
+      // v5: bootstrap_meta store (added by sync-engine-repair).
+      // If it already exists (from the v5 upgrade), this is a no-op.
+      if (!db.objectStoreNames.contains('bootstrap_meta')) {
+        db.createObjectStore('bootstrap_meta', { keyPath: 'key' })
       }
     }
 
