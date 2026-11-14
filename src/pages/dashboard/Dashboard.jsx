@@ -1467,7 +1467,7 @@ export default function Dashboard(){
               lazy-loaded modules show the existing loading state.
               The fallback uses the EXISTING .dash-empty-state CSS
               class — no new styling is introduced. */}
-          <Suspense fallback={<div className="dash-empty-state">Loading…</div>}>
+          <Suspense fallback={<LiquidLoader variant="block" label="Loading" />}>
             {tab === 'appointments' && <Appointments initialSearch={deepLinkSearch}/>}
           {tab === 'patients' && (
             profilePatientId ? (
@@ -1520,7 +1520,7 @@ export default function Dashboard(){
                   </div>
 
                   {loading ? (
-                    <div className="dash-empty-state">Loading…</div>
+                   <LiquidLoader variant="block" label="Loading" />
                   ) : filteredPatients.length === 0 ? (
                     <div className="dash-empty-state">
                       {patientSearch.trim() ? `No patients match "${patientSearch}".` : 'No patients yet. Add your first one above.'}
@@ -1770,7 +1770,7 @@ export default function Dashboard(){
            existing `.dash-empty-state` class so no new CSS is
            introduced. The panel is hospital-scoped via useAuth()
            internally — we only need to pass `open` and `onClose`. */}
-      <Suspense fallback={<div className="dash-empty-state">Loading…</div>}>
+      <Suspense fallback={<LiquidLoader variant="block" label="Loading" />}>
         <ConflictReviewPanel
           open={conflictPanelOpen}
           onClose={() => setConflictPanelOpen(false)}
