@@ -1,0 +1,118 @@
+/* =====================================================================
+   G-MedHub LiquidLoader
+   Every colour comes from the tokens in theme/globals.css, so the loader
+   follows dark mode (default) and html.light-mode automatically.
+   ===================================================================== */
+
+@keyframes ll-morph{
+  0%,100%{ border-radius:60% 40% 30% 70% / 60% 30% 70% 40%; transform:rotate(0deg) }
+  25%    { border-radius:30% 60% 70% 40% / 50% 60% 30% 60% }
+  50%    { border-radius:50% 50% 40% 60% / 40% 70% 30% 60%; transform:rotate(180deg) }
+  75%    { border-radius:65% 35% 55% 45% / 35% 55% 45% 65% }
+}
+@keyframes ll-ring{
+  0%,100%{ transform:scale(1);   opacity:.95 }
+  50%    { transform:scale(.92); opacity:.5 }
+}
+
+.ll{
+  --ll-size:64px;
+  --ll-a:var(--violet);
+  --ll-b:var(--teal-bright);
+  --ll-ring:var(--teal);
+  --ll-glow:45%;
+  --ll-speed:5s;
+  display:inline-flex; align-items:center; gap:10px;
+  vertical-align:middle; color:var(--ivory);
+}
+html.light-mode .ll{ --ll-glow:22%; }
+
+.ll-stage{
+  position:relative; flex-shrink:0;
+  width:var(--ll-size); height:var(--ll-size);
+  display:inline-flex; align-items:center; justify-content:center;
+}
+.ll-ring{
+  position:absolute; inset:0; border-radius:50%;
+  border:max(1.5px, calc(var(--ll-size) * .03)) solid var(--ll-ring);
+  box-shadow:0 0 calc(var(--ll-size) * .14) color-mix(in srgb, var(--ll-ring) var(--ll-glow), transparent);
+  animation:ll-ring calc(var(--ll-speed) * .6) ease-in-out infinite;
+}
+.ll-blob{
+  width:58%; height:58%;
+  background:linear-gradient(135deg, var(--ll-a), var(--ll-b));
+  border-radius:60% 40% 30% 70% / 60% 30% 70% 40%;
+  filter:blur(calc(var(--ll-size) * .01));
+  animation:ll-morph var(--ll-speed) ease-in-out infinite;
+}
+
+/* ---- Tones --------------------------------------------------------- */
+/* loading / synchronizing: the brand pair, violet into teal */
+.ll-loading{ --ll-a:var(--violet); --ll-b:var(--teal-bright); --ll-ring:var(--teal); --ll-speed:4.5s; }
+/* synced: calm green, slow morph, ring holds still */
+.ll-success{ --ll-a:var(--success); --ll-b:var(--teal-bright); --ll-ring:var(--success); --ll-speed:9s; }
+.ll-success .ll-ring{ animation:none; }
+/* sync failed: red, quicker and more restless */
+.ll-danger{
+  --ll-a:var(--danger);
+  --ll-b:color-mix(in srgb, var(--danger) 55%, var(--warning));
+  --ll-ring:var(--danger); --ll-speed:3s;
+}
+/* waiting to sync (offline with unsent changes) */
+.ll-warning{ --ll-a:var(--gold); --ll-b:var(--warning); --ll-ring:var(--gold); --ll-speed:6s; }
+/* offline, nothing unsent */
+.ll-muted{ --ll-a:var(--muted-dim); --ll-b:var(--muted); --ll-ring:var(--muted-dim); --ll-glow:0%; --ll-speed:10s; }
+
+/* ---- Layout variants ---------------------------------------------- */
+.ll-block{
+  display:flex; flex-direction:column; justify-content:center;
+  width:100%; padding:48px 16px; gap:14px; text-align:center;
+}
+.ll-screen{
+  display:flex; flex-direction:column; justify-content:center;
+  min-height:100vh; gap:16px; background:var(--bg);
+}
+.ll-text{ display:flex; flex-direction:column; gap:2px; line-height:1.25; }
+.ll-block .ll-text, .ll-screen .ll-text{ align-items:center; }
+.ll-label{ font-size:13px; font-weight:700; color:var(--ivory); }
+.ll-sub{ font-size:12px; color:var(--muted); }
+
+/* ---- Sync chip (components/common/ConnectionState.jsx) ------------- */
+/* Three classes of specificity so these win over theme/components.css
+   regardless of import order. */
+.conn-state.conn-liquid{
+  font-family:inherit; line-height:1; appearance:none;
+  padding:4px 12px 4px 6px; gap:7px;
+  transition:background .2s ease, border-color .2s ease, color .2s ease;
+}
+.conn-state.conn-liquid.clickable:hover{ filter:brightness(1.08); }
+.conn-state.conn-liquid.clickable:focus-visible{ outline:2px solid var(--teal); outline-offset:2px; }
+
+.conn-state.conn-liquid.is-synced{
+  color:var(--success); border-color:var(--mint-border); background:var(--mint-soft);
+}
+.conn-state.conn-liquid.is-syncing{
+  color:var(--teal); border-color:var(--teal-border); background:var(--teal-soft);
+}
+.conn-state.conn-liquid.is-pending{
+  color:var(--warning);
+  border-color:color-mix(in srgb, var(--warning) 35%, transparent);
+  background:var(--warning-soft);
+}
+.conn-state.conn-liquid.is-failed{
+  color:var(--danger);
+  border-color:color-mix(in srgb, var(--danger) 40%, transparent);
+  background:var(--danger-soft);
+}
+.conn-state.conn-liquid.is-offline{
+  color:var(--muted); border-color:var(--line); background:var(--bg-elevated);
+}
+
+/* Phones: keep the existing rule that collapses "Synced" to the orb only */
+@media (max-width:600px){
+  .conn-state.conn-liquid{ padding:4px 8px 4px 5px; }
+}
+
+@media (prefers-reduced-motion:reduce){
+  .ll-ring, .ll-blob{ animation:none; }
+}
