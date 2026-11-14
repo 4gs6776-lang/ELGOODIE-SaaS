@@ -77,11 +77,19 @@ img, svg{ max-width:100%; }
     z-index:50;
     transition:width .25s ease, transform .25s ease;
   }
-  .dash-sidebar.open{
-    width:245px !important;
-    max-width:85vw;
-    box-shadow:20px 0 50px -20px rgba(0,0,0,.65);
-  }
+.dash-sidebar.open{
+  width:245px !important;
+  max-width:85vw;
+  box-shadow:20px 0 50px -20px rgba(0,0,0,.65);
+  overflow-x:hidden;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  height:100vh;
+  height:100dvh;
+  padding-bottom:calc(23px + env(safe-area-inset-bottom, 0px));
+}
+
 
   /* Topbar: give the search bar room, shrink the hospital
      name so it can't push icons off-screen. */
