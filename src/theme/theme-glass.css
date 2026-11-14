@@ -1,0 +1,379 @@
+/* =====================================================================
+   G-MedHub — GLASS THEME (dark + light, one file)
+
+   Dark  = deep navy glass with an amber action colour.
+   Light = lavender-to-cyan frosted glass.
+   Both use the SAME layout rules and read their colours from the tokens
+   below, so switching modes only changes colours. The tokens are
+   registered with @property, so the browser fades between the two
+   palettes (about 0.35s) instead of snapping. Browsers without
+   @property support simply switch instantly.
+
+   Import AFTER glass.css and BEFORE pagination.css / mobile.css.
+   This file replaces light-glass.css (delete that import).
+   ===================================================================== */
+
+/* ---- 0. Register colour tokens so they can animate ------------------ */
+@property --bg{syntax:'<color>';inherits:true;initial-value:#16335c}
+@property --bg-elevated{syntax:'<color>';inherits:true;initial-value:#1b3b66}
+@property --bg-card{syntax:'<color>';inherits:true;initial-value:#1a3a64}
+@property --bg-card-hover{syntax:'<color>';inherits:true;initial-value:#21497d}
+@property --sidebar-bg{syntax:'<color>';inherits:true;initial-value:#153259}
+@property --header-bg{syntax:'<color>';inherits:true;initial-value:#17355f}
+@property --line{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.14)}
+@property --line-soft{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.08)}
+@property --ivory{syntax:'<color>';inherits:true;initial-value:#f2f6ff}
+@property --muted{syntax:'<color>';inherits:true;initial-value:#9db3d4}
+@property --muted-dim{syntax:'<color>';inherits:true;initial-value:#7d97bc}
+@property --teal{syntax:'<color>';inherits:true;initial-value:#7fb2ff}
+@property --teal-bright{syntax:'<color>';inherits:true;initial-value:#a9ccff}
+@property --teal-soft{syntax:'<color>';inherits:true;initial-value:rgba(127,178,255,.14)}
+@property --teal-active{syntax:'<color>';inherits:true;initial-value:rgba(127,178,255,.20)}
+@property --teal-border{syntax:'<color>';inherits:true;initial-value:rgba(127,178,255,.32)}
+@property --violet{syntax:'<color>';inherits:true;initial-value:#9a8cff}
+@property --blue{syntax:'<color>';inherits:true;initial-value:#5b9bff}
+@property --gold{syntax:'<color>';inherits:true;initial-value:#f6c14d}
+@property --tg-p1{syntax:'<color>';inherits:true;initial-value:#112a4d}
+@property --tg-p2{syntax:'<color>';inherits:true;initial-value:#1a3b68}
+@property --tg-p3{syntax:'<color>';inherits:true;initial-value:#21497d}
+@property --tg-p4{syntax:'<color>';inherits:true;initial-value:#1a3f70}
+@property --tg-glow-a{syntax:'<color>';inherits:true;initial-value:rgba(120,170,255,.30)}
+@property --tg-glow-b{syntax:'<color>';inherits:true;initial-value:rgba(70,110,220,.28)}
+@property --tg-glow-c{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.04)}
+@property --tg-s1{syntax:'<color>';inherits:true;initial-value:#1d4075}
+@property --tg-s2{syntax:'<color>';inherits:true;initial-value:#163461}
+@property --tg-s3{syntax:'<color>';inherits:true;initial-value:#10274c}
+@property --tg-card-a{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.13)}
+@property --tg-card-b{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.05)}
+@property --tg-card-border{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.16)}
+@property --tg-card-hi{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.22)}
+@property --tg-card-shadow{syntax:'<color>';inherits:true;initial-value:rgba(5,14,38,.55)}
+@property --tg-sub{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.07)}
+@property --tg-top{syntax:'<color>';inherits:true;initial-value:rgba(16,38,76,.50)}
+@property --tg-top-line{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.10)}
+@property --tg-ctl{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.09)}
+@property --tg-ctl-border{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.16)}
+@property --tg-cta-a{syntax:'<color>';inherits:true;initial-value:#f6c14d}
+@property --tg-cta-b{syntax:'<color>';inherits:true;initial-value:#e8a826}
+@property --tg-cta-ink{syntax:'<color>';inherits:true;initial-value:#3a2a05}
+@property --tg-cta-glow{syntax:'<color>';inherits:true;initial-value:rgba(246,193,77,.45)}
+@property --tg-modal-a{syntax:'<color>';inherits:true;initial-value:rgba(27,59,102,.94)}
+@property --tg-modal-b{syntax:'<color>';inherits:true;initial-value:rgba(18,42,80,.92)}
+@property --tg-kb-a{syntax:'<color>';inherits:true;initial-value:#5a9bff}
+@property --tg-kb-b{syntax:'<color>';inherits:true;initial-value:#2f62d0}
+@property --tg-kp-a{syntax:'<color>';inherits:true;initial-value:#f08ad8}
+@property --tg-kp-b{syntax:'<color>';inherits:true;initial-value:#b24fd0}
+@property --tg-kbase-a{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.12)}
+@property --tg-kbase-b{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.05)}
+@property --tg-scrim{syntax:'<color>';inherits:true;initial-value:rgba(4,12,32,.55)}
+@property --hd-blue{syntax:'<color>';inherits:true;initial-value:#5b9bff}
+@property --hd-cyan{syntax:'<color>';inherits:true;initial-value:#5fd4f0}
+@property --hd-purple{syntax:'<color>';inherits:true;initial-value:#9a8cff}
+@property --hd-pink{syntax:'<color>';inherits:true;initial-value:#f08ad8}
+@property --hd-amber{syntax:'<color>';inherits:true;initial-value:#f6c14d}
+@property --hd-green{syntax:'<color>';inherits:true;initial-value:#4fd6a0}
+@property --hd-red{syntax:'<color>';inherits:true;initial-value:#ff7a85}
+@property --hd-text{syntax:'<color>';inherits:true;initial-value:#f2f6ff}
+@property --hd-mute{syntax:'<color>';inherits:true;initial-value:#9db3d4}
+@property --hd-card{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.08)}
+@property --hd-surface{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.07)}
+@property --hd-line{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.12)}
+
+html{ transition:--bg .35s ease, --bg-elevated .35s ease, --bg-card .35s ease, --bg-card-hover .35s ease, --sidebar-bg .35s ease, --header-bg .35s ease, --line .35s ease, --line-soft .35s ease, --ivory .35s ease, --muted .35s ease, --muted-dim .35s ease, --teal .35s ease, --teal-bright .35s ease, --teal-soft .35s ease, --teal-active .35s ease, --teal-border .35s ease, --violet .35s ease, --blue .35s ease, --gold .35s ease, --tg-p1 .35s ease, --tg-p2 .35s ease, --tg-p3 .35s ease, --tg-p4 .35s ease, --tg-glow-a .35s ease, --tg-glow-b .35s ease, --tg-glow-c .35s ease, --tg-s1 .35s ease, --tg-s2 .35s ease, --tg-s3 .35s ease, --tg-card-a .35s ease, --tg-card-b .35s ease, --tg-card-border .35s ease, --tg-card-hi .35s ease, --tg-card-shadow .35s ease, --tg-sub .35s ease, --tg-top .35s ease, --tg-top-line .35s ease, --tg-ctl .35s ease, --tg-ctl-border .35s ease, --tg-cta-a .35s ease, --tg-cta-b .35s ease, --tg-cta-ink .35s ease, --tg-cta-glow .35s ease, --tg-modal-a .35s ease, --tg-modal-b .35s ease, --tg-kb-a .35s ease, --tg-kb-b .35s ease, --tg-kp-a .35s ease, --tg-kp-b .35s ease, --tg-kbase-a .35s ease, --tg-kbase-b .35s ease, --tg-scrim .35s ease; }
+.hd-root{ transition:--hd-blue .35s ease, --hd-cyan .35s ease, --hd-purple .35s ease, --hd-pink .35s ease, --hd-amber .35s ease, --hd-green .35s ease, --hd-red .35s ease, --hd-text .35s ease, --hd-mute .35s ease, --hd-card .35s ease, --hd-surface .35s ease, --hd-line .35s ease; }
+@media (prefers-reduced-motion:reduce){ html,.hd-root{ transition:none; } }
+
+/* ---- 1. Palettes ----------------------------------------------------- */
+html:not(.light-mode){
+  --bg:#16335c;
+  --bg-elevated:#1b3b66;
+  --bg-card:#1a3a64;
+  --bg-card-hover:#21497d;
+  --sidebar-bg:#153259;
+  --header-bg:#17355f;
+  --line:rgba(255,255,255,.14);
+  --line-soft:rgba(255,255,255,.08);
+  --ivory:#f2f6ff;
+  --muted:#9db3d4;
+  --muted-dim:#7d97bc;
+  --teal:#7fb2ff;
+  --teal-bright:#a9ccff;
+  --teal-soft:rgba(127,178,255,.14);
+  --teal-active:rgba(127,178,255,.20);
+  --teal-border:rgba(127,178,255,.32);
+  --violet:#9a8cff;
+  --blue:#5b9bff;
+  --gold:#f6c14d;
+  --tg-p1:#112a4d;
+  --tg-p2:#1a3b68;
+  --tg-p3:#21497d;
+  --tg-p4:#1a3f70;
+  --tg-glow-a:rgba(120,170,255,.30);
+  --tg-glow-b:rgba(70,110,220,.28);
+  --tg-glow-c:rgba(255,255,255,.04);
+  --tg-s1:#1d4075;
+  --tg-s2:#163461;
+  --tg-s3:#10274c;
+  --tg-card-a:rgba(255,255,255,.13);
+  --tg-card-b:rgba(255,255,255,.05);
+  --tg-card-border:rgba(255,255,255,.16);
+  --tg-card-hi:rgba(255,255,255,.22);
+  --tg-card-shadow:rgba(5,14,38,.55);
+  --tg-sub:rgba(255,255,255,.07);
+  --tg-top:rgba(16,38,76,.50);
+  --tg-top-line:rgba(255,255,255,.10);
+  --tg-ctl:rgba(255,255,255,.09);
+  --tg-ctl-border:rgba(255,255,255,.16);
+  --tg-cta-a:#f6c14d;
+  --tg-cta-b:#e8a826;
+  --tg-cta-ink:#3a2a05;
+  --tg-cta-glow:rgba(246,193,77,.45);
+  --tg-modal-a:rgba(27,59,102,.94);
+  --tg-modal-b:rgba(18,42,80,.92);
+  --tg-kb-a:#5a9bff;
+  --tg-kb-b:#2f62d0;
+  --tg-kp-a:#f08ad8;
+  --tg-kp-b:#b24fd0;
+  --tg-kbase-a:rgba(255,255,255,.12);
+  --tg-kbase-b:rgba(255,255,255,.05);
+  --tg-scrim:rgba(4,12,32,.55);
+  --tg-tint:34%;
+  color-scheme:dark;
+}
+
+html.light-mode{
+  --bg:#d9d5f5;
+  --bg-elevated:#f7f5ff;
+  --bg-card:#f4f2fe;
+  --bg-card-hover:#ebe8fc;
+  --sidebar-bg:#5a46b6;
+  --header-bg:#f1eefd;
+  --line:rgba(98,88,180,.20);
+  --line-soft:rgba(98,88,180,.12);
+  --ivory:#1f1b4d;
+  --muted:#5d5a86;
+  --muted-dim:#77749f;
+  --teal:#4a5fe0;
+  --teal-bright:#6f82fb;
+  --teal-soft:rgba(74,95,224,.12);
+  --teal-active:rgba(74,95,224,.18);
+  --teal-border:rgba(74,95,224,.32);
+  --violet:#7c4de0;
+  --blue:#4f6df5;
+  --gold:#c98a0b;
+  --tg-p1:#cfc2f3;
+  --tg-p2:#c2c7f5;
+  --tg-p3:#b3d9f7;
+  --tg-p4:#a3ebf6;
+  --tg-glow-a:rgba(120,230,250,.60);
+  --tg-glow-b:rgba(196,140,246,.50);
+  --tg-glow-c:rgba(255,255,255,.35);
+  --tg-s1:#7d52d3;
+  --tg-s2:#5f49bd;
+  --tg-s3:#443f9d;
+  --tg-card-a:rgba(255,255,255,.60);
+  --tg-card-b:rgba(255,255,255,.30);
+  --tg-card-border:rgba(255,255,255,.75);
+  --tg-card-hi:rgba(255,255,255,.90);
+  --tg-card-shadow:rgba(86,66,176,.35);
+  --tg-sub:rgba(255,255,255,.50);
+  --tg-top:rgba(255,255,255,.34);
+  --tg-top-line:rgba(255,255,255,.65);
+  --tg-ctl:rgba(255,255,255,.60);
+  --tg-ctl-border:rgba(255,255,255,.85);
+  --tg-cta-a:#6f86f7;
+  --tg-cta-b:#8a5cf0;
+  --tg-cta-ink:#ffffff;
+  --tg-cta-glow:rgba(110,90,240,.65);
+  --tg-modal-a:rgba(255,255,255,.86);
+  --tg-modal-b:rgba(236,232,255,.80);
+  --tg-kb-a:#7fb4ff;
+  --tg-kb-b:#4f7cf0;
+  --tg-kp-a:#f79be9;
+  --tg-kp-b:#c84fdc;
+  --tg-kbase-a:rgba(255,255,255,.75);
+  --tg-kbase-b:rgba(255,255,255,.30);
+  --tg-scrim:rgba(40,30,100,.35);
+  --tg-tint:20%;
+  color-scheme:light;
+}
+
+html:not(.light-mode) .hd-root{
+  --hd-blue:#5b9bff;
+  --hd-cyan:#5fd4f0;
+  --hd-purple:#9a8cff;
+  --hd-pink:#f08ad8;
+  --hd-amber:#f6c14d;
+  --hd-green:#4fd6a0;
+  --hd-red:#ff7a85;
+  --hd-text:#f2f6ff;
+  --hd-mute:#9db3d4;
+  --hd-card:rgba(255,255,255,.08);
+  --hd-surface:rgba(255,255,255,.07);
+  --hd-line:rgba(255,255,255,.12);
+}
+
+html.light-mode .hd-root{
+  --hd-blue:#4f6df5;
+  --hd-cyan:#139bc4;
+  --hd-purple:#7c4de0;
+  --hd-pink:#d63fbd;
+  --hd-amber:#c98a0b;
+  --hd-green:#0f9f6e;
+  --hd-red:#dc2626;
+  --hd-text:#1f1b4d;
+  --hd-mute:#5d5a86;
+  --hd-card:rgba(255,255,255,.55);
+  --hd-surface:rgba(255,255,255,.55);
+  --hd-line:rgba(98,88,180,.16);
+}
+
+/* module pages read these (premium.css) — dark values */
+html:not(.light-mode) .dash-shell{
+  --dash-ink:#f2f6ff; --dash-muted:#9db3d4; --dash-dim:#7d97bc;
+  --dash-bg:#16335c; --dash-bg-2:#153259; --dash-panel:#1a3a64; --dash-panel-2:#1e4170;
+  --dash-surface:#1f4373; --dash-surface-2:#25507f;
+  --dash-border:rgba(255,255,255,.14); --dash-border-strong:rgba(255,255,255,.24); --dash-teal:#7fb2ff;
+}
+html:not(.light-mode){ --card-grad-a:#1d3f6e; --card-grad-b:#1a3a64; --card-shadow:0 10px 30px -22px rgba(5,14,38,.8), inset 0 1px 0 rgba(255,255,255,.08); }
+
+/* ---- 2. Page background ---------------------------------------------- */
+html:root body{
+  background:linear-gradient(135deg,var(--tg-p1) 0%,var(--tg-p2) 34%,var(--tg-p3) 68%,var(--tg-p4) 100%) fixed !important;
+  color:var(--ivory) !important;
+}
+html:root body::before{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(520px 420px at 92% 12%, var(--tg-glow-a), transparent 65%),
+    radial-gradient(620px 460px at 4% 96%, var(--tg-glow-b), transparent 65%),
+    radial-gradient(480px 380px at 55% 60%, var(--tg-glow-c), transparent 70%);
+}
+html:root .dash-shell, html:root .dash-main,
+html:root .dash-shell.has-custom-bg, html:root .dash-shell.has-custom-bg .dash-main{ background:transparent !important; }
+
+/* ---- 3. Frosted glass surfaces ---------------------------------------- */
+html:root .dash-shell .dash-panel,
+html:root .dash-shell .hd-card,
+html:root .dash-shell .premium-stat,
+html:root .dash-shell .liquid-glass,
+html:root .dash-shell .dash-stat-card{
+  background:linear-gradient(145deg,var(--tg-card-a),var(--tg-card-b)) !important;
+  border:1px solid var(--tg-card-border) !important;
+  border-radius:20px;
+  box-shadow:0 14px 36px -18px var(--tg-card-shadow), inset 0 1px 0 var(--tg-card-hi) !important;
+  -webkit-backdrop-filter:blur(22px) saturate(165%);
+  backdrop-filter:blur(22px) saturate(165%);
+}
+html:root .dash-shell .dash-panel:hover,
+html:root .dash-shell .hd-card:hover,
+html:root .dash-shell .premium-stat:hover{
+  box-shadow:0 20px 44px -18px var(--tg-card-shadow), inset 0 1px 0 var(--tg-card-hi) !important;
+}
+html:root .dash-shell .hd-sub-card{
+  background:var(--tg-sub) !important; border:1px solid var(--tg-card-border) !important; border-radius:16px;
+}
+html:root .dash-table-wrap{ background:var(--tg-sub) !important; border-color:var(--tg-card-border) !important; border-radius:16px; }
+html:not(.light-mode) tbody tr:hover{ background:rgba(255,255,255,.06); }
+
+/* ---- 4. Sidebar: gradient, white text, blue active pill ---------------- */
+html:root .dash-shell .dash-sidebar{
+  background:linear-gradient(180deg,var(--tg-s1) 0%,var(--tg-s2) 52%,var(--tg-s3) 100%) !important;
+  border-right:1px solid rgba(255,255,255,.18);
+  box-shadow:18px 0 50px -30px rgba(10,20,70,.6);
+}
+html:root .dash-sidebar .dash-brand{ border-bottom-color:rgba(255,255,255,.2); }
+html:root .dash-sidebar .dash-brand-name{ color:#fff; }
+html:root .dash-sidebar .dash-brand-sub{ color:#d9defe; }
+html:root .dash-sidebar .dash-brand-mark{ background:rgba(255,255,255,.18); border-color:rgba(255,255,255,.35); color:#fff; }
+html:root .dash-sidebar .dash-nav-label{ color:rgba(255,255,255,.72); }
+html:root .dash-sidebar .dash-nav-item{ color:rgba(255,255,255,.86); }
+html:root .dash-sidebar .dash-nav-item:hover{ background:rgba(255,255,255,.14); color:#fff; }
+html:root .dash-sidebar .dash-nav-item.active{
+  background:linear-gradient(135deg,#6a92ff,#4f78f0); color:#fff;
+  box-shadow:0 10px 22px -10px rgba(30,60,190,.8), inset 0 1px 0 rgba(255,255,255,.4);
+}
+html:root .dash-sidebar .dash-nav-item svg{ color:#fff; }
+html:root .dash-shell .dash-sidebar .dash-emergency{ background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.28); box-shadow:none; }
+html:root .dash-shell .dash-sidebar .dash-emergency strong,
+html:root .dash-shell .dash-sidebar .dash-emergency-head,
+html:root .dash-shell .dash-sidebar .dash-emergency-name{ color:#fff; }
+html:root .dash-shell .dash-sidebar .dash-emergency-head svg{ color:#bfeaff; }
+html:root .dash-shell .dash-sidebar .dash-emergency small{ color:#b8f5dc; }
+html:root .dash-shell .dash-sidebar .dash-emergency small::before{ background:#7ef0c0; box-shadow:0 0 0 3px rgba(126,240,192,.25); }
+html:root .dash-sidebar .dash-foot{ border-top-color:rgba(255,255,255,.2); }
+html:root .dash-sidebar .dash-foot-name{ color:#fff; }
+html:root .dash-sidebar .dash-foot-role{ color:rgba(255,255,255,.72); }
+html:root .dash-sidebar .dash-foot-signout{ color:#fff; border-color:rgba(255,255,255,.35) !important; background:rgba(255,255,255,.1) !important; }
+html:root .dash-sidebar .dash-foot-avatar{ background:linear-gradient(145deg,#a78bfa,#6a92ff); }
+html:root .dash-sidebar::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.3); }
+
+/* ---- 5. Topbar + controls ---------------------------------------------- */
+html:root .dash-shell .dash-topbar{
+  background:var(--tg-top) !important; border-bottom:1px solid var(--tg-top-line);
+  -webkit-backdrop-filter:blur(22px) saturate(165%); backdrop-filter:blur(22px) saturate(165%);
+}
+html:root .dash-search{ background:var(--tg-ctl); border-color:var(--tg-ctl-border); border-radius:12px; }
+html:root .dash-search:focus-within{ border-color:var(--teal-border); box-shadow:0 0 0 3px var(--teal-soft); }
+html:root .dash-search input{ background:transparent !important; border:0 !important; color:var(--ivory) !important; }
+html:root .dash-search kbd{ background:var(--tg-ctl); border-color:var(--line); }
+html:root .dash-icon-btn{ background:var(--tg-ctl) !important; border:1px solid var(--tg-ctl-border) !important; color:var(--muted); }
+html:root .dash-icon-btn:hover{ color:var(--teal); }
+html:root .dash-hospital-selector, html:root .dash-live-clock{ background:var(--tg-ctl); border-color:var(--tg-ctl-border); box-shadow:none; }
+html:root .dash-live-clock-icon{ background:var(--teal-soft); color:var(--teal); }
+html:root .dash-overlay, html:root .dash-modal-backdrop{ background:var(--tg-scrim) !important; }
+html:not(.light-mode) .dash-bars i{ background:linear-gradient(180deg,rgba(169,204,255,.9),rgba(91,155,255,.55)); }
+html:not(.light-mode) .teal-stat .dash-stat-icon{ background:var(--teal-soft); }
+
+/* ---- 6. KPI tiles: blue + pink are bold, the rest are tinted glass ----- */
+html:root .hd-root .hd-kpi{
+  background:linear-gradient(145deg,color-mix(in srgb,var(--tone,var(--hd-blue)) var(--tg-tint),var(--tg-kbase-a)),var(--tg-kbase-b)) !important;
+}
+html:root .hd-root .hd-kpi[data-tone=blue]{
+  --hd-text:#fff; --hd-mute:rgba(255,255,255,.86);
+  background:linear-gradient(145deg,var(--tg-kb-a) 0%,var(--tg-kb-b) 100%) !important;
+  border:1px solid rgba(140,225,255,.85) !important;
+  box-shadow:0 0 0 1px rgba(120,225,255,.45), 0 18px 36px -14px rgba(40,90,230,.6), inset 0 1px 0 rgba(255,255,255,.5) !important;
+}
+html:root .hd-root .hd-kpi[data-tone=pink]{
+  --hd-text:#fff; --hd-mute:rgba(255,255,255,.88);
+  background:linear-gradient(145deg,var(--tg-kp-a) 0%,var(--tg-kp-b) 100%) !important;
+  border:1px solid rgba(255,255,255,.7) !important;
+  box-shadow:0 18px 36px -14px rgba(190,70,200,.55), inset 0 1px 0 rgba(255,255,255,.5) !important;
+}
+html:root .hd-root .hd-kpi[data-tone=blue] .hd-delta,
+html:root .hd-root .hd-kpi[data-tone=pink] .hd-delta{ background:rgba(255,255,255,.26); color:#fff; }
+html:root .dash-shell .premium-stat.teal-stat{ background:linear-gradient(145deg,color-mix(in srgb,var(--teal) var(--tg-tint),var(--tg-kbase-a)),var(--tg-kbase-b)) !important; }
+html:root .dash-shell .premium-stat.violet-stat{ background:linear-gradient(145deg,color-mix(in srgb,var(--violet) var(--tg-tint),var(--tg-kbase-a)),var(--tg-kbase-b)) !important; }
+html:root .dash-shell .premium-stat.gold-stat{ background:linear-gradient(145deg,color-mix(in srgb,var(--gold) var(--tg-tint),var(--tg-kbase-a)),var(--tg-kbase-b)) !important; }
+html:root .dash-shell .premium-stat.red-stat{ background:linear-gradient(145deg,color-mix(in srgb,var(--danger) var(--tg-tint),var(--tg-kbase-a)),var(--tg-kbase-b)) !important; }
+
+/* ---- 7. Buttons, inputs, modals ----------------------------------------- */
+html:root .btn-primary{
+  background:linear-gradient(135deg,var(--tg-cta-a) 0%,var(--tg-cta-b) 100%) !important; color:var(--tg-cta-ink) !important;
+  border:1px solid rgba(255,255,255,.45) !important;
+  box-shadow:0 10px 24px -10px var(--tg-cta-glow), inset 0 1px 0 rgba(255,255,255,.5) !important;
+}
+html:root .btn-ghost{ background:var(--tg-ctl); border-color:var(--tg-ctl-border); color:var(--muted); }
+html:root .btn-ghost:hover{ color:var(--ivory); border-color:var(--tg-card-hi); }
+html:root .appt-toggle.is-active{ color:var(--tg-cta-ink); background:linear-gradient(135deg,var(--tg-cta-a),var(--tg-cta-b)); border-color:transparent; }
+html:root .dash-chip-btn{ background:var(--tg-ctl); }
+html:root .field input, html:root .field select, html:root .field textarea,
+html:root .dash-field input, html:root .dash-field select, html:root .dash-field textarea{
+  background:var(--tg-ctl) !important; border:1px solid var(--tg-ctl-border) !important; color:var(--ivory) !important;
+}
+html:root .field input:focus, html:root .field select:focus{ border-color:var(--teal) !important; box-shadow:0 0 0 3px var(--teal-soft) !important; }
+html:root .dash-modal{
+  background:linear-gradient(150deg,var(--tg-modal-a),var(--tg-modal-b)) !important;
+  border:1px solid var(--tg-card-border) !important; border-radius:24px;
+  box-shadow:0 28px 80px -20px var(--tg-card-shadow), inset 0 1px 0 var(--tg-card-hi) !important;
+}
+
+/* ---- 8. Loader: cyan ring in both modes -------------------------------- */
+html:root .ll-loading{ --ll-b:#38c6ea; --ll-ring:#38c6ea; }
+
+/* ---- 9. No backdrop-filter support: near-solid cards -------------------- */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  html.light-mode .dash-shell .dash-panel, html.light-mode .dash-shell .hd-card, html.light-mode .dash-shell .premium-stat{ background:rgba(250,248,255,.92) !important; }
+  html:not(.light-mode) .dash-shell .dash-panel, html:not(.light-mode) .dash-shell .hd-card, html:not(.light-mode) .dash-shell .premium-stat{ background:rgba(26,58,100,.94) !important; }
+}
