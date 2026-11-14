@@ -52,6 +52,7 @@ export function useThemeMode() {
 export const PALETTE = {
  dark:  { blue: '#5b9bff', cyan: '#5fd4f0', purple: '#9a8cff', pink: '#f08ad8', amber: '#f6c14d', green: '#4fd6a0', grid: 'rgba(255,255,255,.10)', axis: '#9db3d4' },
    light: { blue: '#4f6df5', cyan: '#139bc4', purple: '#7c4de0', pink: '#d63fbd', amber: '#c98a0b', green: '#0f9f6e', grid: 'rgba(98,88,180,.18)', axis: '#5d5a86' },
+}
 export const nf = new Intl.NumberFormat('en-NG')
 export const money = (n) => '₦' + nf.format(Math.round(Number(n || 0)))
 
