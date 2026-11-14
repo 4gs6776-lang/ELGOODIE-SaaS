@@ -1,0 +1,186 @@
+/* =====================================================================
+   G-MedHub — LIGHT THEME: frosted glass on a lavender-to-cyan gradient
+   Matches the reference dashboard: purple gradient sidebar, blue active
+   pill, frosted white cards, pastel gradient KPI tiles.
+
+   Everything here is scoped to html.light-mode. Dark mode is untouched.
+   Import it AFTER glass.css and BEFORE mobile.css (see README).
+   ===================================================================== */
+
+/* ---- 1. Tokens ------------------------------------------------------
+   Same token names the app already uses, so every module follows. The
+   surface tokens stay opaque on purpose: some components (the donut hole,
+   popovers, toasts) paint with var(--bg-card) and must not be see-through.
+   The glass look comes from the explicit card rules in section 3. */
+html.light-mode{
+  color-scheme:light;
+  --bg:#d9d5f5; --bg-elevated:#f7f5ff; --bg-card:#f4f2fe; --bg-card-hover:#ebe8fc;
+  --sidebar-bg:#5a46b6; --header-bg:#f1eefd;
+  --line:rgba(98,88,180,.20); --line-soft:rgba(98,88,180,.12);
+  --ivory:#1f1b4d; --muted:#5d5a86; --muted-dim:#77749f;
+
+  /* accent moves from teal to the reference's blue-violet */
+  --teal:#4a5fe0; --teal-bright:#6f82fb;
+  --teal-soft:rgba(74,95,224,.12); --teal-active:rgba(74,95,224,.18); --teal-border:rgba(74,95,224,.32);
+  --violet:#7c4de0; --blue:#4f6df5; --gold:#c98a0b;
+}
+html.light-mode .hd-root{
+  --hd-blue:#4f6df5; --hd-cyan:#139bc4; --hd-purple:#7c4de0; --hd-pink:#d63fbd;
+  --hd-amber:#c98a0b; --hd-green:#0f9f6e; --hd-red:#dc2626;
+  --hd-text:#1f1b4d; --hd-mute:#5d5a86;
+  --hd-card:rgba(255,255,255,.55); --hd-surface:rgba(255,255,255,.55); --hd-line:rgba(98,88,180,.16);
+  --hd-shadow:0 14px 36px -18px rgba(86,66,176,.35);
+}
+
+/* ---- 2. Page background ------------------------------------------- */
+html.light-mode body{
+  background:linear-gradient(135deg,#cfc2f3 0%,#c2c7f5 34%,#b3d9f7 68%,#a3ebf6 100%) fixed !important;
+  color:var(--ivory) !important;
+}
+/* soft cyan glow top-right, violet glow bottom-left (like the reference) */
+html.light-mode body::before{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(520px 420px at 92% 12%, rgba(120,230,250,.60), transparent 65%),
+    radial-gradient(620px 460px at 4% 96%, rgba(196,140,246,.50), transparent 65%),
+    radial-gradient(480px 380px at 55% 60%, rgba(255,255,255,.35), transparent 70%);
+}
+html.light-mode .dash-shell,
+html.light-mode .dash-main,
+html.light-mode .dash-shell.has-custom-bg,
+html.light-mode .dash-shell.has-custom-bg .dash-main{ background:transparent !important; }
+
+/* ---- 3. Frosted glass surfaces ------------------------------------- */
+html.light-mode .dash-shell .dash-panel,
+html.light-mode .dash-shell .hd-card,
+html.light-mode .dash-shell .premium-stat,
+html.light-mode .dash-shell .liquid-glass,
+html.light-mode .dash-shell .dash-stat-card{
+  background:linear-gradient(145deg,rgba(255,255,255,.60),rgba(255,255,255,.30)) !important;
+  border:1px solid rgba(255,255,255,.75) !important;
+  border-radius:20px;
+  box-shadow:0 14px 36px -18px rgba(86,66,176,.35), inset 0 1px 0 rgba(255,255,255,.9) !important;
+  -webkit-backdrop-filter:blur(22px) saturate(165%);
+  backdrop-filter:blur(22px) saturate(165%);
+}
+html.light-mode .dash-shell .dash-panel:hover,
+html.light-mode .dash-shell .hd-card:hover,
+html.light-mode .dash-shell .premium-stat:hover{
+  border-color:rgba(255,255,255,.95) !important;
+  box-shadow:0 20px 44px -18px rgba(86,66,176,.45), inset 0 1px 0 #fff !important;
+}
+html.light-mode .dash-shell .hd-sub-card{
+  background:rgba(255,255,255,.50) !important;
+  border:1px solid rgba(255,255,255,.78) !important;
+  border-radius:16px;
+}
+html.light-mode .dash-table-wrap{ background:rgba(255,255,255,.38) !important; border-color:rgba(255,255,255,.7) !important; border-radius:16px; }
+
+/* ---- 4. Sidebar: purple gradient, white text, blue active pill ------- */
+html.light-mode .dash-shell .dash-sidebar{
+  background:linear-gradient(180deg,#7d52d3 0%,#5f49bd 52%,#443f9d 100%) !important;
+  border-right:1px solid rgba(255,255,255,.25);
+  box-shadow:18px 0 50px -30px rgba(70,50,160,.55);
+}
+html.light-mode .dash-sidebar .dash-brand{ border-bottom-color:rgba(255,255,255,.2); }
+html.light-mode .dash-sidebar .dash-brand-name{ color:#fff; }
+html.light-mode .dash-sidebar .dash-brand-sub{ color:#d9defe; }
+html.light-mode .dash-sidebar .dash-brand-mark{ background:rgba(255,255,255,.18); border-color:rgba(255,255,255,.35); color:#fff; }
+html.light-mode .dash-sidebar .dash-nav-label{ color:rgba(255,255,255,.72); }
+html.light-mode .dash-sidebar .dash-nav-item{ color:rgba(255,255,255,.86); }
+html.light-mode .dash-sidebar .dash-nav-item:hover{ background:rgba(255,255,255,.14); color:#fff; }
+html.light-mode .dash-sidebar .dash-nav-item.active{
+  background:linear-gradient(135deg,#6a92ff,#4f78f0); color:#fff;
+  box-shadow:0 10px 22px -10px rgba(40,70,200,.8), inset 0 1px 0 rgba(255,255,255,.4);
+}
+html.light-mode .dash-sidebar .dash-nav-item.active svg,
+html.light-mode .dash-sidebar .dash-nav-item svg{ color:#fff; }
+html.light-mode .dash-shell .dash-sidebar .dash-emergency{
+  background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.3); box-shadow:none;
+}
+html.light-mode .dash-shell .dash-sidebar .dash-emergency strong,
+html.light-mode .dash-shell .dash-sidebar .dash-emergency-head,
+html.light-mode .dash-shell .dash-sidebar .dash-emergency-name{ color:#fff; }
+html.light-mode .dash-shell .dash-sidebar .dash-emergency-head svg{ color:#bfeaff; }
+html.light-mode .dash-shell .dash-sidebar .dash-emergency small{ color:#b8f5dc; }
+html.light-mode .dash-shell .dash-sidebar .dash-emergency small::before{ background:#7ef0c0; box-shadow:0 0 0 3px rgba(126,240,192,.25); }
+html.light-mode .dash-sidebar .dash-foot{ border-top-color:rgba(255,255,255,.2); }
+html.light-mode .dash-sidebar .dash-foot-name{ color:#fff; }
+html.light-mode .dash-sidebar .dash-foot-role{ color:rgba(255,255,255,.72); }
+html.light-mode .dash-sidebar .dash-foot-signout{ color:#fff; border-color:rgba(255,255,255,.35) !important; background:rgba(255,255,255,.1) !important; }
+html.light-mode .dash-sidebar .dash-foot-avatar{ background:linear-gradient(145deg,#a78bfa,#6a92ff); }
+html.light-mode .dash-sidebar::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.3); }
+
+/* ---- 5. Topbar ----------------------------------------------------- */
+html.light-mode .dash-shell .dash-topbar{
+  background:rgba(255,255,255,.34) !important;
+  border-bottom:1px solid rgba(255,255,255,.65);
+  -webkit-backdrop-filter:blur(22px) saturate(165%);
+  backdrop-filter:blur(22px) saturate(165%);
+}
+html.light-mode .dash-search{ background:rgba(255,255,255,.6); border-color:rgba(255,255,255,.85); border-radius:12px; }
+html.light-mode .dash-search input{ background:transparent !important; border:0 !important; color:var(--ivory) !important; }
+html.light-mode .dash-search kbd{ background:rgba(255,255,255,.7); border-color:rgba(98,88,180,.18); }
+html.light-mode .dash-icon-btn{ background:rgba(255,255,255,.55) !important; border:1px solid rgba(255,255,255,.85) !important; color:var(--muted); }
+html.light-mode .dash-icon-btn:hover{ color:var(--teal); background:rgba(255,255,255,.8) !important; }
+html.light-mode .dash-hospital-selector{ background:rgba(255,255,255,.55); border-color:rgba(255,255,255,.85); }
+html.light-mode .dash-live-clock{ background:rgba(255,255,255,.55); border-color:rgba(255,255,255,.85); box-shadow:none; }
+html.light-mode .dash-live-clock-icon{ background:rgba(74,95,224,.14); color:var(--teal); }
+html.light-mode .dash-overlay{ background:rgba(40,30,100,.35); }
+
+/* ---- 6. KPI tiles: pastel gradients, blue + pink are the bold ones ---- */
+html.light-mode .hd-root .hd-kpi[data-tone=blue]{
+  --hd-text:#fff; --hd-mute:rgba(255,255,255,.86);
+  background:linear-gradient(145deg,#7fb4ff 0%,#5b8ff5 55%,#4f7cf0 100%) !important;
+  border:1px solid rgba(120,235,255,.9) !important;
+  box-shadow:0 0 0 1px rgba(120,235,255,.5), 0 18px 36px -14px rgba(60,110,240,.6), inset 0 1px 0 rgba(255,255,255,.55) !important;
+}
+html.light-mode .hd-root .hd-kpi[data-tone=pink]{
+  --hd-text:#fff; --hd-mute:rgba(255,255,255,.88);
+  background:linear-gradient(145deg,#f79be9 0%,#ea62d6 55%,#c84fdc 100%) !important;
+  border:1px solid rgba(255,255,255,.8) !important;
+  box-shadow:0 18px 36px -14px rgba(200,70,200,.55), inset 0 1px 0 rgba(255,255,255,.55) !important;
+}
+html.light-mode .hd-root .hd-kpi[data-tone=blue] .hd-delta,
+html.light-mode .hd-root .hd-kpi[data-tone=pink] .hd-delta{ background:rgba(255,255,255,.26); color:#fff; }
+html.light-mode .hd-root .hd-kpi[data-tone=purple]{ background:linear-gradient(145deg,rgba(220,208,255,.92),rgba(192,182,250,.62)) !important; }
+html.light-mode .hd-root .hd-kpi[data-tone=cyan]{   background:linear-gradient(145deg,rgba(176,242,253,.90),rgba(132,216,246,.58)) !important; }
+html.light-mode .hd-root .hd-kpi[data-tone=amber]{  background:linear-gradient(145deg,rgba(255,236,196,.92),rgba(255,214,160,.58)) !important; }
+html.light-mode .hd-root .hd-kpi[data-tone=green]{  background:linear-gradient(145deg,rgba(196,247,226,.92),rgba(150,230,200,.58)) !important; }
+html.light-mode .hd-root .hd-kpi[data-tone=red]{    background:linear-gradient(145deg,rgba(255,214,222,.92),rgba(252,176,196,.58)) !important; }
+html.light-mode .dash-shell .premium-stat.teal-stat{   background:linear-gradient(145deg,rgba(176,242,253,.85),rgba(255,255,255,.35)) !important; }
+html.light-mode .dash-shell .premium-stat.violet-stat{ background:linear-gradient(145deg,rgba(220,208,255,.90),rgba(255,255,255,.35)) !important; }
+html.light-mode .dash-shell .premium-stat.gold-stat{   background:linear-gradient(145deg,rgba(255,236,196,.90),rgba(255,255,255,.35)) !important; }
+html.light-mode .dash-shell .premium-stat.red-stat{    background:linear-gradient(145deg,rgba(255,214,222,.90),rgba(255,255,255,.35)) !important; }
+
+/* ---- 7. Buttons, inputs, modals ------------------------------------ */
+html.light-mode .btn-primary{
+  background:linear-gradient(135deg,#6f86f7 0%,#8a5cf0 100%) !important; color:#fff !important;
+  border:1px solid rgba(255,255,255,.55) !important;
+  box-shadow:0 10px 24px -10px rgba(110,90,240,.65), inset 0 1px 0 rgba(255,255,255,.5) !important;
+}
+html.light-mode .btn-ghost{ background:rgba(255,255,255,.5); border-color:rgba(255,255,255,.85); color:var(--muted); }
+html.light-mode .btn-ghost:hover{ color:var(--ivory); border-color:#fff; background:rgba(255,255,255,.75); }
+html.light-mode .appt-toggle.is-active{ color:#fff; background:linear-gradient(135deg,#6f86f7,#8a5cf0); border-color:transparent; }
+html.light-mode .field input, html.light-mode .field select, html.light-mode .field textarea,
+html.light-mode .dash-field input, html.light-mode .dash-field select, html.light-mode .dash-field textarea{
+  background:rgba(255,255,255,.62) !important; border:1px solid rgba(255,255,255,.88) !important; color:var(--ivory) !important;
+}
+html.light-mode .field input:focus, html.light-mode .field select:focus{ border-color:var(--teal) !important; box-shadow:0 0 0 3px rgba(74,95,224,.15) !important; }
+html.light-mode .dash-modal{
+  background:linear-gradient(150deg,rgba(255,255,255,.86),rgba(236,232,255,.80)) !important;
+  border:1px solid rgba(255,255,255,.92) !important; border-radius:24px;
+  box-shadow:0 28px 80px -20px rgba(70,50,160,.45), inset 0 1px 0 #fff !important;
+}
+html.light-mode .dash-modal-backdrop{ background:rgba(40,30,100,.35) !important; }
+
+/* ---- 8. Loader and sync chip: cyan ring like the reference ---------- */
+html.light-mode .ll-loading{ --ll-b:#38c6ea; --ll-ring:#38c6ea; }
+
+/* ---- 9. No backdrop-filter support: fall back to solid-ish cards ----- */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  html.light-mode .dash-shell .dash-panel,
+  html.light-mode .dash-shell .hd-card,
+  html.light-mode .dash-shell .premium-stat{ background:rgba(250,248,255,.92) !important; }
+  html.light-mode .dash-shell .dash-topbar{ background:rgba(246,243,255,.95) !important; }
+}
