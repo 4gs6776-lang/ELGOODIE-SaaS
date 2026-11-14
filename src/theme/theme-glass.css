@@ -42,7 +42,8 @@
 @property --tg-glow-c{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.04)}
 @property --tg-s1{syntax:'<color>';inherits:true;initial-value:#1d4075}
 @property --tg-s2{syntax:'<color>';inherits:true;initial-value:#163461}
-@property --tg-s3{syntax:'<color>';inherits:true;initial-value:#10274c}
+@property --tg-s3{syntax:'<color>';inherits:true;initial-value:#112b52}
+@property --tg-s4{syntax:'<color>';inherits:true;initial-value:#0a1d3a}
 @property --tg-card-a{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.13)}
 @property --tg-card-b{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.05)}
 @property --tg-card-border{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.16)}
@@ -79,7 +80,7 @@
 @property --hd-surface{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.07)}
 @property --hd-line{syntax:'<color>';inherits:true;initial-value:rgba(255,255,255,.12)}
 
-html{ transition:--bg .35s ease, --bg-elevated .35s ease, --bg-card .35s ease, --bg-card-hover .35s ease, --sidebar-bg .35s ease, --header-bg .35s ease, --line .35s ease, --line-soft .35s ease, --ivory .35s ease, --muted .35s ease, --muted-dim .35s ease, --teal .35s ease, --teal-bright .35s ease, --teal-soft .35s ease, --teal-active .35s ease, --teal-border .35s ease, --violet .35s ease, --blue .35s ease, --gold .35s ease, --tg-p1 .35s ease, --tg-p2 .35s ease, --tg-p3 .35s ease, --tg-p4 .35s ease, --tg-glow-a .35s ease, --tg-glow-b .35s ease, --tg-glow-c .35s ease, --tg-s1 .35s ease, --tg-s2 .35s ease, --tg-s3 .35s ease, --tg-card-a .35s ease, --tg-card-b .35s ease, --tg-card-border .35s ease, --tg-card-hi .35s ease, --tg-card-shadow .35s ease, --tg-sub .35s ease, --tg-top .35s ease, --tg-top-line .35s ease, --tg-ctl .35s ease, --tg-ctl-border .35s ease, --tg-cta-a .35s ease, --tg-cta-b .35s ease, --tg-cta-ink .35s ease, --tg-cta-glow .35s ease, --tg-modal-a .35s ease, --tg-modal-b .35s ease, --tg-kb-a .35s ease, --tg-kb-b .35s ease, --tg-kp-a .35s ease, --tg-kp-b .35s ease, --tg-kbase-a .35s ease, --tg-kbase-b .35s ease, --tg-scrim .35s ease; }
+html{ transition:--bg .35s ease, --bg-elevated .35s ease, --bg-card .35s ease, --bg-card-hover .35s ease, --sidebar-bg .35s ease, --header-bg .35s ease, --line .35s ease, --line-soft .35s ease, --ivory .35s ease, --muted .35s ease, --muted-dim .35s ease, --teal .35s ease, --teal-bright .35s ease, --teal-soft .35s ease, --teal-active .35s ease, --teal-border .35s ease, --violet .35s ease, --blue .35s ease, --gold .35s ease, --tg-p1 .35s ease, --tg-p2 .35s ease, --tg-p3 .35s ease, --tg-p4 .35s ease, --tg-glow-a .35s ease, --tg-glow-b .35s ease, --tg-glow-c .35s ease, --tg-s1 .35s ease, --tg-s2 .35s ease, --tg-s3 .35s ease, --tg-s4 .35s ease, --tg-card-a .35s ease, --tg-card-b .35s ease, --tg-card-border .35s ease, --tg-card-hi .35s ease, --tg-card-shadow .35s ease, --tg-sub .35s ease, --tg-top .35s ease, --tg-top-line .35s ease, --tg-ctl .35s ease, --tg-ctl-border .35s ease, --tg-cta-a .35s ease, --tg-cta-b .35s ease, --tg-cta-ink .35s ease, --tg-cta-glow .35s ease, --tg-modal-a .35s ease, --tg-modal-b .35s ease, --tg-kb-a .35s ease, --tg-kb-b .35s ease, --tg-kp-a .35s ease, --tg-kp-b .35s ease, --tg-kbase-a .35s ease, --tg-kbase-b .35s ease, --tg-scrim .35s ease; }
 .hd-root{ transition:--hd-blue .35s ease, --hd-cyan .35s ease, --hd-purple .35s ease, --hd-pink .35s ease, --hd-amber .35s ease, --hd-green .35s ease, --hd-red .35s ease, --hd-text .35s ease, --hd-mute .35s ease, --hd-card .35s ease, --hd-surface .35s ease, --hd-line .35s ease; }
 @media (prefers-reduced-motion:reduce){ html,.hd-root{ transition:none; } }
 
@@ -111,9 +112,10 @@ html:not(.light-mode){
   --tg-glow-a:rgba(120,170,255,.30);
   --tg-glow-b:rgba(70,110,220,.28);
   --tg-glow-c:rgba(255,255,255,.04);
-  --tg-s1:#1d4075;
-  --tg-s2:#163461;
-  --tg-s3:#10274c;
+  --tg-s1:#1f4579;
+  --tg-s2:#183a69;
+  --tg-s3:#112b52;
+  --tg-s4:#0a1d3a;
   --tg-card-a:rgba(255,255,255,.13);
   --tg-card-b:rgba(255,255,255,.05);
   --tg-card-border:rgba(255,255,255,.16);
@@ -142,12 +144,12 @@ html:not(.light-mode){
 }
 
 html.light-mode{
-  --bg:#d9d5f5;
-  --bg-elevated:#f7f5ff;
-  --bg-card:#f4f2fe;
-  --bg-card-hover:#ebe8fc;
+  --bg:#e9e4fb;
+  --bg-elevated:#fbfaff;
+  --bg-card:#f8f6ff;
+  --bg-card-hover:#efecfd;
   --sidebar-bg:#5a46b6;
-  --header-bg:#f1eefd;
+  --header-bg:#f6f4ff;
   --line:rgba(98,88,180,.20);
   --line-soft:rgba(98,88,180,.12);
   --ivory:#1f1b4d;
@@ -161,38 +163,39 @@ html.light-mode{
   --violet:#7c4de0;
   --blue:#4f6df5;
   --gold:#c98a0b;
-  --tg-p1:#cfc2f3;
-  --tg-p2:#c2c7f5;
-  --tg-p3:#b3d9f7;
-  --tg-p4:#a3ebf6;
-  --tg-glow-a:rgba(120,230,250,.60);
-  --tg-glow-b:rgba(196,140,246,.50);
-  --tg-glow-c:rgba(255,255,255,.35);
-  --tg-s1:#7d52d3;
-  --tg-s2:#5f49bd;
-  --tg-s3:#443f9d;
-  --tg-card-a:rgba(255,255,255,.60);
-  --tg-card-b:rgba(255,255,255,.30);
-  --tg-card-border:rgba(255,255,255,.75);
-  --tg-card-hi:rgba(255,255,255,.90);
-  --tg-card-shadow:rgba(86,66,176,.35);
-  --tg-sub:rgba(255,255,255,.50);
-  --tg-top:rgba(255,255,255,.34);
-  --tg-top-line:rgba(255,255,255,.65);
-  --tg-ctl:rgba(255,255,255,.60);
-  --tg-ctl-border:rgba(255,255,255,.85);
+  --tg-p1:#e8defc;
+  --tg-p2:#dbe3fd;
+  --tg-p3:#cdeafb;
+  --tg-p4:#c0f3fa;
+  --tg-glow-a:rgba(130,235,255,.70);
+  --tg-glow-b:rgba(215,170,255,.55);
+  --tg-glow-c:rgba(255,255,255,.55);
+  --tg-s1:#8b5cf0;
+  --tg-s2:#6b4fd8;
+  --tg-s3:#4c45b8;
+  --tg-s4:#2f3a8f;
+  --tg-card-a:rgba(255,255,255,.74);
+  --tg-card-b:rgba(255,255,255,.42);
+  --tg-card-border:rgba(255,255,255,.92);
+  --tg-card-hi:rgba(255,255,255,1);
+  --tg-card-shadow:rgba(110,90,200,.28);
+  --tg-sub:rgba(255,255,255,.62);
+  --tg-top:rgba(255,255,255,.52);
+  --tg-top-line:rgba(255,255,255,.8);
+  --tg-ctl:rgba(255,255,255,.75);
+  --tg-ctl-border:rgba(255,255,255,.95);
   --tg-cta-a:#6f86f7;
   --tg-cta-b:#8a5cf0;
   --tg-cta-ink:#ffffff;
   --tg-cta-glow:rgba(110,90,240,.65);
-  --tg-modal-a:rgba(255,255,255,.86);
-  --tg-modal-b:rgba(236,232,255,.80);
-  --tg-kb-a:#7fb4ff;
-  --tg-kb-b:#4f7cf0;
-  --tg-kp-a:#f79be9;
-  --tg-kp-b:#c84fdc;
-  --tg-kbase-a:rgba(255,255,255,.75);
-  --tg-kbase-b:rgba(255,255,255,.30);
+  --tg-modal-a:rgba(255,255,255,.92);
+  --tg-modal-b:rgba(244,241,255,.90);
+  --tg-kb-a:#8cbcff;
+  --tg-kb-b:#5b88f5;
+  --tg-kp-a:#fba8ee;
+  --tg-kp-b:#d85fe0;
+  --tg-kbase-a:rgba(255,255,255,.88);
+  --tg-kbase-b:rgba(255,255,255,.42);
   --tg-scrim:rgba(40,30,100,.35);
   --tg-tint:20%;
   color-scheme:light;
@@ -223,8 +226,8 @@ html.light-mode .hd-root{
   --hd-red:#dc2626;
   --hd-text:#1f1b4d;
   --hd-mute:#5d5a86;
-  --hd-card:rgba(255,255,255,.55);
-  --hd-surface:rgba(255,255,255,.55);
+  --hd-card:rgba(255,255,255,.65);
+  --hd-surface:rgba(255,255,255,.62);
   --hd-line:rgba(98,88,180,.16);
 }
 
@@ -278,7 +281,7 @@ html:not(.light-mode) tbody tr:hover{ background:rgba(255,255,255,.06); }
 
 /* ---- 4. Sidebar: gradient, white text, blue active pill ---------------- */
 html:root .dash-shell .dash-sidebar{
-  background:linear-gradient(180deg,var(--tg-s1) 0%,var(--tg-s2) 52%,var(--tg-s3) 100%) !important;
+  background:linear-gradient(180deg,var(--tg-s1) 0%,var(--tg-s2) 38%,var(--tg-s3) 72%,var(--tg-s4) 100%) !important;
   border-right:1px solid rgba(255,255,255,.18);
   box-shadow:18px 0 50px -30px rgba(10,20,70,.6);
 }
