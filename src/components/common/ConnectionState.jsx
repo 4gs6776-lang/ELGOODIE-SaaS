@@ -1,49 +1,38 @@
-import AppIcon from '../icons'
+import LiquidLoader from './LiquidLoader'
 
 // =====================================================================
 // GOODIE-MEDHUB — ConnectionState (Stage 1, requirement #14)
 //
-// ONE chip that tells the truth about connectivity + sync. It wraps the
-// status every useOfflineTable caller already has (isOnline, pendingCount)
-// plus the stuck-item count from getAllSyncErrors(), and maps it to the
-// approved state vocabulary:
+// The sync button in the dashboard topbar. Same props and same state
+// logic as before; the dot + icon is replaced by the liquid orb, which
+// changes colour with the state:
 //
-//   Online    → "Synced"    (online, nothing pending, no failures)
-//   Syncing   → "Syncing…"  (online, queue draining)
-//   Pending   → "Pending sync" (offline, unsent local changes — data is
-//                              safe locally, NOT on the server)
-//   Offline   → "Offline"   (offline, nothing unsaved)
-//   Failed    → "Sync failed (n)" (server refused items — needs attention)
+//   connecting / syncing → violet-teal, fast morph   "Syncing…"
+//   synced               → green, calm               "Synced"
+//   failed               → red, restless             "Sync failed (n)"
+//   pending (offline)    → gold                      "Pending sync (n)"
+//   offline              → grey                      "Offline"
 //
 // It never claims something is synchronized when it is not: any pending
 // or failed item forces the state away from "Synced".
 //
-// Optional onRetry() makes the chip clickable when items are stuck.
+// Optional onRetry() makes the chip a real <button> when items are stuck.
 // =====================================================================
 
 function deriveState({ isOnline, pendingCount, failedCount, connecting }) {
-  if (connecting) return { key: 'connecting', label: 'Connecting…', cls: 'is-syncing' }
+  if (connecting) return { key: 'connecting', label: 'Connecting…', cls: 'is-syncing', tone: 'loading' }
   if (!isOnline) {
     return pendingCount > 0
-      ? { key: 'pending', label: `Pending sync (${pendingCount})`, cls: 'is-pending' }
-      : { key: 'offline', label: 'Offline', cls: 'is-offline' }
+      ? { key: 'pending', label: `Pending sync (${pendingCount})`, cls: 'is-pending', tone: 'warning' }
+      : { key: 'offline', label: 'Offline', cls: 'is-offline', tone: 'muted' }
   }
   if (failedCount > 0) {
-    return { key: 'failed', label: `Sync failed (${failedCount})`, cls: 'is-failed' }
+    return { key: 'failed', label: `Sync failed (${failedCount})`, cls: 'is-failed', tone: 'danger' }
   }
   if (pendingCount > 0) {
-    return { key: 'syncing', label: 'Syncing…', cls: 'is-syncing' }
+    return { key: 'syncing', label: 'Syncing…', cls: 'is-syncing', tone: 'loading' }
   }
-  return { key: 'synced', label: 'Synced', cls: 'is-synced' }
-}
-
-const STATE_ICONS = {
-  connecting: 'connecting',
-  syncing: 'refresh',
-  pending: 'upload',
-  offline: 'wifiOff',
-  failed: 'alert',
-  synced: 'check',
+  return { key: 'synced', label: 'Synced', cls: 'is-synced', tone: 'success' }
 }
 
 const STATE_TITLES = {
@@ -65,25 +54,22 @@ export default function ConnectionState({
 }) {
   const state = deriveState({ isOnline, pendingCount, failedCount, connecting })
   const clickable = typeof onRetry === 'function' && (state.key === 'failed' || state.key === 'pending')
+  const Tag = clickable ? 'button' : 'span'
+  const tagProps = clickable
+    ? { type: 'button', onClick: onRetry, 'aria-label': `${state.label}. ${STATE_TITLES[state.key]}` }
+    : { role: 'status', 'aria-live': 'polite' }
 
   return (
-    <span
-      className={`conn-state ${state.cls}${clickable ? ' clickable' : ''}`}
+    <Tag
+      className={`conn-state conn-liquid ${state.cls}${clickable ? ' clickable' : ''}`}
       title={STATE_TITLES[state.key]}
-      role="status"
-      aria-live="polite"
-      onClick={clickable ? onRetry : undefined}
       style={style}
+      {...tagProps}
     >
-      <span className="conn-dot" aria-hidden="true" />
-      <AppIcon
-        name={STATE_ICONS[state.key]}
-        size={13}
-        spin={state.key === 'syncing' || state.key === 'connecting'}
-      />
+      <LiquidLoader tone={state.tone} size="xs" decorative />
       {/* .conn-label lets the phone topbar compress the harmless
-          "Synced" text to dot+icon only (see components.css). */}
+          "Synced" text to the orb only (see theme/components.css). */}
       <span className="conn-label">{state.label}</span>
-    </span>
+    </Tag>
   )
 }
