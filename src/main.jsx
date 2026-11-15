@@ -61,6 +61,13 @@ try {
   html.classList.toggle('light-mode', mode === 'light')
 } catch {}
 
+try {
+     const chromium = navigator.userAgentData?.brands?.some(b => b.brand === 'Chromium')
+     if (chromium && matchMedia('(pointer:fine)').matches) {
+       document.documentElement.classList.add('lg-refract')
+     }
+   } catch {}
+
 registerSW({ immediate: true })
 
 ReactDOM.createRoot(document.getElementById('root')).render(
