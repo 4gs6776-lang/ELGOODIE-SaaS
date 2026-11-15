@@ -1,0 +1,314 @@
+/* =====================================================================
+   Liquid glass cards
+   Clear glass, not frosted: almost no blur, a thin tint, a bright
+   bevelled edge that is lit from the top-left, and (Chromium desktop)
+   real refraction of whatever sits behind the card.
+
+   Page, sidebar and text colours are not touched.
+
+   Tint a card with any CSS colour:
+     style={{ '--glass-tint': '#ff8a78' }}
+     className="glass-card glass-mint"   (presets at the bottom)
+
+   Refraction needs the .lg-refract class on <html> (see README) and the
+   updated LiquidGlassSVG.jsx. Without it every card still gets the edge
+   lighting and a light blur.
+
+   Import after glass.css, before pagination.css / mobile.css.
+   ===================================================================== */
+
+html:root:root:root{ --lg-radius:26px; --lg-radius-sm:20px; --lg-gap:3px; }
+html:root:root:root:not(.light-mode){
+  --lg-top:rgba(255,255,255,.075); --lg-bot:rgba(255,255,255,.02);
+  --lg-glare:.16;
+  --lg-inner:rgba(255,255,255,.34); --lg-inner2:rgba(255,255,255,.16); --lg-lens:rgba(255,255,255,.07);
+  --lg-thick:rgba(255,255,255,.00);
+  --lg-hair:rgba(255,255,255,.07);
+  --lg-rim:.88; --lg-rim-mid:.07;
+  --lg-shadow:rgba(0,0,0,.58); --lg-shadow-2:rgba(0,0,0,.42);
+  --lg-tint-a:30%; --lg-tint-b:12%;
+}
+html:root:root:root.light-mode{
+  --lg-top:rgba(255,255,255,.26); --lg-bot:rgba(255,255,255,.08);
+  --lg-glare:.55;
+  --lg-inner:rgba(255,255,255,.95); --lg-inner2:rgba(255,255,255,.70); --lg-lens:rgba(255,255,255,.32);
+  --lg-thick:rgba(60,75,120,.13);
+  --lg-hair:rgba(60,75,120,.15);
+  --lg-rim:1; --lg-rim-mid:.10;
+  --lg-shadow:rgba(52,66,108,.32); --lg-shadow-2:rgba(52,66,108,.20);
+  --lg-tint-a:34%; --lg-tint-b:16%;
+}
+
+/* ---- surface -------------------------------------------------------- */
+html:root:root:root .card,
+html:root:root:root .dash-panel,
+html:root:root:root .owner-panel,
+html:root:root:root .auth-card,
+html:root:root:root .hd-card,
+html:root:root:root .liquid-glass,
+html:root:root:root .glass-card,
+html:root:root:root .dash-modal,
+html:root:root:root .dash-sync-panel,
+html:root:root:root .hd-root .hd-card{ --lg-r:var(--lg-radius); }
+html:root:root:root .dash-stat-card,
+html:root:root:root .premium-stat,
+html:root:root:root .owner-stat-card,
+html:root:root:root .hd-sub-card,
+html:root:root:root .hd-kpi,
+html:root:root:root .dash-date-card,
+html:root:root:root .hd-root .hd-sub-card,
+html:root:root:root .hd-root .hd-kpi,
+html:root:root:root [class$="-card"],
+html:root:root:root [class*="-card "]{ --lg-r:var(--lg-radius-sm); }
+html:root:root:root .card,
+html:root:root:root .dash-panel,
+html:root:root:root .owner-panel,
+html:root:root:root .auth-card,
+html:root:root:root .hd-card,
+html:root:root:root .liquid-glass,
+html:root:root:root .glass-card,
+html:root:root:root .dash-modal,
+html:root:root:root .dash-sync-panel,
+html:root:root:root .hd-root .hd-card,
+html:root:root:root .dash-stat-card,
+html:root:root:root .premium-stat,
+html:root:root:root .owner-stat-card,
+html:root:root:root .hd-sub-card,
+html:root:root:root .hd-kpi,
+html:root:root:root .dash-date-card,
+html:root:root:root .hd-root .hd-sub-card,
+html:root:root:root .hd-root .hd-kpi,
+html:root:root:root [class$="-card"],
+html:root:root:root [class*="-card "]{
+  position:relative;
+  isolation:isolate;
+  background:
+    linear-gradient(118deg,
+      rgba(255,255,255,var(--lg-glare)) 0%,
+      rgba(255,255,255,0) 30%,
+      rgba(255,255,255,0) 72%,
+      rgba(255,255,255,calc(var(--lg-glare) * .45)) 100%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--glass-tint, transparent) var(--lg-tint-a), transparent),
+      color-mix(in srgb, var(--glass-tint, transparent) var(--lg-tint-b), transparent)),
+    linear-gradient(180deg, var(--lg-top), var(--lg-bot)) !important;
+  border:0 !important;
+  border-radius:var(--lg-r);
+  -webkit-backdrop-filter:blur(3px) saturate(165%) brightness(1.05);
+  backdrop-filter:blur(3px) saturate(165%) brightness(1.05);
+  box-shadow:
+    0 0 0 1px var(--lg-hair),
+    0 22px 34px -14px var(--lg-shadow),
+    0 6px 12px -6px color-mix(in srgb, var(--glass-tint, var(--lg-shadow-2)) 35%, var(--lg-shadow-2)),
+    inset 3px 4px 8px -3px var(--lg-inner),
+    inset -3px -4px 8px -3px var(--lg-inner2),
+    inset 0 0 26px var(--lg-lens),
+    inset 0 -14px 22px -16px color-mix(in srgb, var(--glass-tint, var(--lg-thick)) 55%, var(--lg-thick)) !important;
+  transition:transform .3s cubic-bezier(.2,.8,.2,1), box-shadow .3s ease;
+}
+
+/* ---- outer rim: bright at top-left and bottom-right only ------------ */
+html:root:root:root .card::after,
+html:root:root:root .dash-panel::after,
+html:root:root:root .owner-panel::after,
+html:root:root:root .auth-card::after,
+html:root:root:root .hd-card::after,
+html:root:root:root .liquid-glass::after,
+html:root:root:root .glass-card::after,
+html:root:root:root .dash-modal::after,
+html:root:root:root .dash-sync-panel::after,
+html:root:root:root .hd-root .hd-card::after,
+html:root:root:root .dash-stat-card::after,
+html:root:root:root .premium-stat::after,
+html:root:root:root .owner-stat-card::after,
+html:root:root:root .hd-sub-card::after,
+html:root:root:root .hd-kpi::after,
+html:root:root:root .dash-date-card::after,
+html:root:root:root .hd-root .hd-sub-card::after,
+html:root:root:root .hd-root .hd-kpi::after,
+html:root:root:root [class$="-card"]::after,
+html:root:root:root [class*="-card "]::after{
+  content:"";
+  position:absolute !important; inset:0 !important; width:auto !important; height:auto !important; margin:0 !important;
+  z-index:2 !important; pointer-events:none; border:0 !important;
+  border-radius:inherit !important;
+  padding:1.5px !important;
+  background:linear-gradient(135deg,
+    rgba(255,255,255,var(--lg-rim)) 0%,
+    rgba(255,255,255,var(--lg-rim-mid)) 24%,
+    rgba(255,255,255,var(--lg-rim-mid)) 64%,
+    rgba(255,255,255,calc(var(--lg-rim) * .8)) 100%) !important;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor !important;
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite:exclude !important;
+  box-shadow:none !important; filter:none !important; opacity:1 !important; transition:none !important; animation:none !important;
+}
+
+/* ---- inner rim: the second edge of thick glass ---------------------- */
+html:root:root:root .card::before,
+html:root:root:root .dash-panel::before,
+html:root:root:root .owner-panel::before,
+html:root:root:root .auth-card::before,
+html:root:root:root .hd-card::before,
+html:root:root:root .liquid-glass::before,
+html:root:root:root .glass-card::before,
+html:root:root:root .dash-modal::before,
+html:root:root:root .dash-sync-panel::before,
+html:root:root:root .hd-root .hd-card::before,
+html:root:root:root .dash-stat-card::before,
+html:root:root:root .premium-stat::before,
+html:root:root:root .owner-stat-card::before,
+html:root:root:root .hd-sub-card::before,
+html:root:root:root .hd-kpi::before,
+html:root:root:root .dash-date-card::before,
+html:root:root:root .hd-root .hd-sub-card::before,
+html:root:root:root .hd-root .hd-kpi::before,
+html:root:root:root [class$="-card"]::before,
+html:root:root:root [class*="-card "]::before{
+  content:"";
+  position:absolute !important; inset:var(--lg-gap) !important; width:auto !important; height:auto !important; margin:0 !important;
+  z-index:1 !important; pointer-events:none; border:0 !important;
+  border-radius:calc(var(--lg-r) - var(--lg-gap)) !important;
+  padding:1px !important;
+  background:linear-gradient(135deg,
+    rgba(255,255,255,calc(var(--lg-rim) * .42)) 0%,
+    rgba(255,255,255,0) 38%,
+    rgba(255,255,255,0) 62%,
+    rgba(255,255,255,calc(var(--lg-rim) * .34)) 100%) !important;
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor !important;
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite:exclude !important;
+  box-shadow:none !important; filter:none !important; opacity:1 !important; animation:none !important;
+}
+
+/* ---- lift ------------------------------------------------------------ */
+@media (hover:hover){
+  html:root:root:root .card:hover,
+  html:root:root:root .dash-panel:hover,
+  html:root:root:root .owner-panel:hover,
+  html:root:root:root .auth-card:hover,
+  html:root:root:root .hd-card:hover,
+  html:root:root:root .liquid-glass:hover,
+  html:root:root:root .glass-card:hover,
+  html:root:root:root .dash-modal:hover,
+  html:root:root:root .dash-sync-panel:hover,
+  html:root:root:root .hd-root .hd-card:hover,
+  html:root:root:root .dash-stat-card:hover,
+  html:root:root:root .premium-stat:hover,
+  html:root:root:root .owner-stat-card:hover,
+  html:root:root:root .hd-sub-card:hover,
+  html:root:root:root .hd-kpi:hover,
+  html:root:root:root .dash-date-card:hover,
+  html:root:root:root .hd-root .hd-sub-card:hover,
+  html:root:root:root .hd-root .hd-kpi:hover,
+  html:root:root:root [class$="-card"]:hover,
+  html:root:root:root [class*="-card "]:hover{
+    transform:translateY(-3px);
+    box-shadow:
+    0 0 0 1px var(--lg-hair),
+    0 30px 44px -16px var(--lg-shadow),
+    0 10px 16px -6px color-mix(in srgb, var(--glass-tint, var(--lg-shadow-2)) 35%, var(--lg-shadow-2)),
+    inset 3px 4px 8px -3px var(--lg-inner),
+    inset -3px -4px 8px -3px var(--lg-inner2),
+    inset 0 0 26px var(--lg-lens),
+    inset 0 -14px 22px -16px color-mix(in srgb, var(--glass-tint, var(--lg-thick)) 55%, var(--lg-thick)) !important;
+  }
+}
+html:root:root:root .hd-kpi.is-link:active{ transform:translateY(-1px) scale(.992); }
+
+/* ---- modals keep more body so forms stay readable -------------------- */
+html:root:root:root:not(.light-mode) .dash-modal{ --lg-top:rgba(22,34,48,.80); --lg-bot:rgba(14,24,36,.84); }
+html:root:root:root.light-mode .dash-modal{ --lg-top:rgba(255,255,255,.84); --lg-bot:rgba(246,249,252,.78); }
+html:root:root:root .dash-modal{ -webkit-backdrop-filter:blur(14px) saturate(160%); backdrop-filter:blur(14px) saturate(160%); }
+html:root:root:root .dash-modal:hover{ transform:none; }
+
+/* ---- refraction (Chromium desktop, class set from main.jsx) ----------- */
+html.lg-refract:root:root:root :is(.card, .dash-panel, .owner-panel, .auth-card, .hd-card, .liquid-glass, .glass-card, .dash-modal, .dash-sync-panel, .hd-root .hd-card):not(.dash-modal){
+  -webkit-backdrop-filter:blur(1.5px) url(#lg-panel) saturate(165%) brightness(1.05);
+  backdrop-filter:blur(1.5px) url(#lg-panel) saturate(165%) brightness(1.05);
+}
+html.lg-refract:root:root:root :is(.dash-stat-card, .premium-stat, .owner-stat-card, .hd-sub-card, .hd-kpi, .dash-date-card, .hd-root .hd-sub-card, .hd-root .hd-kpi, [class$="-card"], [class*="-card "]){
+  -webkit-backdrop-filter:blur(1px) url(#lg-tile) saturate(165%) brightness(1.05);
+  backdrop-filter:blur(1px) url(#lg-tile) saturate(165%) brightness(1.05);
+}
+
+/* ---- tints (any colour: set --glass-tint) ----------------------------- */
+html:root:root:root .hd-kpi{ --glass-tint:var(--tone); }
+html:root:root:root .premium-stat.teal-stat{ --glass-tint:var(--teal); }
+html:root:root:root .premium-stat.violet-stat{ --glass-tint:var(--violet); }
+html:root:root:root .premium-stat.gold-stat{ --glass-tint:var(--gold); }
+html:root:root:root .premium-stat.red-stat{ --glass-tint:var(--danger); }
+html:root:root:root .glass-lavender{ --glass-tint:#9b8cf0; }
+html:root:root:root .glass-mint{ --glass-tint:#5fd0a0; }
+html:root:root:root .glass-coral{ --glass-tint:#ff8a78; }
+html:root:root:root .glass-sky{ --glass-tint:#5db7f5; }
+html:root:root:root .glass-amber{ --glass-tint:#f2b84b; }
+html:root:root:root .glass-rose{ --glass-tint:#f06fa6; }
+html:root:root:root .glass-none{ --glass-tint:transparent; }
+
+/* ---- optional: soft light behind the cards (add class lg-ambient to <html>)
+   Glass only has something to refract when something is behind it. */
+html.lg-ambient:not(.light-mode) body::before{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(55vw 45vh at 88% 8%, rgba(255,255,255,.09), transparent 62%),
+    linear-gradient(118deg, transparent 38%, rgba(255,255,255,.045) 52%, transparent 68%);
+}
+html.lg-ambient.light-mode body::before{
+  content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    linear-gradient(118deg, rgba(90,105,150,.10) 0%, transparent 34%, rgba(255,255,255,.65) 58%, transparent 82%);
+}
+
+/* ---- small screens, fallbacks, reduced motion ------------------------- */
+@media (max-width:700px){
+  html:root:root:root{ --lg-radius:22px; --lg-radius-sm:18px; --lg-gap:2.5px; }
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  html:root:root:root:not(.light-mode){ --lg-top:rgba(40,52,66,.90); --lg-bot:rgba(26,36,48,.92); }
+  html:root:root:root.light-mode{ --lg-top:rgba(255,255,255,.90); --lg-bot:rgba(246,249,252,.88); }
+}
+@media (prefers-reduced-motion:reduce){
+  html:root:root:root .card,
+html:root:root:root .dash-panel,
+html:root:root:root .owner-panel,
+html:root:root:root .auth-card,
+html:root:root:root .hd-card,
+html:root:root:root .liquid-glass,
+html:root:root:root .glass-card,
+html:root:root:root .dash-modal,
+html:root:root:root .dash-sync-panel,
+html:root:root:root .hd-root .hd-card,
+html:root:root:root .dash-stat-card,
+html:root:root:root .premium-stat,
+html:root:root:root .owner-stat-card,
+html:root:root:root .hd-sub-card,
+html:root:root:root .hd-kpi,
+html:root:root:root .dash-date-card,
+html:root:root:root .hd-root .hd-sub-card,
+html:root:root:root .hd-root .hd-kpi,
+html:root:root:root [class$="-card"],
+html:root:root:root [class*="-card "]{ transition:none; }
+  html:root:root:root .card:hover,
+html:root:root:root .dash-panel:hover,
+html:root:root:root .owner-panel:hover,
+html:root:root:root .auth-card:hover,
+html:root:root:root .hd-card:hover,
+html:root:root:root .liquid-glass:hover,
+html:root:root:root .glass-card:hover,
+html:root:root:root .dash-modal:hover,
+html:root:root:root .dash-sync-panel:hover,
+html:root:root:root .hd-root .hd-card:hover,
+html:root:root:root .dash-stat-card:hover,
+html:root:root:root .premium-stat:hover,
+html:root:root:root .owner-stat-card:hover,
+html:root:root:root .hd-sub-card:hover,
+html:root:root:root .hd-kpi:hover,
+html:root:root:root .dash-date-card:hover,
+html:root:root:root .hd-root .hd-sub-card:hover,
+html:root:root:root .hd-root .hd-kpi:hover,
+html:root:root:root [class$="-card"]:hover,
+html:root:root:root [class*="-card "]:hover{ transform:none; }
+}
