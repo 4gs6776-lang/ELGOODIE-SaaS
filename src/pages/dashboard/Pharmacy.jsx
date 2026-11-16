@@ -38,7 +38,11 @@ export default function Pharmacy() {
   const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
 
   // prescriptions: needed on queue + requests tabs
-  const { records: prescriptions, updateRecord: updatePrescriptions, syncFromServer: syncPrescriptions } = useLazyTable('prescriptions', hospital?.id, { enabled: pharmTab === 'queue' || pharmTab === 'requests' })
+  // NOTE: aliased to `updatePrescription` (singular) to match the
+  // call sites at handleCancelRx (line 181) and handleDispense (line
+  // 369). The other hooks in this file use singular too
+  // (updatePharmRequest), so this keeps the convention consistent.
+  const { records: prescriptions, updateRecord: updatePrescription, syncFromServer: syncPrescriptions } = useLazyTable('prescriptions', hospital?.id, { enabled: pharmTab === 'queue' || pharmTab === 'requests' })
   // pharmRequests: needed on requests tab
   const { records: pharmRequests, updateRecord: updatePharmRequest } = useLazyTable('pharmacy_requests', hospital?.id, { enabled: pharmTab === 'requests' })
   // pharmacySales: needed on sales tab only
