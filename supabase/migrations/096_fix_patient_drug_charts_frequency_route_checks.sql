@@ -1,0 +1,120 @@
+-- =====================================================================
+-- GOODIE-MEDHUB — 096_fix_patient_drug_charts_frequency_route_checks.sql
+--
+-- Drops TWO restrictive CHECK constraints on patient_drug_charts that
+-- were rejecting values the app legitimately writes.
+--
+-- HISTORY
+--   v1 of this migration (096_fix_patient_drug_charts_frequency_check.sql)
+--   only dropped the frequency check. After the user ran 091 + 096-v1,
+--   the stuck records STILL failed. We asked for the actual constraint
+--   definitions on the live DB; the user ran:
+--
+--     select conname, pg_get_constraintdef(oid) as definition
+--       from pg_constraint
+--      where conrelid = 'public.patient_drug_charts'::regclass
+--        and contype = 'c'
+--      order by conname;
+--
+--   and got back THREE constraints:
+--
+--     patient_drug_charts_frequency_check
+--       CHECK ((frequency = ANY (ARRAY['Stat','OD','BD','TDS','QDS','PRN'])))
+--     patient_drug_charts_route_check
+--       CHECK ((route = ANY (ARRAY['Oral','IV','IM','SC','Topical'])))
+--     patient_drug_charts_status_check
+--       CHECK ((status = ANY (ARRAY['Pending','Given','Missed','Discontinued'])))
+--
+--   This v2 migration drops the first TWO. The third (`status_check`)
+--   is left alone — see "Why we leave the status check alone" below.
+--
+-- WHY EACH NEEDS TO GO
+--
+--   1. patient_drug_charts_frequency_check
+--      Constraint allows: 'Stat','OD','BD','TDS','QDS','PRN'
+--      App writes (from FREQUENCY_OPTIONS in clinicalData.js, used by
+--      the DoctorWorkbench form):
+--        'Once daily (OD)', 'Twice daily (BD)', 'Three times daily (TDS)',
+--        'Four times daily (QDS)', 'Every 4 hours', 'Every 6 hours',
+--        'Every 8 hours', 'Every 12 hours', 'At bedtime (Nocte)',
+--        'When required (PRN)', 'Before meals', 'After meals',
+--        'STAT', 'Weekly', 'Custom'
+--      PLUS arbitrary free text from the "Custom Freq" input
+--      (DoctorWorkbench.jsx:1103, placeholder="e.g. Every other day").
+--      Mismatch: descriptive form vs. short code. Every chart entry
+--      fails 23514 check_violation.
+--
+--   2. patient_drug_charts_route_check
+--      Constraint allows: 'Oral','IV','IM','SC','Topical'
+--      App writes (from ROUTE_OPTIONS in clinicalData.js):
+--        'Oral','IV','IM','SC','Topical','Inhalation','Eye','Ear',
+--        'Nasal','Rectal','Vaginal','Sublingual','Other'
+--      Mismatch: 8 of 13 valid routes are rejected. Any prescription
+--      for eye drops, ear drops, nasal spray, inhaler, suppository,
+--      etc. fails 23514 check_violation on the route column.
+--      Same class of bug as #1, just on a different column.
+--
+-- WHY WE LEAVE THE status CHECK ALONE
+--   The constraint is on a column named `status` (capitalized enum:
+--   'Pending','Given','Missed','Discontinued'). The app does NOT
+--   write to `status` — it writes to a SEPARATE column named
+--   `chart_status` (lowercase: 'pending','given'), which migration 091
+--   adds. The `status` column is either:
+--     (a) a legacy column from an earlier schema that the app has
+--         migrated away from, or
+--     (b) populated by a trigger / RPC we can't see.
+--   Either way, since the app never INSERTs or UPDATEs `status` on
+--   patient_drug_charts, the constraint can never fire on app writes.
+--   Leaving it avoids touching data we don't understand.
+--
+--   IF a future investigation shows the app SHOULD be writing to
+--   `status` (or if you want to unify status + chart_status), drop
+--   the status check then. For now: don't touch what isn't broken.
+--
+-- WHAT THIS MIGRATION DOES
+--   Drops both constraints by name, IF EXISTS (idempotent). Does NOT
+--   recreate them — the same reasoning as v1 applies: the doctor's
+--   "Custom Freq" field is explicitly free text, so any enum would be
+--   wrong the moment a clinician types something new. Validation
+--   belongs in the form (dropdown + explicit custom override), not
+--   the DB. prescriptions.frequency and prescriptions.route are both
+--   plain text with no CHECK constraint; patient_drug_charts should
+--   accept whatever prescriptions accepts.
+--
+-- SAFE TO RE-RUN. Idempotent.
+-- =====================================================================
+
+-- 1. Drop the restrictive frequency CHECK.
+--    Was: CHECK ((frequency = ANY (ARRAY['Stat','OD','BD','TDS','QDS','PRN'])))
+--    App writes descriptive forms like 'Once daily (OD)' plus free text.
+alter table public.patient_drug_charts
+  drop constraint if exists patient_drug_charts_frequency_check;
+
+-- 2. Drop the restrictive route CHECK.
+--    Was: CHECK ((route = ANY (ARRAY['Oral','IV','IM','SC','Topical'])))
+--    App writes 13 routes incl. 'Inhalation','Eye','Ear','Nasal',
+--    'Rectal','Vaginal','Sublingual','Other'.
+alter table public.patient_drug_charts
+  drop constraint if exists patient_drug_charts_route_check;
+
+-- 3. (Deliberately NOT dropped) patient_drug_charts_status_check
+--    CHECK ((status = ANY (ARRAY['Pending','Given','Missed','Discontinued'])))
+--    The app writes to `chart_status` (lowercase), not `status`. This
+--    constraint never fires on app writes. Leave it alone.
+
+-- ---------------------------------------------------------------------
+-- VERIFY (run in the Supabase SQL editor after applying):
+--
+--   -- Should return ONLY the status_check now (frequency + route gone):
+--   select conname, pg_get_constraintdef(oid) as definition
+--     from pg_constraint
+--    where conrelid = 'public.patient_drug_charts'::regclass
+--      and contype = 'c'
+--    order by conname;
+--
+-- AFTER APPLYING:
+--   1. In the app, open the QA Sync panel and click Retry. The stuck
+--      patient_drug_charts rows should now flush.
+--   2. From now on, every new drug chart entry syncs regardless of
+--      which clinical frequency phrasing or route the doctor chose.
+-- ---------------------------------------------------------------------
