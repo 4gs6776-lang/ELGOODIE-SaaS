@@ -233,6 +233,19 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
     if (!form.drug_name.trim()) { showToast('Medication name is required'); return }
     setSaving(true)
     try {
+      // chart_status logic:
+      //   - When a prescription IS linked, this chart entry represents a
+      //     pending medication the nurse will administer later — keep
+      //     'pending' so recordMedicationAdministration() (which looks
+      //     up chart rows by prescription_id) can flip it to 'given'.
+      //   - When a nurse manually adds a chart entry WITHOUT a linked
+      //     prescription (e.g. an OTC med given on the ward with no
+      //     doctor's order), there is no prescription for the workflow
+      //     to match against — so we set 'given' now, otherwise the row
+      //     would stay 'pending' forever (the orphan-row bug).
+      //     See: NULL prescription_id rows in patient_drug_charts that
+      //     the QA Sync panel reports as stuck.
+      const hasRx = Boolean(form.prescription_id)
       const payload = {
         patient_id: patient.id,
         entry_date: form.entry_date || null,
@@ -244,6 +257,7 @@ export default function MedicationChart({ patient, entries, admissionRequest, la
         frequency: form.frequency || null,
         sign: form.sign || null,
         prescription_id: form.prescription_id || null,
+        chart_status: hasRx ? 'pending' : 'given',
         created_by: profile?.id || null,
       }
       if (form.id) {
