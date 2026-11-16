@@ -696,6 +696,27 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
   }, [tableName, hospitalId])
 
   useEffect(() => {
+    // Track the last time we pulled from Supabase for this table. Used
+    // by the cache-hit background pull and the visibilitychange handler
+    // below so we never hammer the server (min 5s between pulls).
+    let lastPullAt = 0
+    const MIN_PULL_INTERVAL_MS = 5000
+
+    async function pullFromServer() {
+      const now = Date.now()
+      if (now - lastPullAt < MIN_PULL_INTERVAL_MS) return
+      lastPullAt = now
+      try {
+        const db = await openDB()
+        await pullFromSupabase(db, tableName, hospitalId)
+        // Mark cached so concurrent mounts skip the pull (the background
+        // pull above just refreshed IndexedDB; they will read it).
+        setCachedTable(tableName, hospitalId, [])
+      } catch (err) {
+        console.error('Error opening DB for pull:', err)
+      }
+    }
+
     async function initialLoad() {
       // ---- Check global cache first ----
       // If another component already loaded this table, use the cached
@@ -703,22 +724,31 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
       // The cache is invalidated on any local write or realtime update.
       const cached = getCachedTable(tableName, hospitalId)
       if (cached) {
-        // Cache hit — just read from IndexedDB (which is already populated)
+        // Cache hit — read from IndexedDB immediately so the UI shows
+        // data without waiting for a network round-trip.
         await loadLocalRecords()
-        // Subscribe to cache invalidation so we re-read when other
-        // components write to the same table
+
+        // FIX (option C): a cache hit used to `return` here, meaning
+        // the hook NEVER re-pulled from Supabase until the 30-minute
+        // cache TTL expired. If realtime silently failed (table not in
+        // the supabase_realtime publication, network blip, cold start),
+        // the user only ever saw stale data — F5 was the only way out.
+        //
+        // Now we kick off a background pull. The user sees the cached
+        // data instantly, and any new rows arrive a second later via
+        // notifyLocalChange() -> loadLocalRecords(). Throttled to once
+        // per 5s so concurrent mounts of the same table don't stack.
+        if (hospitalId && navigator.onLine) {
+          pullFromServer()
+        }
         return
       }
 
       if (hospitalId) {
-        try {
-          const db = await openDB()
-          await pullFromSupabase(db, tableName, hospitalId)
-          // Mark this table as cached so other components skip the pull
-          setCachedTable(tableName, hospitalId, [])
-        } catch (err) {
-          console.error('Error opening DB for initial pull:', err)
-        }
+        // Cache miss — this is the first mount for this table. Pull
+        // from Supabase, then mark cached so later mounts skip the
+        // pull and just read IndexedDB.
+        await pullFromServer()
       }
       await loadLocalRecords()
     }
@@ -761,6 +791,31 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
     const handleOffline = () => setIsOnline(false)
 
+    // FIX (option B): when the user tabs away from the browser, the OS
+    // throttles setInterval to ~once/min (and hard-pauses it on mobile).
+    // When they come back, there was no "you're back, re-pull now"
+    // handler — they had to wait for the next 30s poll tick or hit F5.
+    // Now: the moment the tab becomes visible again, we re-pull this
+    // table from Supabase (throttled by MIN_PULL_INTERVAL_MS so rapid
+    // tab-switching doesn't stack requests). This is the single most
+    // impactful fix for "I have to refresh to see the doctor's changes"
+    // because most clinical workflows involve tab-switching.
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && hospitalId && navigator.onLine) {
+        // Reuse the throttled pull helper defined above in this effect.
+        pullFromServer().then(() => loadLocalRecords())
+      }
+    }
+
+    // FIX (option B): same idea for window focus — covers the case
+    // where the tab is visible but the user was in another app
+    // (e.g. an email client) and just clicked back into the browser.
+    const handleFocus = () => {
+      if (hospitalId && navigator.onLine) {
+        pullFromServer().then(() => loadLocalRecords())
+      }
+    }
+
     // FIX: listen for 'gmh:session-cleared' and 'gmh:force-resync' so
     // the hook resets its React state when forceResync() is called or
     // the user logs out. Without this, React keeps stale records in
@@ -791,6 +846,8 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     window.addEventListener('offline', handleOffline)
     window.addEventListener('gmh:session-cleared', handleSessionCleared)
     window.addEventListener('gmh:force-resync', handleForceResync)
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', handleFocus)
 
     return () => {
       clearInterval(retryTimer)
@@ -798,6 +855,8 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
       window.removeEventListener('offline', handleOffline)
       window.removeEventListener('gmh:session-cleared', handleSessionCleared)
       window.removeEventListener('gmh:force-resync', handleForceResync)
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', handleFocus)
       // Unsubscribe from cross-component cache invalidation
       if (unsubscribe) unsubscribe()
     }
