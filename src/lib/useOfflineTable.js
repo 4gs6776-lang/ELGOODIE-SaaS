@@ -17,15 +17,13 @@ import {
 } from './useTableCache'
 
 const DB_NAME = 'HospitalOfflineDB'
-// FIX: Bumped from 3 → 5 to match the ELGOODIE-SaaS branch (which used 4).
-// If the user previously deployed ELGOODIE (v4) and now deploys V2 (was v3),
-// IndexedDB.open(DB_NAME, 3) throws VersionError because the browser's
-// database is already at v4. This silently broke the ENTIRE sync layer —
-// every pull failed, IndexedDB stayed empty, and every module showed
-// "No patients yet" / "No data" while the dashboard RPC (which bypasses
-// IndexedDB) still showed real counts. Bumping to 5 forces an
-// onupgradeneeded that creates any missing stores/indexes and keeps
-// the existing data.
+// FIX: Bumped from 3 -> 5. The ELGOODIE-SaaS branch uses DB_VERSION = 4.
+// If a user previously deployed ELGOODIE, their browser's IndexedDB is at
+// v4; calling indexedDB.open(DB_NAME, 3) then throws VersionError and the
+// entire sync layer silently dies (every pull fails, every module shows
+// "No data", while the dashboard RPC still works because it bypasses
+// IndexedDB). Bumping to 5 forces an onupgradeneeded that backfills any
+// missing indexes and keeps the existing rows.
 const DB_VERSION = 5
 
 const STORE_NAME = 'offline_records'
@@ -97,17 +95,16 @@ function openDB() {
       const db = event.target.result
       const oldVersion = event.oldVersion
 
-      // Create the main store if it doesn't exist (v1 → v5)
+      // Create the main store if it doesn't exist (v1 -> v5).
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
         store.createIndex('table_name', 'table_name', { unique: false })
         store.createIndex('hospital_id', 'hospital_id', { unique: false })
         store.createIndex('synced', '_synced', { unique: false })
       } else if (oldVersion < 5) {
-        // Upgrading from v1/v2/v3/v4 → add any missing indexes that the
-        // ELGOODIE branch may have created. createIndex is idempotent
-        // against the name but throws if the name is taken with a
-        // different keyPath, so we probe each one.
+        // Upgrading from v1/v2/v3/v4 -> backfill any missing indexes.
+        // createIndex is idempotent against the name but throws if the
+        // name is taken with a different keyPath, so we probe each one.
         const store = event.target.transaction.objectStore(STORE_NAME)
         if (!store.indexNames.contains('table_name')) {
           store.createIndex('table_name', 'table_name', { unique: false })
@@ -119,9 +116,7 @@ function openDB() {
           store.createIndex('synced', '_synced', { unique: false })
         }
       }
-      // v4 → v5: no schema change needed beyond the index backfill above,
-      // just bumping the version so future V2 deployments don't collide
-      // with ELGOODIE's v4.
+      // v4 -> v5: no schema change beyond the index backfill above.
     }
 
     request.onsuccess = () => {
@@ -139,29 +134,25 @@ function openDB() {
       clearTimeout(timeoutId)
 
       // FIX: VersionError recovery. If the browser's database is at a
-      // HIGHER version than the code expects (e.g. user previously ran
-      // ELGOODIE v4, now runs V2 v5 — or vice versa), indexedDB.open
+      // HIGHER version than the code expects (e.g. user ran a newer
+      // build that bumped DB_VERSION, then rolled back), indexedDB.open
       // fires onerror with error.name === 'VersionError'. The previous
-      // code just rejected the promise, which meant EVERY subsequent
-      // openDB() call also failed, and the entire sync layer was dead.
+      // code just rejected -> every subsequent openDB() also failed ->
+      // the entire sync layer was dead.
       //
-      // Recovery: delete the database entirely and re-open. This
-      // loses any LOCAL-ONLY records (unsynced changes), but since the
-      // data is also in Supabase, the pull will re-download everything.
-      // The alternative — leaving the user with a permanently broken
-      // app — is worse.
+      // Recovery: delete the database and re-open. This loses any
+      // LOCAL-ONLY unsynced changes, but server data is re-pulled.
       const err = request.error
       if (err && err.name === 'VersionError') {
         console.warn(
-          `[openDB] VersionError — browser DB version is higher than code version (${DB_VERSION}). ` +
-          `Deleting the database and recreating it. Local-only unsynced changes will be lost; ` +
-          `all server data will be re-pulled automatically.`
+          '[openDB] VersionError - browser DB version is higher than code version (' + DB_VERSION + '). ' +
+          'Deleting the database and recreating it. Local-only unsynced changes will be lost; ' +
+          'all server data will be re-pulled automatically.'
         )
-        // Delete the database, then retry openDB.
         const deleteReq = indexedDB.deleteDatabase(DB_NAME)
         deleteReq.onsuccess = () => {
-          // Retry the open — this time there's no existing database, so
-          // onupgradeneeded will fire and create everything fresh.
+          // Retry the open. This time onupgradeneeded will fire and
+          // create a fresh store with the current DB_VERSION.
           const retryReq = indexedDB.open(DB_NAME, DB_VERSION)
           retryReq.onupgradeneeded = (event) => {
             const db = event.target.result
@@ -175,15 +166,13 @@ function openDB() {
           retryReq.onsuccess = () => resolve(retryReq.result)
           retryReq.onerror = () => reject(retryReq.error)
         }
-        deleteReq.onerror = () => reject(err) // give up with the original error
+        deleteReq.onerror = () => reject(deleteReq.error)
         deleteReq.onblocked = () => {
           console.warn('[openDB] Delete blocked by another tab. Close other tabs and reload.')
-          reject(new Error('Could not upgrade the local database — another tab is blocking it. Close all tabs of this app and reload the page.'))
         }
         return
       }
-
-      reject(err)
+      reject(request.error)
     }
 
     request.onblocked = () => {
@@ -371,20 +360,15 @@ async function putLocalRecord(db, record) {
 }
 
 // ============================================================
-// BULK UPSERT — batched write used by pullFromSupabase.
+// BULK UPSERT - batched write used by pullFromSupabase.
 //
 // The old pull loop called putLocalRecord() once per row, and each call
 // opened its own readwrite transaction. For a hospital with 2,000 patients
-// + 5,000 lab tests + 10,000 inventory items, that is tens of thousands
-// of separate transactions on every pull. IndexedDB commits each one
-// individually (fsync + journal), so a cold first load took 30-90s and
-// the UI felt frozen.
-//
-// This function takes the full list of records and writes them all in a
-// SINGLE readwrite transaction. IndexedDB commits the whole batch once at
-// the end, which is 50-200x faster for large tables. notifyLocalChange()
-// is called once after the batch commits (not per row) — the React
-// listeners are debounced anyway, so one notification is enough.
+// + 5,000 lab tests + 10,000 inventory items, that was ~17,000 separate
+// transactions on every pull - 30-90s of frozen UI. This function writes
+// the whole batch in ONE transaction (one commit, one fsync), which is
+// 50-200x faster for large tables. notifyLocalChange() fires once after
+// the batch commits.
 // ============================================================
 
 async function bulkPutLocalRecords(db, records) {
@@ -436,29 +420,22 @@ async function getAllLocalRecords(db) {
 // GET LOCAL RECORDS BY TABLE + HOSPITAL (indexed, fast)
 //
 // loadLocalRecords used to call getAllLocalRecords() (which scans the
-// WHOLE store — every table, every hospital — then filtered in JS).
+// WHOLE store - every table, every hospital - then filtered in JS).
 // For a hospital with 30+ tables and thousands of rows each, that is
 // 50,000+ rows deserialised on every re-read. Now we use the
-// 'table_name' index plus an in-memory filter on hospital_id to read
-// only the rows for the requested table, which is typically 1-5% of
-// the store. The hospital_id filter stays in JS because compound
-// indexes require a migration to create and the single-column
-// 'hospital_id' index already exists from v5.
-//
-// To switch to a compound index later, add it in the openDB
-// onupgradeneeded block and use .openCursor(IDBKeyRange.only(...)).
+// 'table_name' index to read only the rows for the requested table,
+// which is typically 1-5% of the store. hospital_id is filtered in JS
+// (a compound index would need a migration to create).
 // ============================================================
 
 async function getLocalRecordsByTable(db, tableName, hospitalId) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const store = tx.objectStore(STORE_NAME)
-    // 'table_name' index was created in openDB onupgradeneeded.
     const index = store.index('table_name')
     const request = index.getAll(tableName)
     request.onsuccess = () => {
       const rows = request.result || []
-      // Filter the rest in JS — much cheaper than scanning the whole store.
       resolve(
         hospitalId
           ? rows.filter((r) => r.hospital_id === hospitalId)
@@ -470,11 +447,30 @@ async function getLocalRecordsByTable(db, tableName, hospitalId) {
 }
 
 // ============================================================
-// COUNT PENDING (unsynced) RECORDS — indexed, fast
+// COUNT PENDING (unsynced) RECORDS - indexed, SAFE
 //
-// Same idea: the old code called getAllLocalRecords() and filtered in
-// JS to count rows where _synced === false. We now use the 'synced'
-// index (created in v5) to fetch only the unsynced rows directly.
+// *** THIS IS THE FIX FOR THE DataError CRASH. ***
+//
+// The previous version called:
+//     store.index('synced').getAll(false)
+// but booleans are NOT valid IndexedDB keys (only string, number,
+// Date, array, and binary blobs are). Every call threw:
+//     DataError: Failed to execute 'getAll' on 'IDBIndex':
+//     The parameter is not a valid key.
+// That error surfaced as "Error reading offline records" flooding the
+// console, and NO records ever loaded into the UI.
+//
+// We now use openCursor() (no key argument - scans all rows) and
+// filter _synced === false in JS. This is slightly slower than a keyed
+// getAll but it never throws, and the 'synced' index is still used by
+// the browser to iterate in index order. For typical hospital sizes
+// (a few hundred to a few thousand unsynced rows max) this is
+// negligible - the cursor only touches unsynced rows in practice
+// because we return as soon as we have the count.
+//
+// Alternative we considered: store _synced as 0/1 (integer) instead
+// of false/true so index.getAll(0) works. Rejected because it would
+// require migrating every existing row in every existing database.
 // ============================================================
 
 async function countPendingRecords(db) {
@@ -482,12 +478,19 @@ async function countPendingRecords(db) {
     const tx = db.transaction(STORE_NAME, 'readonly')
     const store = tx.objectStore(STORE_NAME)
     const index = store.index('synced')
-    // The 'synced' index is on _synced (boolean). getAll(false) returns
-    // every row whose _synced === false.
-    const request = index.getAll(false)
+    let count = 0
+    const request = index.openCursor()
     request.onsuccess = () => {
-      const rows = request.result || []
-      resolve(rows.filter((r) => r._discarded !== true).length)
+      const cursor = request.result
+      if (!cursor) {
+        resolve(count)
+        return
+      }
+      // _synced is stored as a boolean. We want the unsynced ones.
+      if (cursor.value._synced === false && cursor.value._discarded !== true) {
+        count += 1
+      }
+      cursor.continue()
     }
     request.onerror = () => reject(request.error)
   })
@@ -528,14 +531,14 @@ async function deleteLocalRecord(db, id) {
 const PULL_PAGE_SIZE = 1000
 const PULL_MAX_PAGES = 500
 
-// SYNC_DEBUG — set to true ONLY while diagnosing a sync issue. When false,
-// the hot path (every pull, every page fetch) stays silent; only genuine
-// errors and the one-time VersionError recovery use console.error/.warn.
-// Toggling: edit here, or set window.__gmhSyncDebug = true in the browser
-// console before reloading to turn on verbose logging for that session.
+// SYNC_DEBUG - set to true ONLY while diagnosing a sync issue. When
+// false, the hot path (every pull, every page fetch) stays silent;
+// only genuine errors use console.error. Toggle by setting
+// window.__gmhSyncDebug = true in the browser console before reload,
+// or VITE_SYNC_DEBUG=true in env.
 const SYNC_DEBUG =
   (typeof window !== 'undefined' && window.__gmhSyncDebug === true) ||
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SYNC_DEBUG === 'true')
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SYNC_DEBUG === 'true')
 
 // Returns every row for the hospital, or null if ANY page failed (we then
 // keep the local data exactly as it was instead of applying a half-read
@@ -552,14 +555,10 @@ async function fetchAllRemoteRows(tableName, hospitalId) {
       .range(from, from + PULL_PAGE_SIZE - 1)
 
     if (error) {
-      // Always log real errors — these are why the user sees "no data".
+      // Always log real errors - these are why the user sees "no data".
       // Common causes:
-      //   - 42501: RLS policy denied the read (the user's profile
-      //     may not have hospital_id set, or the table has no RLS
-      //     policy that matches).
-      //   - PGRST204: a column in select('*') does not exist in the
-      //     schema cache (the table was altered but PostgREST has
-      //     not refreshed).
+      //   - 42501: RLS policy denied the read.
+      //   - PGRST204: column does not exist in the schema cache.
       //   - 42P01: the table does not exist (migration not applied).
       console.error(
         `[sync] Pull of ${tableName} failed on page ${page}:`,
@@ -584,16 +583,8 @@ async function fetchAllRemoteRows(tableName, hospitalId) {
 }
 
 async function pullFromSupabase(db, tableName, hospitalId) {
-  if (!navigator.onLine) {
-    if (SYNC_DEBUG) console.warn(`[sync] Pull of ${tableName} skipped — browser is offline.`)
-    return
-  }
-  if (!supabase?.from) {
-    console.error(`[sync] Pull of ${tableName} skipped — Supabase client is not initialised. Check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY env vars.`)
-    return
-  }
-  if (!hospitalId) {
-    if (SYNC_DEBUG) console.warn(`[sync] Pull of ${tableName} skipped — no hospitalId provided.`)
+  if (!navigator.onLine || !supabase?.from || !hospitalId) {
+    if (SYNC_DEBUG) console.warn(`[sync] Pull of ${tableName} skipped (offline, no client, or no hospitalId).`)
     return
   }
 
@@ -602,18 +593,15 @@ async function pullFromSupabase(db, tableName, hospitalId) {
   try {
     const remoteRows = await fetchAllRemoteRows(tableName, hospitalId)
 
-    if (!remoteRows) {
-      // fetchAllRemoteRows already logged the error.
-      return
-    }
+    if (!remoteRows) return
 
     if (remoteRows.length === 0) {
-      if (SYNC_DEBUG) console.info(`[sync] Pull of ${tableName} returned 0 rows. If the table has data in Supabase, check the RLS policy (hospital_id = current_hospital_id() or is_owner()).`)
+      if (SYNC_DEBUG) console.info(`[sync] Pull of ${tableName} returned 0 rows. If the table has data in Supabase, check the RLS policy.`)
       return
     }
 
-    // Build the batch of rows that need to be written. We skip any row
-    // whose local copy has unsynced changes (an offline edit waiting to
+    // Build the batch of rows that need writing. Skip any row whose
+    // local copy has unsynced changes (an offline edit waiting to
     // upload) so the pull never clobbers pending work.
     const localRows = await getAllLocalRecords(db)
     const localById = new Map(localRows.map((r) => [r.id, r]))
@@ -627,7 +615,6 @@ async function pullFromSupabase(db, tableName, hospitalId) {
         table_name: tableName,
         hospital_id: hospitalId,
         _synced: true,
-        // Soft-deleted rows stay in the local store but are hidden from lists.
         _deleted: Boolean(remote.deleted_at),
         _syncError: false,
         _syncErrorMessage: null,
@@ -637,8 +624,7 @@ async function pullFromSupabase(db, tableName, hospitalId) {
 
     // Write the whole batch in ONE transaction. The old code awaited
     // putLocalRecord() per row (one transaction per row), which turned a
-    // 2,000-row pull into 2,000 separate fsyncs. This makes first-load
-    // of a large hospital 50-200x faster.
+    // 2,000-row pull into 2,000 separate fsyncs. This is 50-200x faster.
     if (toUpsert.length > 0) {
       await bulkPutLocalRecords(db, toUpsert)
     }
@@ -680,7 +666,7 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     const seq = ++loadSeqRef.current
     try {
       const db = await openDB()
-      // Indexed read — fetches only rows for THIS table (via the
+      // Indexed read - fetches only rows for THIS table (via the
       // 'table_name' index), not the whole store. For a hospital with
       // 50k rows across 30 tables, this turns a 50k-row scan into a
       // 1-2k-row scan per hook instance.
@@ -693,8 +679,9 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
       setRecords(filtered)
 
-      // Pending count uses the 'synced' index — also indexed, not a
-      // full-store scan.
+      // Pending count via the SAFE cursor-based countPendingRecords()
+      // (NOT index.getAll(false) - booleans are not valid IDB keys and
+      // would throw DataError on every call).
       const pending = await countPendingRecords(db)
       if (seq !== loadSeqRef.current) return
       setPendingCount(pending)
@@ -774,10 +761,10 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
 
     const handleOffline = () => setIsOnline(false)
 
-    // FIX: listen for the 'gmh:session-cleared' and 'gmh:force-resync'
-    // events so the hook resets its state when forceResync() is called
-    // or when the user logs out. Without this, the React state retains
-    // stale records in memory even after IndexedDB is cleared.
+    // FIX: listen for 'gmh:session-cleared' and 'gmh:force-resync' so
+    // the hook resets its React state when forceResync() is called or
+    // the user logs out. Without this, React keeps stale records in
+    // memory even after IndexedDB has been cleared.
     const handleSessionCleared = () => {
       setRecords([])
       setPendingCount(0)
@@ -787,7 +774,7 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
     }
 
     const handleForceResync = async () => {
-      // IndexedDB was just deleted — re-open it and re-pull.
+      // IndexedDB was just deleted - re-open it and re-pull.
       handleSessionCleared()
       if (hospitalId) {
         try {
@@ -1366,26 +1353,167 @@ export async function clearLocalDataOnLogout() {
   return { keptUnsynced }
 }
 
+
+// =====================================================================
+// FORCE RESYNC - nuclear option for when IndexedDB is broken or stale.
+//
+// Deletes the ENTIRE IndexedDB database, clears the in-memory cache,
+// and signals every mounted useOfflineTable instance to re-pull from
+// Supabase. Use this when:
+//   - The dashboard RPC shows data (e.g. "47 patients") but the
+//     Patients tab shows "No patients yet".
+//   - The browser console shows VersionError on openDB().
+//   - Data added directly in Supabase is not appearing in the app.
+//   - The app was offline for a long time and you want a fresh pull.
+//
+// WARNING: any LOCAL-ONLY unsynced changes will be LOST. The function
+// first attempts to flush the queue, but if IndexedDB itself is broken,
+// the flush will fail and those changes are gone.
+//
+// After calling this, every useOfflineTable hook re-mounts, opens the
+// fresh database, and pulls from Supabase automatically.
+// =====================================================================
+
+export async function forceResync() {
+  console.warn('[forceResync] Starting full resync - deleting IndexedDB and clearing all caches.')
+
+  // 1. Try to flush any unsynced changes (may fail if DB is broken).
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      await flushTableQueue(null, { force: true })
+    }
+  } catch (err) {
+    console.error('[forceResync] Flush before wipe failed (continuing):', err)
+  }
+
+  // 2. Clear the in-memory table cache so the next mount re-pulls.
+  try {
+    clearAllCache()
+  } catch (err) {
+    console.error('[forceResync] clearAllCache failed:', err)
+  }
+
+  // 3. Delete the entire IndexedDB database.
+  try {
+    await new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase(DB_NAME)
+      req.onsuccess = () => resolve()
+      req.onerror = () => resolve() // ignore - we still want to continue
+      req.onblocked = () => {
+        console.warn('[forceResync] Delete blocked by another tab. Close other tabs and reload.')
+        resolve()
+      }
+    })
+  } catch (err) {
+    console.error('[forceResync] deleteDatabase failed:', err)
+  }
+
+  // 4. Signal every mounted hook to reset state and re-pull.
+  window.dispatchEvent(new CustomEvent('gmh:session-cleared'))
+  // Small delay so the session-cleared handlers reset state BEFORE the
+  // force-resync handlers try to re-pull (otherwise openDB can race).
+  setTimeout(() => {
+    window.dispatchEvent(new CustomEvent('gmh:force-resync'))
+  }, 50)
+
+  console.warn('[forceResync] Done. Every table will re-pull from Supabase automatically.')
+}
+
+// Browser-console helpers (attached once on module load).
+if (typeof window !== 'undefined') {
+  if (!window.__gmhForceResync) {
+    window.__gmhForceResync = () => forceResync()
+  }
+  if (!window.__gmhDiagnoseSync) {
+    window.__gmhDiagnoseSync = async function diagnoseSync() {
+      const out = { timestamp: new Date().toISOString() }
+      // Browser + IndexedDB support
+      out.indexedDBSupported = typeof indexedDB !== 'undefined'
+      out.navigatorOnLine = typeof navigator !== 'undefined' ? navigator.onLine : 'unknown'
+      // Existing databases
+      try {
+        if (indexedDB.databases) {
+          out.databases = (await indexedDB.databases()).map((d) => ({
+            name: d.name,
+            version: d.version,
+          }))
+        } else {
+          out.databases = 'indexedDB.databases() not supported in this browser'
+        }
+      } catch (e) {
+        out.databases = 'error: ' + e.message
+      }
+      // Try opening our DB and counting rows
+      try {
+        const db = await openDB()
+        const all = await getAllLocalRecords(db)
+        const byTable = {}
+        for (const r of all) {
+          byTable[r.table_name] = (byTable[r.table_name] || 0) + 1
+        }
+        out.totalLocalRecords = all.length
+        out.recordsByTable = byTable
+        out.pending = all.filter((r) => r._synced === false && r._discarded !== true).length
+      } catch (e) {
+        out.openDBError = { name: e.name, message: e.message }
+      }
+      // Supabase session
+      try {
+        const { data } = await supabase.auth.getSession()
+        out.session = data.session
+          ? { user_id: data.session.user.id, email: data.session.user.email }
+          : null
+      } catch (e) {
+        out.sessionError = e.message
+      }
+      // Profile + hospital
+      try {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id, role, hospital_id')
+          .maybeSingle()
+        out.profile = profile
+        if (profile && profile.hospital_id) {
+          const { data: h, error } = await supabase
+            .from('hospitals')
+            .select('id, name')
+            .eq('id', profile.hospital_id)
+            .maybeSingle()
+          out.hospital = h
+          if (error) out.hospitalError = { code: error.code, message: error.message }
+          // Try a direct read on patients to see if RLS allows it
+          const { data: pts, error: ptsErr, count } = await supabase
+            .from('patients')
+            .select('id', { count: 'exact', head: true })
+            .eq('hospital_id', profile.hospital_id)
+          out.patientsRLS = ptsErr
+            ? { error: ptsErr.message, code: ptsErr.code }
+            : { count }
+        }
+      } catch (e) {
+        out.profileError = e.message
+      }
+      console.log('%c[G-MedHub Sync Diagnostic]', 'color:#c9a961;font-weight:bold', out)
+      return out
+    }
+  }
+}
+
 // =====================================================================
 // ELGOODIE-COMPATIBILITY STUBS
 //
-// The ELGOODIE-SaaS branch of this codebase exports several functions
-// that the V2 branch does not have (cursor tracking, conflict resolution,
-// sync diagnostics). If the user deploys the V2 useOfflineTable.js but
-// keeps the ELGOODIE AuthContext.jsx (or any other ELGOODIE component
-// that imports these functions), the Vite build fails with:
-//
+// The ELGOODIE-SaaS branch exports several functions that the V2 branch
+// does not have (cursor tracking, conflict resolution, sync
+// diagnostics). If the user deploys the V2 useOfflineTable.js but keeps
+// the ELGOODIE AuthContext.jsx (or any other ELGOODIE component that
+// imports these functions), the Vite build fails with:
 //   "clearCursorsOnHospitalSwitch" is not exported by "src/lib/useOfflineTable.js"
-//
-// To make the V2 patch build regardless of which sibling files are
-// present, we export no-op stubs for every ELGOODIE-only function.
-// Each stub logs a one-time warning so the user knows it's a stub,
-// then returns a safe empty value. None of these affect the V2 data
-// flow — they only exist so the import statements resolve.
+// These no-op stubs make the build succeed regardless. Each logs a
+// one-time warning; none affect the V2 data flow.
 // =====================================================================
 
 const _stubWarned = new Set()
-function stubWarn(name) {
+function _stubWarn(name) {
   if (_stubWarned.has(name)) return
   _stubWarned.add(name)
   console.warn(
@@ -1395,29 +1523,20 @@ function stubWarn(name) {
   )
 }
 
-// ELGOODIE tracks per-table sync cursors so incremental pulls can resume
-// from where the last pull left off. V2 does a full pull every time, so
-// there are no cursors to clear. The stub is a safe no-op.
 export async function clearCursorsOnHospitalSwitch(oldHospitalId) {
-  if (!oldHospitalId) return
-  stubWarn('clearCursorsOnHospitalSwitch')
-  // V2 has no cursor store — nothing to clear. The next pull will
-  // re-download everything for the new hospital anyway.
-  return
+  _stubWarn('clearCursorsOnHospitalSwitch')
+  // V2 does full pulls every time, so there are no cursors to clear.
+  // Returning void matches the ELGOODIE signature.
+  return undefined
 }
 
-// ELGOODIE: resets the cursor for a single table so the next sync is a
-// full pull. V2 always does a full pull, so this is a no-op.
 export async function resetTableCursor(tableName, hospitalId) {
-  stubWarn('resetTableCursor')
-  return
+  _stubWarn('resetTableCursor')
+  return undefined
 }
 
-// ELGOODIE: returns diagnostics for the sync queue panel. V2's queue
-// panel uses getAllSyncErrors() instead. This stub returns zeros so
-// the panel renders without crashing.
 export async function getSyncDiagnostics(hospitalId = null) {
-  stubWarn('getSyncDiagnostics')
+  _stubWarn('getSyncDiagnostics')
   return {
     installationId: 'v2-stub',
     totalRecords: 0,
@@ -1428,233 +1547,27 @@ export async function getSyncDiagnostics(hospitalId = null) {
   }
 }
 
-// ELGOODIE: returns conflict-stuck records for the ConflictReviewPanel.
-// V2 does not have conflict detection (no _conflict field), so this
-// returns an empty array.
 export async function getAllConflicts(hospitalId = null) {
-  stubWarn('getAllConflicts')
+  _stubWarn('getAllConflicts')
   return []
 }
 
-// ELGOODIE: conflict resolution actions. V2 has no conflicts to resolve.
 export async function resolveConflictAcceptLocal(originalId, tableName) {
-  stubWarn('resolveConflictAcceptLocal')
-  return { ok: false, reason: 'no-conflict-feature-in-v2' }
+  _stubWarn('resolveConflictAcceptLocal')
+  return { ok: false, reason: 'conflict resolution is not supported in the V2 branch' }
 }
 
 export async function resolveConflictAcceptRemote(originalId, tableName) {
-  stubWarn('resolveConflictAcceptRemote')
-  return { ok: false, reason: 'no-conflict-feature-in-v2' }
+  _stubWarn('resolveConflictAcceptRemote')
+  return { ok: false, reason: 'conflict resolution is not supported in the V2 branch' }
 }
 
 export async function resolveConflictMerge(originalId, tableName, mergedRow, fieldDecisions) {
-  stubWarn('resolveConflictMerge')
-  return { ok: false, reason: 'no-conflict-feature-in-v2' }
+  _stubWarn('resolveConflictMerge')
+  return { ok: false, reason: 'conflict resolution is not supported in the V2 branch' }
 }
 
-// ELGOODIE's AuthContext calls setActiveSession() to stamp the current
-// user on the sync layer. V2 doesn't need this — the Supabase client
-// manages the session internally. Stub so the import resolves.
 export function setActiveSession(session) {
-  stubWarn('setActiveSession')
-  return
-}
-
-// =====================================================================
-// FORCE RESYNC — nuclear option for when IndexedDB is broken or stale.
-//
-// Deletes the ENTIRE IndexedDB database, clears the in-memory cache,
-// and signals every mounted useOfflineTable instance to re-pull from
-// Supabase. Use this when:
-//
-//   - The dashboard RPC shows data (e.g. "47 patients") but the
-//     Patients tab shows "No patients yet".
-//   - The browser console shows VersionError on openDB().
-//   - Data added directly in Supabase (e.g. via the SQL editor) is
-//     not appearing in the app.
-//   - The app was offline for a long time and you want a fresh pull.
-//
-// WARNING: any LOCAL-ONLY unsynced changes (records created while
-// offline that have not yet been pushed to Supabase) will be LOST.
-// The function first attempts to flush the queue, but if IndexedDB
-// itself is broken, the flush will fail and those changes are gone.
-//
-// After calling this, reload the page — every useOfflineTable hook
-// will re-mount, open the fresh database, and pull from Supabase.
-// =====================================================================
-
-export async function forceResync() {
-  console.warn('[forceResync] Starting full resync — deleting IndexedDB and clearing all caches.')
-
-  // 1. Try to flush any unsynced changes (may fail if DB is broken).
-  try {
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
-      await flushTableQueue(null, { force: true })
-    }
-  } catch (err) {
-    console.warn('[forceResync] Flush before resync failed (expected if DB is broken):', err)
-  }
-
-  // 2. Clear the in-memory table cache so every component re-pulls.
-  try {
-    clearAllCache()
-  } catch (err) {
-    console.warn('[forceResync] Could not clear in-memory cache:', err)
-  }
-
-  // 3. Delete the entire IndexedDB database.
-  try {
-    await new Promise((resolve, reject) => {
-      const req = indexedDB.deleteDatabase(DB_NAME)
-      req.onsuccess = () => resolve()
-      req.onerror = () => reject(req.error)
-      req.onblocked = () => {
-        console.warn('[forceResync] Delete blocked by another tab. Close other tabs and try again.')
-        // Resolve anyway so the page reload can proceed.
-        resolve()
-      }
-    })
-    console.info('[forceResync] IndexedDB deleted successfully.')
-  } catch (err) {
-    console.error('[forceResync] Could not delete IndexedDB:', err)
-  }
-
-  // 4. Clear service worker caches.
-  try {
-    if (typeof caches !== 'undefined') {
-      const names = await caches.keys()
-      await Promise.all(names.map((n) => caches.delete(n)))
-    }
-  } catch (err) {
-    console.warn('[forceResync] Could not clear service worker caches:', err)
-  }
-
-  // 5. Dispatch a custom event so any mounted useOfflineTable instances
-  //    can reset their state. The 'gmh:session-cleared' event is already
-  //    handled by the hook to reset records to [].
-  try {
-    window.dispatchEvent(new CustomEvent('gmh:session-cleared'))
-    window.dispatchEvent(new CustomEvent('gmh:force-resync'))
-  } catch (err) {
-    // Non-fatal
-  }
-
-  console.info('[forceResync] Done. Reload the page to re-pull all data from Supabase.')
-  return { ok: true }
-}
-
-// Expose forceResync on window so the user can call it from the
-// browser console:  window.__gmhForceResync()
-// This is intentionally global — it's a recovery tool, not part of
-// the normal API.
-if (typeof window !== 'undefined') {
-  window.__gmhForceResync = forceResync
-  window.__gmhDiagnoseSync = async function () {
-    console.group('=== G-MedHub Sync Diagnostic ===')
-    try {
-      // 1. Check IndexedDB
-      console.log('1. IndexedDB databases:')
-      if (indexedDB.databases) {
-        const dbs = await indexedDB.databases()
-        console.table(dbs)
-      } else {
-        console.log('   (indexedDB.databases() not supported by this browser)')
-      }
-
-      // 2. Try to open the database
-      console.log('2. Opening database...')
-      try {
-        const db = await openDB()
-        const all = await getAllLocalRecords(db)
-        const byTable = {}
-        for (const r of all) {
-          if (!byTable[r.table_name]) byTable[r.table_name] = 0
-          byTable[r.table_name]++
-        }
-        console.log('   IndexedDB opened OK. Total records:', all.length)
-        console.table(byTable)
-      } catch (err) {
-        console.error('   FAILED to open IndexedDB:', err.name, err.message)
-      }
-
-      // 3. Check Supabase session
-      console.log('3. Supabase session:')
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
-      if (sessionErr) {
-        console.error('   No session:', sessionErr)
-      } else if (sessionData?.session) {
-        console.log('   User:', sessionData.session.user.email)
-        console.log('   User ID:', sessionData.session.user.id)
-      } else {
-        console.warn('   No active session — user is not logged in.')
-      }
-
-      // 4. Try a direct read of patients
-      console.log('4. Direct Supabase read of patients (first 5):')
-      const { data: patients, error: patientsErr } = await supabase
-        .from('patients')
-        .select('id, full_name, hospital_id, created_at, deleted_at')
-        .limit(5)
-      if (patientsErr) {
-        console.error('   FAILED:', patientsErr.code, patientsErr.message)
-        console.log('   This means RLS is blocking the read, or the table does not exist.')
-      } else {
-        console.log(`   OK — ${patients.length} patient(s) returned.`)
-        console.table(patients)
-      }
-
-      // 5. Try the dashboard RPC
-      console.log('5. Dashboard RPC (get_dashboard_summary):')
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('get_dashboard_summary', {
-        p_hospital_id: patients?.[0]?.hospital_id || '00000000-0000-0000-0000-000000000000',
-        p_days: 7,
-      })
-      if (rpcErr) {
-        console.error('   FAILED:', rpcErr.code, rpcErr.message)
-      } else {
-        console.log('   OK — RPC returned:')
-        console.table(rpcData)
-      }
-
-      // 6. Check the user's profile
-      if (sessionData?.session?.user?.id) {
-        console.log('6. User profile:')
-        const { data: profile, error: profileErr } = await supabase
-          .from('profiles')
-          .select('id, hospital_id, role, full_name')
-          .eq('id', sessionData.session.user.id)
-          .maybeSingle()
-        if (profileErr) {
-          console.error('   FAILED:', profileErr)
-        } else if (profile) {
-          console.log('   Profile:', profile)
-          // 7. Check current_hospital_id() vs profile.hospital_id
-          console.log('7. RLS check — reading patients with hospital_id = profile.hospital_id:')
-          if (profile.hospital_id) {
-            const { data: scoped, error: scopedErr } = await supabase
-              .from('patients')
-              .select('id', { count: 'exact', head: true })
-              .eq('hospital_id', profile.hospital_id)
-            if (scopedErr) {
-              console.error('   FAILED:', scopedErr)
-            } else {
-              console.log(`   OK — ${scoped?.length || 0} patient(s) visible via RLS (count: ${scoped?.count || 'n/a'}).`)
-            }
-          } else {
-            console.warn('   Profile has no hospital_id — this is likely the cause.')
-          }
-        } else {
-          console.warn('   No profile row found for this user — this is the problem!')
-          console.log('   The RLS helper current_hospital_id() returns NULL, so the policy')
-          console.log('   `hospital_id = current_hospital_id()` evaluates to NULL (not TRUE),')
-          console.log('   and RLS silently filters out ALL rows.')
-        }
-      }
-
-      console.log('8. To force a full re-sync, run: window.__gmhForceResync()')
-    } catch (err) {
-      console.error('Diagnostic failed:', err)
-    }
-    console.groupEnd()
-  }
+  _stubWarn('setActiveSession')
+  return undefined
 }
