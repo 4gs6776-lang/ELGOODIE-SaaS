@@ -341,22 +341,48 @@ export function getAccessibleModulesWithDb(role, dbPermissions) {
   if (FULL_ACCESS_ROLES.includes(role)) return [...MODULES]
   if (role === 'cmd') return [...MODULES] // CMD sees all (read-only)
 
+  // Start from the hardcoded defaults. The DB rows are OVERRIDES on
+  // top of these, not a complete replacement — so a hospital that
+  // has only customized 3 modules still keeps the other 20 defaults
+  // for any role they haven't touched.
+  const baseModules = getAccessibleModules(role)
+
   // If no DB permissions, fall back to hardcoded defaults
   if (!dbPermissions || dbPermissions.length === 0) {
-    return getAccessibleModules(role)
+    return baseModules
   }
 
-  // Filter DB rows for this role where can_view=true
-  const accessible = dbPermissions
-    .filter(p => p.role === role && p.can_view !== false)
-    .map(p => p.module)
+  // Filter to this role's DB rows
+  const rowsForRole = dbPermissions.filter(p => p.role === role)
 
   // If no rows found for this role, fall back to hardcoded defaults
-  if (accessible.length === 0) {
-    return getAccessibleModules(role)
+  if (rowsForRole.length === 0) {
+    return baseModules
   }
 
-  return accessible
+  // MERGE: for every module in the hardcoded defaults, check if the
+  // DB has an override for this role. If yes, use the DB's can_view;
+  // if no, keep the hardcoded default (which already includes it).
+  // Then ADD any DB rows whose modules aren't in the hardcoded
+  // defaults at all (e.g. a custom module admin enabled that wasn't
+  // in ROLE_MODULES).
+  const merged = new Set()
+  for (const moduleKey of baseModules) {
+    const row = rowsForRole.find(p => p.module === moduleKey)
+    // No row = not overridden = keep the default (which is "visible"
+    // since it's in baseModules).
+    if (!row || row.can_view !== false) {
+      merged.add(moduleKey)
+    }
+  }
+  // Add any DB-only modules (can_view=true) not in hardcoded defaults
+  for (const row of rowsForRole) {
+    if (row.can_view !== false && !merged.has(row.module)) {
+      merged.add(row.module)
+    }
+  }
+
+  return [...merged]
 }
 
 // Build the full permission object using DB-backed permissions.
