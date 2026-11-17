@@ -20,6 +20,7 @@ import {
   FULL_ACCESS_ROLES,
   ROLE_LABELS,
   getAccessibleModules,
+  getAccessibleModulesWithDb,
 } from '../../lib/permissions'
 import {
   DEFAULT_REGISTRATION_FEES,
@@ -237,8 +238,13 @@ export default function Dashboard(){
 
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
-    return getAccessibleModules(profile?.role)
-  }, [profile?.role])
+    // Use DB-backed permissions so admin customizations (Settings →
+    // Role Permissions) actually take effect. When dbRolePerms is
+    // empty (hospital hasn't customized), getAccessibleModulesWithDb
+    // falls back to the hardcoded ROLE_MODULES defaults — so this is
+    // backward-compatible and never regresses existing hospitals.
+    return getAccessibleModulesWithDb(profile?.role, dbRolePerms)
+  }, [profile?.role, dbRolePerms])
   // What the hospital's PLAN includes (menu items for modules the plan
   // doesn't include are hidden; existing data is never touched).
   const planEntitlements = useSyncExternalStore(subscribeEntitlements, getEntitlements, getEntitlements)
@@ -347,6 +353,14 @@ export default function Dashboard(){
   const { records: inventoryItems } = useOfflineTable('inventory_items', hospital?.id)
   const { records: labTests } = useOfflineTable('lab_tests', hospital?.id)
   const { records: allMessages } = useOfflineTable('messages', hospital?.id)
+
+  // DB-backed role permissions (hospital_role_permissions). Loaded so
+  // the sidebar builder can read admin customizations instead of
+  // falling back to the hardcoded ROLE_MODULES map in permissions.js.
+  // When the table is empty (hospital hasn't customized anything),
+  // getAccessibleModulesWithDb() falls back to the hardcoded defaults
+  // anyway — so this is backward-compatible.
+  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
 
   // ---- Registration fees (folder-prices feature) -------------------
   // Same flow as Reception: when a patient is added via the quick-add
