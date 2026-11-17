@@ -119,9 +119,10 @@ export default function DashboardOverview({ hospital, profile }) {
       {!hasAnything && (
         <EmptyNote>Your role does not include any overview widgets. Use the menu to open the modules you work in.</EmptyNote>
       )}
+      <PerformanceBoard d={d} access={access} ready={ready} c={c} />
 
       {/* ---------- pulse panel + queue cards ---------- */}
-      {(showPulse || access.lab || access.pharmacy) && (
+      {false && (
         <div className="hd-top">
           {showPulse && (
             <Panel title="Hospital pulse" sub="Last 14 days" className="hd-pulse" index={1}>
