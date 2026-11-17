@@ -1,0 +1,113 @@
+/* Overview board (PerformanceBoard.jsx). Uses the dashboard tokens
+   (--hd-*) and the healthcare-ui tokens (--ui-*), with fallbacks so it
+   also works without healthcare-ui.css. Import after healthcare-ui.css. */
+
+.pb-board{ display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:18px; align-items:stretch; }
+.pb-board > :only-child{ grid-column:1/-1; }
+.pb-left{ display:flex; flex-direction:column; gap:18px; min-width:0; }
+.pb-right{ display:flex; flex-direction:column; gap:18px; min-width:0; }
+.pb-kpis{ display:grid; grid-template-columns:1.15fr 1fr 1fr; gap:16px; }
+.pb-kpis > :only-child{ grid-column:1/-1; }
+.pb-charts{ display:grid; grid-template-columns:1fr 1.3fr; gap:18px; flex:1; }
+.pb-charts > :only-child{ grid-column:1/-1; }
+
+.pb-card{ padding:20px 22px; display:flex; flex-direction:column; gap:14px; min-width:0; }
+.pb-head{ display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:10px; }
+.pb-title{ margin:0; white-space:nowrap; font-size:15px; font-weight:600; color:var(--hd-text); }
+.pb-sub{ display:block; margin:2px 0 0; font-size:11.5px; color:var(--hd-mute); }
+.pb-label{ font-size:12.5px; font-weight:500; color:var(--hd-mute); }
+.pb-foot{ margin:auto 0 0; font-size:12px; color:var(--hd-mute); }
+.pb-big{ display:block; margin-top:6px; font-size:clamp(34px,3.2vw,46px); font-weight:600; letter-spacing:-.04em; line-height:1; color:var(--hd-text); font-variant-numeric:tabular-nums; }
+.pb-mid{ display:block; margin-top:6px; font-size:30px; font-weight:600; letter-spacing:-.035em; line-height:1; color:var(--hd-text); font-variant-numeric:tabular-nums; }
+
+/* hero */
+html:root:root:root .pb-hero{
+  --hd-text:var(--ui-hero-ink,#101216); --hd-mute:rgba(16,18,22,.62);
+  background:linear-gradient(145deg,var(--ui-hero-a,#BFF5F7),var(--ui-hero-b,#D5C9FF)) !important;
+  border-color:transparent !important; color:var(--ui-hero-ink,#101216);
+}
+.pb-badge{ width:34px; height:34px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; background:rgba(16,18,22,.1); color:var(--ui-hero-ink,#101216); }
+.pb-hero-body{ display:flex; align-items:flex-end; justify-content:space-between; gap:14px; }
+.pb-bedgrid{ display:grid; grid-template-columns:repeat(6,1fr); gap:4px; width:min(104px,38%); }
+.pb-bedgrid i{ aspect-ratio:1; border-radius:5px; background:rgba(16,18,22,.12); }
+.pb-bedgrid i.on{ background:rgba(16,18,22,.78); }
+
+/* occupancy */
+.pb-occ{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pb-vbar{ position:relative; flex:none; width:30px; height:96px; border-radius:999px; overflow:hidden; background:var(--ui-chip,var(--hd-surface)); }
+.pb-vbar i{ position:absolute; left:0; right:0; bottom:0; border-radius:999px; background:linear-gradient(180deg,var(--hd-purple),var(--hd-cyan)); }
+
+/* patients dots */
+.pb-patients{ display:flex; align-items:flex-end; justify-content:space-between; gap:14px; }
+.pb-dots{ display:grid; grid-template-columns:repeat(7,1fr); gap:5px; width:min(112px,46%); }
+.pb-dots i{ aspect-ratio:1; border-radius:50%; background:var(--hd-cyan); opacity:var(--o,.1); }
+
+/* activity bars */
+.pb-bars{ display:flex; align-items:stretch; gap:10px; flex:1; min-height:190px; }
+.pb-bar{ flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:6px; }
+.pb-bar em{ font-style:normal; font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px; background:var(--ui-chip,var(--hd-surface)); color:var(--hd-text); font-variant-numeric:tabular-nums; }
+.pb-track{ flex:1; width:100%; display:flex; align-items:flex-end; }
+.pb-track i{ display:block; width:100%; border-radius:12px; background:linear-gradient(180deg,var(--hd-purple),var(--hd-cyan)); }
+.pb-bar.max .pb-track i{ background:repeating-linear-gradient(135deg,var(--hd-purple) 0 5px,color-mix(in srgb,var(--hd-purple) 30%,transparent) 5px 9px); }
+.pb-bar span{ font-size:10.5px; color:var(--hd-mute); }
+
+/* line chart */
+.pb-trend{ flex:1; display:flex; flex-direction:column; justify-content:space-between; }
+.pb-trend svg{ display:block; width:100%; height:auto; overflow:visible; }
+.pb-grid{ stroke:var(--hd-line); stroke-width:1; stroke-dasharray:3 5; }
+.pb-line{ fill:none; stroke:var(--hd-cyan); stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; }
+.pb-peakline{ stroke:var(--hd-mute); stroke-width:1; stroke-dasharray:3 4; opacity:.7; }
+.pb-dot{ fill:var(--hd-card); stroke:var(--hd-cyan); stroke-width:3; }
+.pb-tip{ fill:var(--ui-chip,var(--hd-surface)); }
+.pb-tiptext{ font-size:12px; font-weight:600; fill:var(--hd-text); }
+.pb-axis{ font-size:10.5px; fill:var(--hd-mute); }
+.pb-total{ display:flex; align-items:baseline; gap:8px; margin:10px 0 0; }
+.pb-total strong{ font-size:26px; font-weight:600; letter-spacing:-.03em; color:var(--hd-text); }
+.pb-total span{ font-size:12px; color:var(--hd-mute); }
+
+/* gauge */
+.pb-gauge{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+.pb-gauge svg{ width:100%; max-width:300px; height:auto; }
+.pb-gauge-track, .pb-gauge-val{ fill:none; stroke-width:14; stroke-linecap:round; }
+.pb-gauge-track{ stroke:var(--ui-chip,var(--hd-surface)); }
+.pb-gauge-val{ stroke:url(#pb-gauge-fill); }
+.pb-gauge-knob{ fill:var(--hd-card); stroke:var(--hd-purple); stroke-width:4; }
+.pb-gauge-num{ font-size:30px; font-weight:600; letter-spacing:-.03em; fill:var(--hd-text); }
+.pb-gauge .pb-foot{ margin:0; }
+
+/* weekly rings */
+.pb-week{ display:flex; justify-content:space-between; gap:4px; }
+.pb-day{ display:flex; flex-direction:column; align-items:center; gap:6px; font-size:10.5px; color:var(--hd-mute); }
+.pb-day.today{ color:var(--hd-text); font-weight:600; }
+.pb-day-track{ fill:none; stroke:var(--ui-chip,var(--hd-surface)); stroke-width:4; }
+.pb-day-val{ fill:none; stroke:var(--hd-cyan); stroke-width:4; stroke-linecap:round; }
+.pb-day.today .pb-day-val{ stroke:var(--hd-purple); }
+.pb-day-num{ font-size:11px; font-weight:600; fill:var(--hd-text); }
+
+/* roles */
+.pb-roles{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.pb-role{ border-radius:20px; padding:13px 15px; background:color-mix(in srgb,var(--tone) 20%,var(--ui-chip,var(--hd-surface))); display:flex; flex-direction:column; gap:2px; min-width:0; }
+.pb-role strong{ font-size:26px; font-weight:600; letter-spacing:-.03em; color:var(--hd-text); }
+.pb-role span{ font-size:12px; text-transform:capitalize; color:var(--hd-text); }
+.pb-role small{ font-size:11px; color:var(--hd-mute); }
+
+@media (max-width:1180px){
+  .pb-board{ grid-template-columns:minmax(0,1fr); }
+  .pb-right{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); }
+}
+@media (max-width:900px){
+  .pb-kpis{ grid-template-columns:1fr 1fr; }
+  .pb-kpis > :first-child{ grid-column:1/-1; }
+  .pb-charts{ grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:560px){
+  .pb-kpis{ grid-template-columns:minmax(0,1fr); }
+  .pb-card{ padding:18px; }
+  .pb-bars{ min-height:170px; gap:6px; }
+}
+
+/* tone colours for the role tiles (same mapping the dashboard uses) */
+.pb-role[data-tone=cyan]{ --tone:var(--hd-cyan); }
+.pb-role[data-tone=purple]{ --tone:var(--hd-purple); }
+.pb-role[data-tone=green]{ --tone:var(--hd-green); }
+.pb-role[data-tone=pink]{ --tone:var(--hd-pink); }
