@@ -162,6 +162,17 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
   const patientAmount = Math.max(0, grandTotal - hmoAmount)
   const amountOwedByPatient = hasHmo ? patientAmount : grandTotal
 
+  // Wallet deduction PREVIEW — what will be auto-deducted from the patient's
+  // wallet when this invoice is finalized. Mirrors the actual deduction logic
+  // at the save-site (line 194): Math.min(liveBalance, amountOwedByPatient).
+  // Used to show the cashier + patient the TRUE balance due, not just the
+  // pre-deduction grandTotal. HMO folder patients never get wallet deductions
+  // (their wallet is bypassed), so the preview is 0 for them.
+  const walletDeductionPreview = canUseWallet
+    ? Math.min(walletBalance, amountOwedByPatient)
+    : 0
+  const balanceDueAfterWallet = Math.max(0, amountOwedByPatient - walletDeductionPreview)
+
   const formatMoney = (n) => '₦' + Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   async function handleGenerateInvoice() {
@@ -175,6 +186,20 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
         `You can record a payment on it later from:\n` +
         `  Billing → Unpaid Invoices tab → Take Payment\n\n` +
         `Click OK to create the unpaid invoice, or Cancel to go back and enter an amount.`
+      )
+      if (!proceed) return
+    }
+    // If the wallet covers the whole balance, we don't need a manual amount.
+    // Without this guard, the confirm dialog above would fire even when the
+    // patient owes ₦0 out-of-pocket (their wallet fully covers it).
+    if (pAmt <= 0 && canUseWallet && balanceDueAfterWallet > 0.001) {
+      const proceed = window.confirm(
+        `No cash/card amount entered.\n\n` +
+        `Wallet will auto-cover ${formatMoney(walletDeductionPreview)} of this invoice.\n` +
+        `The remaining balance of ${formatMoney(balanceDueAfterWallet)} will be recorded as UNPAID.\n\n` +
+        `You can collect it later from:\n` +
+        `  Billing → Unpaid Invoices tab → Take Payment\n\n` +
+        `Click OK to proceed, or Cancel to enter a payment amount now.`
       )
       if (!proceed) return
     }
@@ -507,9 +532,32 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
             <div className="billing-summary-row"><span>Subtotal</span><span>{formatMoney(subtotal)}</span></div>
             <div className="billing-summary-row" style={{ color: 'var(--danger)' }}><span>Discount</span><span>- {formatMoney(discountAmt)}</span></div>
             <div className="billing-summary-row" style={{ color: 'var(--gold)' }}><span>Tax / VAT</span><span>+ {formatMoney(taxAmt)}</span></div>
-            <div className="billing-summary-row grand" style={{ marginBottom: hasHmo ? 12 : 16 }}>
+            <div className="billing-summary-row grand" style={{ marginBottom: (hasHmo || walletDeductionPreview > 0) ? 12 : 16 }}>
               <span>Total Bill</span><span style={{ color: 'var(--teal)' }}>{formatMoney(grandTotal)}</span>
             </div>
+
+            {/* Wallet deduction line — shown only when there's a real deduction
+                to apply. Mirrors the wallet banner above, but as a totals-row
+                so the cashier sees the math: Total Bill - Wallet = Balance Due.
+                Without this row, the cashier/patient thinks they owe the full
+                Total Bill, when in fact the wallet will auto-cover part of it. */}
+            {walletDeductionPreview > 0 && (
+              <div className="billing-summary-row" style={{ color: 'var(--teal)', marginBottom: hasHmo ? 12 : 16 }}>
+                <span>Wallet Deduction</span><span>- {formatMoney(walletDeductionPreview)}</span>
+              </div>
+            )}
+
+            {/* True balance due after HMO + wallet. This is the amount the
+                patient actually needs to pay out of pocket today. */}
+            {(walletDeductionPreview > 0 || hasHmo) && (
+              <div className="billing-summary-row" style={{
+                marginBottom: 16, paddingTop: 8, borderTop: '1px dashed var(--line-soft)',
+                fontSize: 15, fontWeight: 800,
+              }}>
+                <span>Balance Due</span>
+                <span style={{ color: 'var(--gold)' }}>{formatMoney(balanceDueAfterWallet)}</span>
+              </div>
+            )}
 
             {hasHmo && (
               <div className="billing-hmo-box" style={{ marginBottom: 16 }}>
@@ -552,7 +600,7 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
                 type="number"
                 value={amountPaid}
                 onChange={e => setAmountPaid(e.target.value)}
-                placeholder={amountOwedByPatient.toFixed(2)}
+                placeholder={balanceDueAfterWallet.toFixed(2)}
                 style={{ fontSize: 16, fontWeight: 700 }}
               />
             </div>
