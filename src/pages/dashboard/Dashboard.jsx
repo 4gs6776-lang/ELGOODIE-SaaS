@@ -238,6 +238,15 @@ export default function Dashboard(){
   // through src/lib/datetime.js with this zone (Stage 1 req. #11).
   const hospitalTz = getTimezone(hospital)
 
+  // DB-backed role permissions (hospital_role_permissions). MUST be
+  // declared ABOVE allowedKeys below — allowedKeys uses dbRolePerms
+  // in its useMemo, and `const` bindings live in the Temporal Dead Zone
+  // until their declaration. Declaring this after allowedKeys causes
+  // "Cannot access '_t' before initialization" at first render.
+  // When the table is empty (hospital hasn't customized anything),
+  // getAccessibleModulesWithDb() falls back to the hardcoded defaults.
+  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
+
   const allowedKeys = useMemo(() => {
     if (FULL_ACCESS_ROLES.includes(profile?.role)) return null
     // Use DB-backed permissions so admin customizations (Settings →
@@ -355,14 +364,6 @@ export default function Dashboard(){
   const { records: inventoryItems } = useOfflineTable('inventory_items', hospital?.id)
   const { records: labTests } = useOfflineTable('lab_tests', hospital?.id)
   const { records: allMessages } = useOfflineTable('messages', hospital?.id)
-
-  // DB-backed role permissions (hospital_role_permissions). Loaded so
-  // the sidebar builder can read admin customizations instead of
-  // falling back to the hardcoded ROLE_MODULES map in permissions.js.
-  // When the table is empty (hospital hasn't customized anything),
-  // getAccessibleModulesWithDb() falls back to the hardcoded defaults
-  // anyway — so this is backward-compatible.
-  const { records: dbRolePerms } = useOfflineTable('hospital_role_permissions', hospital?.id)
 
   // ---- Registration fees (folder-prices feature) -------------------
   // Same flow as Reception: when a patient is added via the quick-add
