@@ -62,6 +62,16 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   const { records: creditNotes } = useOfflineTable('credit_notes', hospital?.id)
   const { records: deposits } = useOfflineTable('deposits', hospital?.id)
 
+  // Patient wallets — needed so the Overview tab can show the live wallet
+  // balance and have it drop to ₦0 the moment a cashier auto-deducts from
+  // it (CashierWorkspace writes a patient_wallet_transactions row, the
+  // trg_sync_wallet_balance DB trigger updates patient_wallets.balance,
+  // and our realtime subscription refetches so the UI reflects the change
+  // instantly — no manual refresh needed).
+  const { records: wallets, syncFromServer: syncWallets } = useOfflineTable('patient_wallets', hospital?.id)
+  useRealtimeAlert('patient_wallets', hospital?.id, () => { syncWallets() }, { event: 'UPDATE' })
+  useRealtimeAlert('patient_wallet_transactions', hospital?.id, () => { syncWallets() })
+
   // Phase 5: lab orders for the unified clinical History tab
   const { records: labOrders } = useOfflineTable('lab_orders', hospital?.id)
   // Phase 5 fix: lab_tests holds the actual completed results (status
@@ -321,6 +331,18 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
 
   const outstandingBalance = patientInvoices.filter(inv => inv.status === 'unpaid').reduce((sum, inv) => sum + Number(inv.amount), 0)
 
+  // Live wallet balance for this patient. Mirrors the lookup in
+  // PatientWallet.jsx + CashierWorkspace.jsx. HMO folder patients don't
+  // get wallet deductions (bypassed per CashierWorkspace logic), so we
+  // still resolve their wallet — they just don't see deductions against
+  // it. The value updates instantly via the useRealtimeAlert hooks
+  // above when the DB trigger fires.
+  const patientWallet = useMemo(
+    () => wallets.find(w => w.patient_id === patient.id) || null,
+    [wallets, patient.id]
+  )
+  const walletBalance = Number(patientWallet?.balance || 0)
+
   const patientDrugChart = drugChartEntries
     .filter(e => e.patient_id === patient.id)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
@@ -534,7 +556,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
 
         <div className="thin-scroll" style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
           {tab === 'Overview' && (
-            <OverviewTab patient={patient} latestConsultation={history[0]} activePrescriptions={activePrescriptions} outstandingBalance={outstandingBalance} admissionRequest={activeAdmissionRequest} />
+            <OverviewTab patient={patient} latestConsultation={history[0]} activePrescriptions={activePrescriptions} outstandingBalance={outstandingBalance} walletBalance={walletBalance} admissionRequest={activeAdmissionRequest} />
           )}
           {tab === 'Vitals' && (
             <VitalsTab
@@ -937,7 +959,7 @@ function AdmissionStatusCard({ request }){
   )
 }
 
-function OverviewTab({ patient, latestConsultation, activePrescriptions, outstandingBalance, admissionRequest }){
+function OverviewTab({ patient, latestConsultation, activePrescriptions, outstandingBalance, walletBalance, admissionRequest }){
   return (
     <div>
       <AdmissionStatusCard request={admissionRequest} />
@@ -970,17 +992,31 @@ function OverviewTab({ patient, latestConsultation, activePrescriptions, outstan
         {detailRow('Queue Status', patient.queue_status ? patient.queue_status.replace('_', ' ') : 'Not in queue')}
         {detailRow('Patient Status', patient.status === 'stable' ? 'Stable' : 'In Review')}
       </div>
-      <div className="dash-stats" style={{ gridTemplateColumns: 'repeat(2, 1fr)', marginBottom: 20 }}>
+      {/* Three financial stat cards: wallet balance, outstanding balance,
+          and active prescriptions. Wallet balance updates LIVE the moment
+          a cashier auto-deducts from it (via the useRealtimeAlert hooks
+          on patient_wallets + patient_wallet_transactions), so when a
+          patient's wallet is fully used it visibly drops to ₦0 here —
+          matching what just happened at the billing desk. */}
+      <div className="dash-stats" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 20 }}>
         <div className="dash-stat-card">
           <div>
-            <div className="dash-stat-label">Active Prescriptions</div>
-            <div className="dash-stat-value">{activePrescriptions.length}</div>
+            <div className="dash-stat-label">Wallet Balance</div>
+            <div className="dash-stat-value" style={{ color: walletBalance > 0 ? 'var(--teal)' : 'var(--muted)' }}>
+              ₦{walletBalance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
           </div>
         </div>
         <div className="dash-stat-card">
           <div>
             <div className="dash-stat-label">Outstanding Balance</div>
             <div className="dash-stat-value" style={{ color: outstandingBalance > 0 ? 'var(--gold)' : undefined }}>₦{outstandingBalance.toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="dash-stat-card">
+          <div>
+            <div className="dash-stat-label">Active Prescriptions</div>
+            <div className="dash-stat-value">{activePrescriptions.length}</div>
           </div>
         </div>
       </div>
