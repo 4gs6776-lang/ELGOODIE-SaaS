@@ -6,6 +6,7 @@ import {
 } from './hospital/widgets'
 import AppIcon from '../icons'
 import { formatWeekdayDate, formatTime, relativeShort, relativeTime } from '../../lib/datetime'
+import PerformanceBoard from './hospital/PerformanceBoard'
 
 // =====================================================================
 // GOODIE-MEDHUB — Hospital overview (redesign — performance optimized)
