@@ -83,6 +83,7 @@ const DoctorWorkbench = lazy(() => import('./DoctorWorkbench'))
 const Nursing         = lazy(() => import('./Nursing'))
 const DutyRoster      = lazy(() => import('./DutyRoster'))
 const IPD             = lazy(() => import('./IPD'))
+const RevenueCycle    = lazy(() => import('./RevenueCycle'))
 const Admissions      = lazy(() => import('./Admissions'))
 const Reception       = lazy(() => import('./Reception'))
 import PatientProfile from '../../components/PatientProfile'
@@ -157,6 +158,7 @@ const NAV_ITEMS = [
   { key: 'patients', label: 'Patients', section: 'Main', icon: 'users' },
   { key: 'reception', label: 'Reception', section: 'Main', icon: 'reception' },
   { key: 'billing', label: 'Billing & Invoices', section: 'Main', icon: 'billing' },
+  { key: 'revenue-cycle', label: 'Revenue Cycle', section: 'Main', icon: 'billing' },
   { key: 'laboratory', label: 'Laboratory', section: 'Main', icon: 'lab' },
   { key: 'pharmacy', label: 'Pharmacy', section: 'Main', icon: 'pharmacy' },
   { key: 'radiology', label: 'Radiology', section: 'Main', icon: 'radiology' },
@@ -1579,6 +1581,7 @@ export default function Dashboard(){
           {tab === 'hmo-patients' && <HmoPatients />}
           {tab === 'anc-patients' && <AncPatients />}
           {tab === 'billing' && <Billing initialSearch={deepLinkSearch}/>}
+          {tab === 'revenue-cycle' && <RevenueCycle />}
           {tab === 'laboratory' && <Laboratory />}
           {tab === 'pharmacy' && <Pharmacy />}
           {tab === 'radiology' && <Radiology />}
