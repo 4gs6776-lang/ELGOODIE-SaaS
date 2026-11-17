@@ -14,6 +14,8 @@ import './theme/login-neo.css'
 import './theme/handover.css'
 import './theme/hospital-dash.css'
 import './theme/glass.css'
+import './theme/healthcare-ui.css'
+import './theme/performance-board.css'
 import './theme/pagination.css'
 // mobile.css MUST be imported last (its own header demands it).
 import './theme/mobile.css'
