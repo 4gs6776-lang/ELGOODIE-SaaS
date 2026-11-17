@@ -64,6 +64,14 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
 
   // Phase 5: lab orders for the unified clinical History tab
   const { records: labOrders } = useOfflineTable('lab_orders', hospital?.id)
+  // Phase 5 fix: lab_tests holds the actual completed results (status
+  // 'completed', result_value, verified_by, etc.). lab_orders stays
+  // 'pending' forever — only the lab_tests child row progresses. The
+  // History tab must read BOTH tables, or completed lab results never
+  // appear (the bug: only lab_orders was loaded, and it never
+  // reaches 'completed', so the history's lab section was always empty
+  // for tests the lab actually finished).
+  const { records: labTests } = useOfflineTable('lab_tests', hospital?.id)
   // Phase 5: radiology scans + appointments for the "Everything" history
   const { records: radiologyScans } = useOfflineTable('radiology_scans', hospital?.id)
   const { records: appointments } = useOfflineTable('appointments', hospital?.id)
@@ -545,6 +553,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
               history={history}
               prescriptions={patientPrescriptions}
               labOrders={labOrders.filter(lo => lo.patient_id === patient?.id || lo.patient_name === patient?.full_name)}
+              labTests={labTests.filter(lt => lt.patient_id === patient?.id || lt.patient_name === patient?.full_name)}
               patientId={patient?.id}
               patient={patient}
               invoices={invoices.filter(inv => inv.patient_id === patient?.id || inv.patient_name === patient?.full_name)}
@@ -990,7 +999,7 @@ function OverviewTab({ patient, latestConsultation, activePrescriptions, outstan
   )
 }
 
-function HistoryTab({ history, prescriptions = [], labOrders = [], patientId, patient, invoices = [], payments = [], radiologyScans = [], appointments = [], stockRecords = [], creditNotes = [], timezone }){
+function HistoryTab({ history, prescriptions = [], labOrders = [], labTests = [], patientId, patient, invoices = [], payments = [], radiologyScans = [], appointments = [], stockRecords = [], creditNotes = [], timezone }){
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize] = useState(10)
   const [searchQuery, setSearchQuery] = useState('')
@@ -1058,6 +1067,33 @@ function HistoryTab({ history, prescriptions = [], labOrders = [], patientId, pa
         title: lo.test_name || lo.test_type || 'Lab test',
         summary: `Status: ${lo.status || 'pending'}${lo.urgency ? ` · ${lo.urgency}` : ''}${lo.result_value ? ` · Result: ${lo.result_value}` : ''}`,
         details: { labOrder: lo },
+      })
+    })
+
+    // 3b. Lab tests (the actual completed results). lab_orders only
+    // ever holds the doctor's REQUEST; the lab_tests table holds the
+    // completed result row (status 'completed', result_value, verified_by,
+    // completed_at). Without this block, the History tab never shows
+    // finished lab results — that's the bug we're fixing.
+    // Each lab_test gets its own timeline entry so a doctor can see
+    // both the request and the result. We DON'T deduplicate against
+    // lab_orders here because the two tables are linked by test_name +
+    // patient + approximate date, not by a foreign key, and forcing a
+    // match would risk hiding real results.
+    labTests.forEach(lt => {
+      events.push({
+        id: `labtest-${lt.id}`,
+        date: lt.completed_at || lt.requested_at || lt.created_at,
+        type: 'lab',
+        typeLabel: lt.status === 'completed' ? 'Lab Result' : 'Lab Test',
+        color: 'var(--violet)',
+        bg: 'rgba(118,87,232,0.10)',
+        title: lt.test_name || 'Lab test',
+        summary: `Status: ${lt.status || 'pending'}` +
+                 `${lt.result ? ` · Result: ${lt.result}` : ''}` +
+                 `${lt.result_value ? ` · ${lt.result_value}` : ''}` +
+                 `${lt.verified_by ? ` · Verified by ${lt.verified_by}` : ''}`,
+        details: { labTest: lt },
       })
     })
 
