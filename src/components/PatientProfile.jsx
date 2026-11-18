@@ -274,6 +274,19 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     setTimeout(() => setToast(null), 3000)
   }
 
+  // Live wallet balance for this patient. MUST run before any early
+  // return (React's Rules of Hooks) — patientId is the stable prop
+  // passed into the component, so the lookup is safe even on the
+  // loading render where `patient` is still null. The wallet updates
+  // instantly via the useRealtimeAlert hooks above (patient_wallets
+  // UPDATE + patient_wallet_transactions INSERT) when the DB trigger
+  // fires after a cashier auto-deducts from it.
+  const patientWallet = useMemo(
+    () => wallets.find(w => w.patient_id === patientId) || null,
+    [wallets, patientId]
+  )
+  const walletBalance = Number(patientWallet?.balance || 0)
+
   if (!patient) {
     return (
       <div style={overlayStyle}>
@@ -330,18 +343,6 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
   const outstandingBalance = patientInvoices.filter(inv => inv.status === 'unpaid').reduce((sum, inv) => sum + Number(inv.amount), 0)
-
-  // Live wallet balance for this patient. Mirrors the lookup in
-  // PatientWallet.jsx + CashierWorkspace.jsx. HMO folder patients don't
-  // get wallet deductions (bypassed per CashierWorkspace logic), so we
-  // still resolve their wallet — they just don't see deductions against
-  // it. The value updates instantly via the useRealtimeAlert hooks
-  // above when the DB trigger fires.
-  const patientWallet = useMemo(
-    () => wallets.find(w => w.patient_id === patient.id) || null,
-    [wallets, patient.id]
-  )
-  const walletBalance = Number(patientWallet?.balance || 0)
 
   const patientDrugChart = drugChartEntries
     .filter(e => e.patient_id === patient.id)
