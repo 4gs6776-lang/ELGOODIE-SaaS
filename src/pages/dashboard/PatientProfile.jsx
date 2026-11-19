@@ -94,7 +94,12 @@ export default function PatientProfile({ patientId, onClose }){
     .filter(inv => inv.patient_id === patient.id || inv.patient_name === patient.full_name)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
-  const outstandingBalance = patientInvoices.filter(inv => inv.status === 'unpaid').reduce((sum, inv) => sum + Number(inv.amount), 0)
+  // FIX: use inv.balance (remaining) instead of inv.amount (full total),
+  // and include 'partial' invoices too. See components/PatientProfile.jsx
+  // for the full rationale.
+  const outstandingBalance = patientInvoices
+    .filter(inv => inv.status === 'unpaid' || inv.status === 'partial')
+    .reduce((sum, inv) => sum + Number(inv.balance ?? inv.amount ?? 0), 0)
 
   const patientDrugChart = drugChartEntries
     .filter(e => e.patient_id === patient.id)

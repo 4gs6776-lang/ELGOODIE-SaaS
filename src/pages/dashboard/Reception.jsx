@@ -28,6 +28,11 @@ const GENOTYPES = ['AA','AS','SS','AC']
 const MARITAL_STATUSES = ['Single','Married','Widow','Widower','Divorced']
 const RELIGIONS = ['Christianity','Islam','Traditional','Other']
 
+// NOTE: the above arrays are duplicated in src/lib/patientFormConstants.js
+// for use by PatientProfile.jsx → EditInfoTab. If you add a new value here,
+// add it there too. (Kept inline in Reception to avoid churning this
+// large file; the canonical copy is the lib/ file.)
+
 const CATEGORIES = [
   { value: 'personal',  label: 'Personal Folder',  defaultPrice: DEFAULT_REGISTRATION_FEES.personal },
   { value: 'family',    label: 'Family Folder',    defaultPrice: DEFAULT_REGISTRATION_FEES.family },

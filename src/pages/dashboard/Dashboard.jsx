@@ -90,6 +90,10 @@ import PatientProfile from '../../components/PatientProfile'
 const Messages        = lazy(() => import('./Messages'))
 const ShiftHandover   = lazy(() => import('./ShiftHandover'))
 const AiDiagnostics   = lazy(() => import('./AiDiagnostics'))
+// Phase 6: clinical workflow modules — Delivery, Operating Theatre (Thaether), Discharge
+const Delivery        = lazy(() => import('./Delivery'))
+const OperatingTheatre = lazy(() => import('./OperatingTheatre'))
+const Discharge       = lazy(() => import('./Discharge'))
 import DashboardOverview from '../../components/dashboard/DashboardOverview'
 import { useMedicationReminders } from '../../hooks/useMedicationReminders'
 import { usePagination } from '../../lib/usePagination'
@@ -164,7 +168,14 @@ const NAV_ITEMS = [
   { key: 'radiology', label: 'Radiology', section: 'Main', icon: 'radiology' },
   { key: 'inventory', label: 'Inventory', section: 'Main', icon: 'inventory' },
   { key: 'hmo-patients', label: 'HMO Patients', section: 'Main', icon: 'insurance' },
-  { key: 'anc-patients', label: 'ANC Patients', section: 'Main', icon: 'nurse' },
+    { key: 'anc-patients', label: 'ANC Patients', section: 'Main', icon: 'nurse' },
+    // Phase 6: clinical workflow modules — Delivery, Operating Theatre
+    // (Thaether), Discharge. Use snake_case keys so role gating in
+    // permissions.js matches correctly (NAV_ITEMS.filter(item =>
+    // allowedKeys.includes(item.key))).
+    { key: 'delivery', label: 'Delivery Register', section: 'Main', icon: 'nurse' },
+    { key: 'operating_theatre', label: 'Operating Theatre', section: 'Operations', icon: 'bed' },
+    { key: 'discharge', label: 'Discharge Workflow', section: 'Operations', icon: 'check' },
   { key: 'staff', label: 'Staff', section: 'Operations', icon: 'users' },
   { key: 'doctor', label: 'Doctor Workbench', section: 'Operations', icon: 'doctor' },
   { key: 'nursing', label: 'Nursing / Triage', section: 'Operations', icon: 'nurse' },
@@ -191,6 +202,10 @@ const PAGE_TITLES = {
   notifications: 'Reminders & Alerts', settings: 'Settings', ipd: 'IPD Management',
   reception: 'Reception', admissions: 'Admissions', roster: 'Duty Roster', messages: 'Messages',
   handover: 'Shift Handover', subscription: 'Subscription',
+  // Phase 6: clinical workflow modules
+  delivery: 'Delivery Register',
+  operating_theatre: 'Operating Theatre',
+  discharge: 'Discharge Workflow',
 }
 
 const COMMON_ACCESS = ['overview', 'roster', 'notifications', 'messages', 'settings']
@@ -1581,6 +1596,9 @@ export default function Dashboard(){
           {tab === 'reception' && <Reception />}
           {tab === 'hmo-patients' && <HmoPatients />}
           {tab === 'anc-patients' && <AncPatients />}
+          {tab === 'delivery' && <Delivery />}
+          {tab === 'operating_theatre' && <OperatingTheatre />}
+          {tab === 'discharge' && <Discharge />}
           {tab === 'billing' && <Billing initialSearch={deepLinkSearch}/>}
           {tab === 'revenue-cycle' && <RevenueCycle />}
           {tab === 'laboratory' && <Laboratory />}
