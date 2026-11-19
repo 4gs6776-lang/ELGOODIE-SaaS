@@ -90,6 +90,10 @@ export const MODULES = [
   'hmo_patients',
   'anc_patients',
   'ai_diagnostics',
+  // Phase 6: clinical workflow modules
+  'delivery',
+  'operating_theatre',
+  'discharge',
 ]
 
 // Module labels for the Admin UI (human-readable names)
@@ -118,6 +122,9 @@ export const MODULE_LABELS = {
   hmo_patients: 'HMO Patients',
   anc_patients: 'ANC Patients',
   ai_diagnostics: 'AI Diagnostics',
+  delivery: 'Delivery Register',
+  operating_theatre: 'Operating Theatre',
+  discharge: 'Discharge Workflow',
 }
 
 // Roles that can be configured (owner excluded — always full access)
@@ -142,22 +149,32 @@ const ROLE_MODULES = {
     ...COMMON_ACCESS,
     'patients', 'hmo_patients', 'anc_patients', 'appointments',
     'doctor', 'ipd', 'admissions', 'handover', 'ai_diagnostics',
+    // Phase 6 clinical workflow modules
+    'delivery', 'operating_theatre', 'discharge',
   ],
   nurse: [
     ...COMMON_ACCESS,
     'patients', 'hmo_patients', 'anc_patients', 'appointments',
     'nursing', 'ipd', 'admissions', 'handover', 'reception',
     'laboratory', 'radiology', 'ai_diagnostics',
+    // Phase 6 clinical workflow modules
+    'delivery', 'operating_theatre', 'discharge',
   ],
   front_desk: [
     ...COMMON_ACCESS,
     'patients', 'hmo_patients', 'anc_patients', 'reception',
     'appointments', 'insurance', 'admissions',
+    // Front desk can see the discharge workflow (so they can prepare
+    // discharge paperwork), but cannot sign off on any step.
+    'discharge',
   ],
   pharmacist: [
     ...COMMON_ACCESS,
     'patients', 'hmo_patients', 'anc_patients', 'pharmacy',
     'inventory', 'handover',
+    // Pharmacists need to see the discharge workflow to fulfill the
+    // take-home drugs that the doctor prescribed.
+    'discharge',
   ],
   lab: [
     ...COMMON_ACCESS,
@@ -168,6 +185,9 @@ const ROLE_MODULES = {
     ...COMMON_ACCESS,
     'patients', 'hmo_patients', 'anc_patients', 'billing',
     'insurance',
+    // Billing clears the patient's outstanding balance as part of the
+    // multi-step discharge flow.
+    'discharge',
   ],
   staff: [...COMMON_ACCESS],
   cmd: [
@@ -176,6 +196,8 @@ const ROLE_MODULES = {
     'appointments', 'doctor', 'nursing', 'ipd', 'admissions',
     'handover', 'pharmacy', 'laboratory', 'radiology', 'inventory',
     'billing', 'insurance', 'reports', 'ai_diagnostics', 'staff',
+    // CMD (read-only) sees every clinical module too.
+    'delivery', 'operating_theatre', 'discharge',
   ],
 }
 
