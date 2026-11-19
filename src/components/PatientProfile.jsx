@@ -10,6 +10,11 @@ import { writeAudit } from '../lib/audit'
 import { formatDateTime, getTimezone } from '../lib/datetime'
 import { computePatientStatement } from '../lib/billingService'
 import { canWithDb } from '../lib/permissions'
+import {
+  BLOOD_GROUPS, GENOTYPES, MARITAL_STATUSES, RELIGIONS,
+  NIGERIAN_STATES, AFRICAN_COUNTRIES, PATIENT_CATEGORIES,
+  calculateAgeFromDob, calculateEddFromLmp,
+} from '../lib/patientFormConstants'
 
 const TABS = ['Overview', 'Vitals', 'Wallet', 'History', 'Items Given', 'Prescriptions', 'Drug Chart', 'Pharmacy', 'Billing', 'Statement', 'Edit Info']
 // Full-screen patient dashboard, opened by clicking a patient anywhere in
@@ -352,7 +357,29 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .filter(inv => inv.patient_id === patient.id || inv.patient_name === patient.full_name)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
-  const outstandingBalance = patientInvoices.filter(inv => inv.status === 'unpaid').reduce((sum, inv) => sum + Number(inv.amount), 0)
+  // -----------------------------------------------------------------
+  // FIX: outstandingBalance now uses `inv.balance` (the remaining
+  // amount after partial payments) instead of `inv.amount` (the full
+  // grand total), and includes BOTH 'unpaid' AND 'partial' invoices
+  // in the sum.
+  //
+  // Previously this used `inv.amount` AND filtered only by
+  // `status === 'unpaid'`, so:
+  //   • A draft saved with ₦1000 paid on a ₦3000 bill showed the
+  //     patient owing the full ₦3000 instead of ₦2000 (because the
+  //     draft was stored as status='unpaid' with amount=3000).
+  //   • A finalized invoice with a partial payment (status='partial',
+  //     balance=2000) was silently EXCLUDED from the outstanding
+  //     balance — making the patient appear to owe ₦0.
+  //
+  // The balance column is computed as `amount_paid - amount` (with
+  // wallet deductions) in CashierWorkspace.handleGenerateInvoice and
+  // handleSaveAsDraft — it correctly represents what the patient still
+  // owes. Using `inv.balance` directly is the right value.
+  // -----------------------------------------------------------------
+  const outstandingBalance = patientInvoices
+    .filter(inv => inv.status === 'unpaid' || inv.status === 'partial')
+    .reduce((sum, inv) => sum + Number(inv.balance ?? inv.amount ?? 0), 0)
 
   const patientDrugChart = drugChartEntries
     .filter(e => e.patient_id === patient.id)
@@ -784,7 +811,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
             />
           )}
           {tab === 'Edit Info' && (
-            <EditInfoTab patient={patient} updatePatient={updatePatient} showToast={showToast} />
+            <EditInfoTab patient={patient} updatePatient={updatePatient} showToast={showToast} profile={profile} hospital={hospital} />
           )}
         </div>
 
@@ -1141,6 +1168,22 @@ function OverviewTab({ patient, latestConsultation, activePrescriptions, outstan
         {detailRow('Next of Kin Address', patient.next_of_kin_address)}
         {patient.category === 'anc' && detailRow('ANC — LMP', patient.anc_lmp ? new Date(patient.anc_lmp).toLocaleDateString() : null)}
         {patient.category === 'anc' && detailRow('ANC — EDD', patient.anc_edd ? new Date(patient.anc_edd).toLocaleDateString() : null)}
+        {/* Delivery status — auto-set by the Delivery module when a delivery
+            is recorded. Replaces the original "EDD" line with a clear
+            "Delivered on <date>" / "Miscarried on <date>" once the
+            patient's pregnancy has ended. */}
+        {patient.category === 'anc' && patient.anc_delivery_status === 'delivered' && detailRow(
+          'ANC — Delivery',
+          patient.anc_delivery_date
+            ? `Delivered on ${new Date(patient.anc_delivery_date).toLocaleDateString()}`
+            : 'Delivered (date not recorded)'
+        )}
+        {patient.category === 'anc' && patient.anc_delivery_status === 'miscarried' && detailRow(
+          'ANC — Delivery',
+          patient.anc_delivery_date
+            ? `Miscarried on ${new Date(patient.anc_delivery_date).toLocaleDateString()}`
+            : 'Miscarried (date not recorded)'
+        )}
         {patient.category === 'anc' && detailRow('ANC — Indication', patient.anc_indication)}
         {patient.category === 'anc' && detailRow('ANC — Husband', patient.anc_husband_name)}
         {detailRow('Queue Status', patient.queue_status ? patient.queue_status.replace('_', ' ') : 'Not in queue')}
@@ -2044,43 +2087,178 @@ function StatementTab({ patient, invoices, payments, creditNotes, deposits, hosp
   )
 }
 
-function EditInfoTab({ patient, updatePatient, showToast }){
+// =====================================================================
+// EditInfoTab — full patient demographics editor.
+// ---------------------------------------------------------------------
+// Mirrors the Reception registration form (Reception.jsx) field-for-
+// field, so editing a patient from their profile exposes the SAME
+// controls Reception uses (controlled <select> dropdowns for blood
+// group / genotype / marital status / religion / state of origin /
+// nationality, conditional ANC + HMO sections, next-of-kin block).
+//
+// Reception writes ~33 fields; the previous EditInfoTab only exposed
+// 10 of them (full_name, age, gender, phone, status, blood_group,
+// genotype, emergency_contact_name, emergency_contact_phone, address),
+// using free-text inputs for blood group and genotype (so a typo
+// like "0+" instead of "O+" was possible). This new version exposes
+// every editable patient attribute and uses the shared option arrays
+// from lib/patientFormConstants.js so the validation matches Reception.
+//
+// updatePatient accepts a PARTIAL payload (useOfflineTable.updateRecord
+// spreads ...existing first), so we only send fields the user actually
+// touched — but we still send every form field so an explicit clear
+// (e.g. removing a phone number) is persisted as null.
+// =====================================================================
+function EditInfoTab({ patient, updatePatient, showToast, profile, hospital }) {
   const [form, setForm] = useState(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     setForm({
-      full_name: patient.full_name || '',
-      age: patient.age ?? '',
-      gender: patient.gender || '',
+      // Biodata
+      surname: patient.surname || '',
+      other_names: patient.other_names || '',
       phone: patient.phone || '',
+      email: patient.email || '',
+      gender: patient.gender || '',
+      marital_status: patient.marital_status || '',
+      date_of_birth: patient.date_of_birth || '',
+      age: patient.age ?? '',
       blood_group: patient.blood_group || '',
       genotype: patient.genotype || '',
-      emergency_contact_name: patient.emergency_contact_name || '',
-      emergency_contact_phone: patient.emergency_contact_phone || '',
+      nationality: patient.nationality || '',
+      state_of_origin: patient.state_of_origin || '',
+      occupation: patient.occupation || '',
+      religion: patient.religion || '',
+      category: patient.category || 'personal',
       address: patient.address || '',
       status: patient.status || 'stable',
+
+      // Next of kin
+      emergency_contact_name: patient.emergency_contact_name || '',
+      next_of_kin_relationship: patient.next_of_kin_relationship || '',
+      emergency_contact_phone: patient.emergency_contact_phone || '',
+      next_of_kin_address: patient.next_of_kin_address || '',
+
+      // ANC (only relevant when category === 'anc')
+      anc_special_point: patient.anc_special_point || '',
+      anc_date_of_booking: patient.anc_date_of_booking || '',
+      anc_indication: patient.anc_indication || '',
+      anc_lmp: patient.anc_lmp || '',
+      anc_edd: patient.anc_edd || '',
+      anc_husband_name: patient.anc_husband_name || '',
+      anc_husband_occupation: patient.anc_husband_occupation || '',
+      anc_employer: patient.anc_employer || '',
+
+      // HMO (only relevant when category === 'hmo')
+      hmo_provider: patient.hmo_provider || '',
+      hmo_id_code: patient.hmo_id_code || '',
+      hmo_plan: patient.hmo_plan || '',
+      hmo_number: patient.hmo_number || '',
+      hmo_coverage_percent: patient.hmo_coverage_percent || '',
+      hmo_authorization_code: patient.hmo_authorization_code || '',
+      hmo_authorization_date: patient.hmo_authorization_date || '',
+      hmo_authorization_expires: patient.hmo_authorization_expires || '',
     })
   }, [patient.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!form) return null
 
-  async function handleSave(e){
+  const set = (key, value) => setForm(f => ({ ...f, [key]: value }))
+
+  // When the user changes the DOB, recompute the age automatically —
+  // same behaviour as Reception's handleDobChange.
+  function handleDobChange(value) {
+    setForm(f => ({
+      ...f,
+      date_of_birth: value,
+      age: calculateAgeFromDob(value),
+    }))
+  }
+
+  // When the user changes the LMP, recompute the EDD — same as
+  // Reception's handleLmpChange.
+  function handleLmpChange(value) {
+    setForm(f => ({
+      ...f,
+      anc_lmp: value,
+      anc_edd: calculateEddFromLmp(value),
+    }))
+  }
+
+  async function handleSave(e) {
     e.preventDefault()
     setSaving(true)
     try {
+      // Compose full_name from surname + other_names so the patient
+      // list / search keeps working with the existing single-name
+      // field. If only surname was filled in, fall back to that.
+      const surname = String(form.surname || '').trim()
+      const otherNames = String(form.other_names || '').trim()
+      const fullName = `${surname} ${otherNames}`.trim() || surname
+
+      // When the category is switched AWAY from 'anc' or 'hmo', null
+      // out the now-irrelevant fields so stale ANC/HMO data doesn't
+      // linger on the patient record. Mirrors Reception's behaviour
+      // (it writes null for ANC fields when category !== 'anc').
+      const isAnc = form.category === 'anc'
+      const isHmo = form.category === 'hmo'
+
       await updatePatient(patient.id, {
-        full_name: form.full_name,
-        age: form.age === '' ? null : parseInt(form.age, 10),
-        gender: form.gender || null,
+        full_name: fullName,
+        surname: surname || null,
+        other_names: otherNames || null,
         phone: form.phone || null,
+        email: form.email || null,
+        gender: form.gender || null,
+        marital_status: form.marital_status || null,
+        date_of_birth: form.date_of_birth || null,
+        age: form.age === '' ? null : parseInt(form.age, 10),
         blood_group: form.blood_group || null,
         genotype: form.genotype || null,
-        emergency_contact_name: form.emergency_contact_name || null,
-        emergency_contact_phone: form.emergency_contact_phone || null,
+        nationality: form.nationality || null,
+        state_of_origin: form.state_of_origin || null,
+        occupation: form.occupation || null,
+        religion: form.religion || null,
+        category: form.category,
         address: form.address || null,
         status: form.status,
+
+        emergency_contact_name: form.emergency_contact_name || null,
+        next_of_kin_relationship: form.next_of_kin_relationship || null,
+        emergency_contact_phone: form.emergency_contact_phone || null,
+        next_of_kin_address: form.next_of_kin_address || null,
+
+        anc_special_point: isAnc ? (form.anc_special_point || null) : null,
+        anc_date_of_booking: isAnc ? (form.anc_date_of_booking || null) : null,
+        anc_indication: isAnc ? (form.anc_indication || null) : null,
+        anc_lmp: isAnc ? (form.anc_lmp || null) : null,
+        anc_edd: isAnc ? (form.anc_edd || null) : null,
+        anc_husband_name: isAnc ? (form.anc_husband_name || null) : null,
+        anc_husband_occupation: isAnc ? (form.anc_husband_occupation || null) : null,
+        anc_employer: isAnc ? (form.anc_employer || null) : null,
+
+        hmo_provider: isHmo ? (form.hmo_provider || null) : null,
+        hmo_id_code: isHmo ? (form.hmo_id_code || null) : null,
+        hmo_plan: isHmo ? (form.hmo_plan || null) : null,
+        hmo_number: isHmo ? (form.hmo_number || null) : null,
+        hmo_coverage_percent: isHmo ? (form.hmo_coverage_percent === '' ? null : Number(form.hmo_coverage_percent)) : null,
+        hmo_authorization_code: isHmo ? (form.hmo_authorization_code || null) : null,
+        hmo_authorization_date: isHmo ? (form.hmo_authorization_date || null) : null,
+        hmo_authorization_expires: isHmo ? (form.hmo_authorization_expires || null) : null,
       })
+
+      writeAudit({
+        hospitalId: patient.hospital_id || hospital?.id, actor: profile,
+        action: 'patient.update_from_profile',
+        entityType: 'patient', entityId: patient.id,
+        patientId: patient.id,
+        summary: `Updated patient details for ${fullName || patient.full_name} from Patient Profile → Edit Info`,
+        metadata: {
+          changed_category: form.category !== patient.category ? { from: patient.category, to: form.category } : null,
+        },
+      })
+
       showToast('Patient details updated')
     } catch (err) {
       showToast(err.message || 'Could not save changes')
@@ -2091,22 +2269,214 @@ function EditInfoTab({ patient, updatePatient, showToast }){
 
   return (
     <form onSubmit={handleSave}>
+      {/* -------- Patient Biodata -------- */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, margin: '6px 0 10px' }}>Patient Biodata</div>
+      <div className="dash-field-grid">
+        <div className="field">
+          <label>Surname *</label>
+          <input value={form.surname} onChange={e => set('surname', e.target.value)} placeholder="Required" />
+        </div>
+        <div className="field">
+          <label>Other Names *</label>
+          <input value={form.other_names} onChange={e => set('other_names', e.target.value)} placeholder="Required" />
+        </div>
+        <div className="field">
+          <label>Tel</label>
+          <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="e.g. 0803 000 0000" />
+        </div>
+        <div className="field">
+          <label>Email</label>
+          <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="optional" />
+        </div>
+        <div className="field">
+          <label>Gender</label>
+          <select value={form.gender} onChange={e => set('gender', e.target.value)}>
+            <option value="">—</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Marital Status</label>
+          <select value={form.marital_status} onChange={e => set('marital_status', e.target.value)}>
+            <option value="">—</option>
+            {MARITAL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Date of Birth</label>
+          <input type="date" value={form.date_of_birth} max={new Date().toISOString().slice(0, 10)} onChange={e => handleDobChange(e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Age (auto)</label>
+          <input type="number" value={form.age} readOnly style={{ background: 'var(--bg-elevated)', color: 'var(--muted)' }} placeholder="auto from DOB" />
+        </div>
+        <div className="field">
+          <label>Blood Group</label>
+          <select value={form.blood_group} onChange={e => set('blood_group', e.target.value)}>
+            <option value="">—</option>
+            {BLOOD_GROUPS.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Genotype</label>
+          <select value={form.genotype} onChange={e => set('genotype', e.target.value)}>
+            <option value="">—</option>
+            {GENOTYPES.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Nationality</label>
+          <input list="nationality-list" value={form.nationality} onChange={e => set('nationality', e.target.value)} placeholder="Start typing…" />
+          <datalist id="nationality-list">{AFRICAN_COUNTRIES.map(c => <option key={c} value={c} />)}</datalist>
+        </div>
+        <div className="field">
+          <label>State of Origin</label>
+          <select value={form.state_of_origin} onChange={e => set('state_of_origin', e.target.value)}>
+            <option value="">—</option>
+            {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Occupation</label>
+          <input value={form.occupation} onChange={e => set('occupation', e.target.value)} />
+        </div>
+        <div className="field">
+          <label>Religion</label>
+          <select value={form.religion} onChange={e => set('religion', e.target.value)}>
+            <option value="">—</option>
+            {RELIGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Patient Category</label>
+          <select value={form.category} onChange={e => set('category', e.target.value)}>
+            {PATIENT_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Patient Status</label>
+          <select value={form.status} onChange={e => set('status', e.target.value)}>
+            <option value="stable">Stable</option>
+            <option value="review">In Review</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+      </div>
       <div className="field">
-        <label>Full Name</label>
-        <input value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
+        <label>Home Address</label>
+        <input value={form.address} onChange={e => set('address', e.target.value)} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div className="field"><label>Age</label><input type="number" value={form.age} onChange={e => setForm(f => ({ ...f, age: e.target.value }))} /></div>
-        <div className="field"><label>Gender</label><select value={form.gender} onChange={e => setForm(f => ({ ...f, gender: e.target.value }))}><option value="">—</option><option value="Male">Male</option><option value="Female">Female</option></select></div>
-        <div className="field"><label>Phone</label><input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
-        <div className="field"><label>Patient Status</label><select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}><option value="stable">Stable</option><option value="review">In Review</option></select></div>
-        <div className="field"><label>Blood Group</label><input value={form.blood_group} onChange={e => setForm(f => ({ ...f, blood_group: e.target.value }))} placeholder="e.g. O+" /></div>
-        <div className="field"><label>Genotype</label><input value={form.genotype} onChange={e => setForm(f => ({ ...f, genotype: e.target.value }))} placeholder="e.g. AA" /></div>
-        <div className="field"><label>Emergency Contact Name</label><input value={form.emergency_contact_name} onChange={e => setForm(f => ({ ...f, emergency_contact_name: e.target.value }))} /></div>
-        <div className="field"><label>Emergency Contact Phone</label><input value={form.emergency_contact_phone} onChange={e => setForm(f => ({ ...f, emergency_contact_phone: e.target.value }))} /></div>
+
+      {/* -------- ANC-specific (conditional) -------- */}
+      {form.category === 'anc' && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--violet)', textTransform: 'uppercase', letterSpacing: 1, margin: '22px 0 10px' }}>ANC Specific Details</div>
+          <div className="dash-field-grid">
+            <div className="field">
+              <label>Special Point</label>
+              <input value={form.anc_special_point} onChange={e => set('anc_special_point', e.target.value)} placeholder="e.g. First pregnancy" />
+            </div>
+            <div className="field">
+              <label>Date of Booking</label>
+              <input type="date" value={form.anc_date_of_booking} onChange={e => set('anc_date_of_booking', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Indication for Booking</label>
+              <input value={form.anc_indication} onChange={e => set('anc_indication', e.target.value)} placeholder="e.g. Routine ANC" />
+            </div>
+            <div className="field">
+              <label>Last Menstrual Period (LMP)</label>
+              <input type="date" value={form.anc_lmp} max={new Date().toISOString().slice(0, 10)} onChange={e => handleLmpChange(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Estimated Date of Delivery (EDD)</label>
+              <input type="date" value={form.anc_edd} readOnly style={{ background: 'var(--bg-elevated)', color: 'var(--muted)' }} placeholder="auto from LMP" />
+            </div>
+            <div className="field">
+              <label>Husband's Name</label>
+              <input value={form.anc_husband_name} onChange={e => set('anc_husband_name', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Husband's Occupation</label>
+              <input value={form.anc_husband_occupation} onChange={e => set('anc_husband_occupation', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Employer</label>
+              <input value={form.anc_employer} onChange={e => set('anc_employer', e.target.value)} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* -------- HMO / Insurance (conditional) -------- */}
+      {form.category === 'hmo' && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--blue)', textTransform: 'uppercase', letterSpacing: 1, margin: '22px 0 10px' }}>HMO / Insurance</div>
+          <div className="dash-field-grid">
+            <div className="field">
+              <label>HMO Provider</label>
+              <input value={form.hmo_provider} onChange={e => set('hmo_provider', e.target.value)} placeholder="e.g. NHIS, AXA, etc." />
+            </div>
+            <div className="field">
+              <label>HMO ID / Code</label>
+              <input value={form.hmo_id_code} onChange={e => set('hmo_id_code', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>HMO Plan</label>
+              <input value={form.hmo_plan} onChange={e => set('hmo_plan', e.target.value)} placeholder="e.g. Bronze, Silver, Gold" />
+            </div>
+            <div className="field">
+              <label>Enrollee / Policy No.</label>
+              <input value={form.hmo_number} onChange={e => set('hmo_number', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Coverage %</label>
+              <input type="number" min="0" max="100" value={form.hmo_coverage_percent} onChange={e => set('hmo_coverage_percent', e.target.value)} placeholder="e.g. 80" />
+            </div>
+            <div className="field">
+              <label>Authorization Code</label>
+              <input value={form.hmo_authorization_code} onChange={e => set('hmo_authorization_code', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Authorization Date</label>
+              <input type="date" value={form.hmo_authorization_date ? form.hmo_authorization_date.slice(0, 10) : ''} onChange={e => set('hmo_authorization_date', e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Authorization Expires</label>
+              <input type="date" value={form.hmo_authorization_expires ? form.hmo_authorization_expires.slice(0, 10) : ''} onChange={e => set('hmo_authorization_expires', e.target.value)} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* -------- Next of Kin -------- */}
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, margin: '22px 0 10px' }}>Next of Kin</div>
+      <div className="dash-field-grid">
+        <div className="field">
+          <label>NOK Name</label>
+          <input value={form.emergency_contact_name} onChange={e => set('emergency_contact_name', e.target.value)} />
+        </div>
+        <div className="field">
+          <label>NOK Relationship</label>
+          <input value={form.next_of_kin_relationship} onChange={e => set('next_of_kin_relationship', e.target.value)} placeholder="e.g. Brother, Mother, Spouse" />
+        </div>
+        <div className="field">
+          <label>NOK Phone</label>
+          <input value={form.emergency_contact_phone} onChange={e => set('emergency_contact_phone', e.target.value)} />
+        </div>
+        <div className="field">
+          <label>NOK Address</label>
+          <input value={form.next_of_kin_address} onChange={e => set('next_of_kin_address', e.target.value)} />
+        </div>
       </div>
-      <div className="field"><label>Address</label><input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-      <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
+
+      <div style={{ display: 'flex', gap: 10, marginTop: 22, alignItems: 'center' }}>
+        <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
+        <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+          Editing patient <strong>{patient.full_name}</strong>{patient.hospital_number ? ` · ${patient.hospital_number}` : ''}
+        </span>
+      </div>
     </form>
   )
 }

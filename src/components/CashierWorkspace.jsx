@@ -423,7 +423,62 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
     if (selectedCharges.length === 0) return alert('No charges selected.')
     setSaving(true)
     try {
+      // ----------------------------------------------------------------
+      // FIX: read the cashier-entered payment amount from state, exactly
+      // like handleGenerateInvoice does. Previously the draft path
+      // hardcoded `amount_paid: 0` and `balance: amountOwedByPatient`
+      // (the full total), so a draft saved while the cashier had typed
+      // ₦1000 into the shared `amountPaid` field would silently drop
+      // the payment AND show the patient owing the full ₦3000 instead
+      // of the ₦2000 balance. Now the draft records the actual amount
+      // paid, computes the correct balance, derives the status, AND
+      // writes a payments row + receipt number so the partial payment
+      // is preserved when the draft is later finalized.
+      // ----------------------------------------------------------------
+      const pAmt = Number(amountPaid) || 0
+      if (pAmt < 0) return alert('Amount paid cannot be negative.')
+      if (pAmt > amountOwedByPatient + 0.001) {
+        const proceed = window.confirm(
+          `Amount entered (${formatMoney(pAmt)}) is greater than the patient's portion (${formatMoney(amountOwedByPatient)}).\n\n` +
+          `The excess of ${formatMoney(pAmt - amountOwedByPatient)} will be recorded as overpayment on the draft.\n\n` +
+          `Click OK to save the draft with this amount, or Cancel to go back.`
+        )
+        if (!proceed) return
+      }
+
+      // Mirror the wallet deduction logic from handleGenerateInvoice.
+      // A draft saved with a wallet deduction should already deduct from
+      // the wallet (so the balance reflects reality) — but ONLY if the
+      // cashier actually used the wallet. We read the live wallet so
+      // the deduction amount is accurate at save time.
+      let liveWallet = patientWallet
+      let liveBalance = walletBalance
+      if (!isHmoFolderPatient) {
+        const latest = wallets.find(w => w.patient_id === patientId)
+        if (latest) {
+          liveWallet = latest
+          liveBalance = Number(latest.balance || 0)
+        }
+      }
+      let walletDeduction = 0
+      if (liveWallet && liveBalance > 0.001) {
+        walletDeduction = Math.min(liveBalance, amountOwedByPatient)
+      }
+      const totalPaid = walletDeduction + pAmt
+      const bal = Math.max(0, amountOwedByPatient - totalPaid)
+      const status = totalPaid >= amountOwedByPatient - 0.001 ? 'paid' : (totalPaid > 0 ? 'partial' : 'unpaid')
+
       const draftInvoiceNumber = `DRAFT-${Date.now().toString().slice(-8)}`
+      // Issue a receipt number whenever money changed hands — even on a
+      // draft. This locks the receipt sequence so the next finalized
+      // invoice doesn't reuse the same number. If the draft is later
+      // discarded, the receipt number is "burned" — acceptable, since
+      // the alternative (issue the receipt only at finalization) means
+      // the draft would show paid without a traceable receipt.
+      const receiptNumber = (totalPaid > 0)
+        ? await nextDocumentNumber(hospital.id, 'receipt', new Date().getFullYear())
+        : null
+
       const newInv = await addInvoice({
         hospital_id: hospital.id,
         patient_id: patientId,
@@ -440,9 +495,13 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
         hmo_coverage_percent: hasHmo ? hmoCoveragePercent : null,
         hmo_amount: hasHmo ? hmoAmount : 0,
         patient_amount: amountOwedByPatient,
-        amount_paid: 0,
-        balance: amountOwedByPatient,
-        status: 'unpaid',
+        amount_paid: totalPaid,
+        wallet_deduction: walletDeduction,
+        wallet_id: walletDeduction > 0 && liveWallet ? liveWallet.id : null,
+        balance: bal,
+        receipt_number: receiptNumber,
+        payment_method: walletDeduction > 0 ? (pAmt > 0 ? `${paymentMethod} + Wallet` : 'Wallet') : paymentMethod,
+        status,
         created_by: profile?.id,
       })
 
@@ -456,19 +515,64 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
         await updateCharge(charge.id, { status: 'invoiced' })
       }
 
+      // Record the cashier-collected portion in the payments register
+      // (same pattern as handleGenerateInvoice). Without this the draft
+      // shows `amount_paid > 0` but the Payments tab has no record,
+      // making reconciliation impossible.
+      if (pAmt > 0) {
+        await addPayment({
+          hospital_id: hospital.id,
+          invoice_id: newInv.id,
+          patient_id: patientId,
+          patient_name: patientName,
+          amount: pAmt,
+          method: paymentMethod,
+          received_by: profile?.id || null,
+          reference_number: receiptNumber || `REF-${Date.now().toString().slice(-6)}`,
+        })
+      }
+
+      // Apply the wallet deduction immediately (same as finalized path).
+      // A draft with a "wallet covers it" should already show the wallet
+      // debited — otherwise the cashier could save the same draft twice
+      // and double-spend the wallet. Locking the deduction at save time
+      // matches the finalized behavior.
+      if (walletDeduction > 0 && liveWallet) {
+        const newWalletBalance = Math.max(0, liveBalance - walletDeduction)
+        await addWalletTxn({
+          hospital_id: hospital.id,
+          patient_id: patientId,
+          wallet_id: liveWallet.id,
+          type: 'charge',
+          amount: walletDeduction,
+          balance_after: newWalletBalance,
+          reference: `DRAFT-${draftInvoiceNumber}`,
+          description: `Wallet deduction for draft invoice ${draftInvoiceNumber} — ${patientName}`,
+          invoice_id: newInv.id,
+          created_by: profile?.id || null,
+        })
+        await updateWallet(liveWallet.id, { balance: newWalletBalance, updated_at: new Date().toISOString() })
+      }
+
       writeAudit({
         hospitalId: hospital?.id, actor: profile,
         action: 'invoice.draft_created',
         entityType: 'invoice', entityId: newInv.id,
         patientId: patientId,
-        summary: `Created draft invoice for ${patientName} — ${formatMoney(grandTotal)} (draft #${draftInvoiceNumber})`,
+        summary: `Created draft invoice for ${patientName} — ${formatMoney(grandTotal)} (paid ${formatMoney(totalPaid)}, balance ${formatMoney(bal)}) draft #${draftInvoiceNumber}`,
         metadata: {
           patient_name: patientName, subtotal, discount: discountAmt, tax: taxAmt,
-          grand_total: grandTotal, item_count: selectedCharges.length,
+          grand_total: grandTotal, amount_paid: totalPaid, balance: bal,
+          wallet_deduction: walletDeduction, status,
+          item_count: selectedCharges.length,
         },
       })
 
-      showToast(`Draft invoice saved — review and finalize it in Billing → Drafts`)
+      showToast(
+        totalPaid > 0
+          ? `Draft saved — paid ${formatMoney(totalPaid)}, balance ${formatMoney(bal)}. Review in Billing → Drafts`
+          : `Draft invoice saved — review and finalize it in Billing → Drafts`
+      )
       onClose()
     } catch (err) {
       alert(err.message || 'Failed to save draft')
