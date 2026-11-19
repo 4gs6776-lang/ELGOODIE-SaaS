@@ -33,6 +33,90 @@ export default function Inventory() {
   const [showDispenseModal, setShowDispenseModal] = useState(false); const [dispensingItem, setDispensingItem] = useState(null); const [dispenseQuantity, setDispenseQuantity] = useState('')
   const [dispensing, setDispensing] = useState(false); const [dispenseError, setDispenseError] = useState(''); const [selectedPatient, setSelectedPatient] = useState(null)
 
+  // ---- "Issue to Department" modal state ------------------------------
+  // Lets the storekeeper issue supplies (syringes, needles, reagents,
+  // gloves, etc.) to internal departments — Lab, Theatre, Nursing, etc.
+  // The stock is decremented (just like a patient dispense) but NO
+  // billable charge is generated (internal consumption — not billable
+  // to a patient). The audit log records the department + reason.
+  const DEPARTMENTS = ['Laboratory', 'Theatre', 'Nursing Station', 'Pharmacy', 'Radiology', 'Records / Admin', 'Maintenance', 'Other']
+  const [showIssueModal, setShowIssueModal] = useState(false)
+  const [issuingItem, setIssuingItem] = useState(null)
+  const [issueQuantity, setIssueQuantity] = useState('')
+  const [issueDepartment, setIssueDepartment] = useState(DEPARTMENTS[0])
+  const [issueReason, setIssueReason] = useState('')
+  const [issuing, setIssuing] = useState(false)
+  const [issueError, setIssueError] = useState('')
+
+  const openIssue = (item) => {
+    setIssuingItem(item); setIssueQuantity(''); setIssueDepartment(DEPARTMENTS[0])
+    setIssueReason(''); setIssueError(''); setShowIssueModal(true)
+  }
+  const closeIssue = () => {
+    if (issuing) return
+    setShowIssueModal(false); setIssuingItem(null); setIssueQuantity('')
+    setIssueDepartment(DEPARTMENTS[0]); setIssueReason(''); setIssueError('')
+  }
+
+  const handleIssueToDepartment = async (e) => {
+    e.preventDefault(); if (!issuingItem) return; setIssueError('')
+    const qty = parseInt(issueQuantity, 10)
+    if (isNaN(qty) || qty <= 0) return setIssueError('Enter a valid quantity.')
+    if (!issueDepartment.trim()) return setIssueError('Select a department.')
+    const currQty = parseInt(issuingItem.quantity, 10) || 0
+    if (qty > currQty) return setIssueError(`Insufficient stock. Only ${currQty} left.`)
+
+    setIssuing(true)
+    try {
+      const newQty = currQty - qty
+
+      // 1. Decrement stock on the inventory item (direct UPDATE).
+      await updateRecord(issuingItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+
+      // 2. NO billable charge — internal consumption, not billable to
+      //    a patient. (Pharmacy/Inventory dispenses to patients route
+      //    through billable_charges so the cashier collects payment.
+      //    Department issues are non-revenue: supplies consumed in
+      //    the course of providing care.)
+      //
+      //    NO patient_stock_records either — that table is patient-
+      //    keyed and would skew the "Items Given" tab on a patient
+      //    profile. Department issues live only in the audit log.
+
+      // 3. Audit trail — this is the SOLE record of the issue. Captures
+      //    the department, reason, quantity, and stock before/after so
+      //    anyone reviewing inventory changes can see exactly what was
+      //    consumed where and by whom.
+      writeAudit({
+        hospitalId: hospital?.id, actor: profile,
+        action: 'inventory.issue_department',
+        entityType: 'inventory_item', entityId: issuingItem.id,
+        patientId: null, // internal issue — no patient
+        summary: `Issued ${qty} ${issuingItem.unit || 'units'} of ${issuingItem.name} to ${issueDepartment}`,
+        metadata: {
+          item_name: issuingItem.name,
+          category: issuingItem.category || null,
+          department: issueDepartment,
+          reason: issueReason.trim() || null,
+          quantity: qty,
+          unit: issuingItem.unit || 'units',
+          cost_price: Number(issuingItem.cost_price || 0),
+          // Total cost consumed (for department cost reports):
+          total_cost: Number(issuingItem.cost_price || 0) * qty,
+          stock_before: currQty,
+          stock_after: newQty,
+        },
+      })
+
+      showToast(`Issued ${qty} ${issuingItem.unit || 'units'} of ${issuingItem.name} to ${issueDepartment}.`)
+      closeIssue(); if (refreshTable) await refreshTable()
+    } catch (err) {
+      setIssueError(err.message || 'Failed to issue.')
+    } finally {
+      setIssuing(false)
+    }
+  }
+
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(null), 3000) }
 
   // Live alert — a new stock item added from another device (or via bulk import).
@@ -225,6 +309,7 @@ export default function Inventory() {
                         <td style={{ padding: 12, color: 'var(--muted)', fontSize: 12 }}>{item.expiry_date || '—'}</td>
                         <td style={{ padding: 12, display: 'flex', gap: 6 }}>
                           <button className="btn btn-primary" style={{ width: 'auto', padding: '7px 12px', fontSize: 11, opacity: q <= 0 ? 0.5 : 1 }} disabled={q <= 0} onClick={() => openDispense(item)}>Dispense</button>
+                          <button className="btn btn-ghost" style={{ width: 'auto', padding: '7px 12px', fontSize: 11, color: 'var(--violet)', borderColor: 'rgba(118,87,232,0.4)', opacity: q <= 0 ? 0.5 : 1 }} disabled={q <= 0} onClick={() => openIssue(item)} title="Issue supplies to an internal department (Lab, Theatre, etc.) — no charge, stock only">Issue to Dept</button>
                           <button onClick={() => openEdit(item)} className="btn btn-ghost" style={{ width: 'auto', padding: '7px 12px', fontSize: 11, border: '1px solid var(--line)' }}>Edit</button>
                           <button onClick={() => handleDelete(item)} className="icon-btn-delete" title="Delete"><TrashIcon size={14}/></button>
                         </td>
@@ -310,6 +395,52 @@ export default function Inventory() {
           </div>
         </div>
       )}
+
+      {/* ---- "Issue to Department" modal --------------------------------
+          Lets the storekeeper issue supplies (syringes, needles, gloves,
+          reagents) to internal departments — Lab, Theatre, Nursing, etc.
+          Stock is decremented but NO billable charge is generated
+          (internal consumption — not billable to a patient). The
+          audit log records department + reason so anyone reviewing
+          inventory changes can see what was consumed where. */}
+      {showIssueModal && issuingItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,3,26,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 460 }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 19, marginBottom: 8 }}>Issue to Department</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 18 }}>{issuingItem.name}</div>
+            <div style={{ padding: 12, borderRadius: 8, background: 'rgba(118,87,232,0.08)', marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>Available Stock</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--violet)', marginTop: 3 }}>{issuingItem.quantity} {issuingItem.unit || 'units'}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>
+                Internal issue — no billable charge is generated.
+                The department consumes the supplies for clinical use.
+              </div>
+            </div>
+            {issueError && <div className="error-box" style={{ marginBottom: 12 }}>{issueError}</div>}
+            <form onSubmit={handleIssueToDepartment}>
+              <div className="field">
+                <label>Department</label>
+                <select value={issueDepartment} onChange={e => setIssueDepartment(e.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--line)' }}>
+                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Quantity</label>
+                <input type="number" min="1" max={issuingItem.quantity} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)} placeholder="1" />
+              </div>
+              <div className="field">
+                <label>Reason / Purpose (optional)</label>
+                <input type="text" value={issueReason} onChange={e => setIssueReason(e.target.value)} placeholder="e.g. Lab — daily phlebotomy rounds" />
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 22 }}>
+                <button type="button" className="btn btn-ghost" onClick={closeIssue} disabled={issuing}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={issuing}>{issuing ? 'Issuing…' : 'Issue to Department'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
      <ImportExcelModal
   isOpen={isImportModalOpen}
   onClose={() => setIsImportModalOpen(false)}
