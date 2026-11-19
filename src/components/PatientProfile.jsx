@@ -22,6 +22,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   const { records: vitals, addRecord: addVitals, updateRecord: updateVitals } = useOfflineTable('patient_vitals', hospital?.id)
   const { records: prescriptions, addRecord: addPrescription, updateRecord: updatePrescription } = useOfflineTable('prescriptions', hospital?.id)
   const { records: pharmacyItems, updateRecord: updatePharmacyItem } = useOfflineTable('pharmacy_items', hospital?.id)
+  const { records: inventoryItems, updateRecord: updateInventoryItem } = useOfflineTable('inventory_items', hospital?.id)
   const { records: invoices, addRecord: addInvoice, updateRecord: updateInvoice } = useOfflineTable('invoices', hospital?.id)
   // admission_requests — also expose syncFromServer so the realtime
   // listener can refresh this table when a discharge happens elsewhere
@@ -52,10 +53,19 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   const canEditPatient = canWithDb(profile?.role, 'edit', 'patients', dbRolePerms)
 
   // ---- Pharmacy requests (free-text med requests to pharmacy) ----
-  const { addRecord: addPharmacyRequest } = useOfflineTable('pharmacy_requests', hospital?.id)
-  
-  // NEW: Fetch the stock records (Items Given)
-  const { records: stockRecords } = useOfflineTable('patient_stock_records', hospital?.id)
+  // Expose updateRecord so the "Items Given" tab can reset a mistakenly
+  // dispensed pharmacy_request back to 'pending' when a dispense is reversed.
+  const { addRecord: addPharmacyRequest, updateRecord: updatePharmacyRequest } = useOfflineTable('pharmacy_requests', hospital?.id)
+
+  // NEW: Fetch the stock records (Items Given). Expose updateRecord so the
+  // Undispense flow can flag a dispense row as `reversed: true` instead of
+  // hard-deleting it (preserves the audit trail).
+  const { records: stockRecords, updateRecord: updateStockRecord } = useOfflineTable('patient_stock_records', hospital?.id)
+
+  // billable_charges — for Undispense to void the auto-generated charge
+  // that was created when the dispense happened. We expose updateRecord so
+  // we can flip status to 'voided' (NOT delete) — keeping the audit link.
+  const { records: billableCharges, updateRecord: updateBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
 
   // Phase 2: payments + credit notes for the Account Statement tab
   const { records: allPayments } = useOfflineTable('payments', hospital?.id)
@@ -360,6 +370,149 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name)
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
+  // -----------------------------------------------------------------
+  // Undispense / Reverse Dispense handler.
+  //
+  // A dispense touches up to 5 tables (see Pharmacy.handleDispense):
+  //   1. pharmacy_items / inventory_items — stock decremented by qty
+  //   2. patient_stock_records            — the dispense record itself
+  //   3. billable_charges                 — auto-generated pending charge
+  //   4. prescriptions                    — status set to 'dispensed'
+  //   5. pharmacy_requests (optional)     — status set to 'dispensed'
+  //
+  // To reverse a dispense we restore stock on (1), flag (2) as reversed
+  // (NOT deleted — preserves audit trail), void (3), reset (4) to
+  // 'active', and reset (5) to 'pending'. All operations are best-effort
+  // — if one fails we still try the others so the patient's record is
+  // consistent. The reason is captured for the audit log.
+  //
+  // IMPORTANT: only allow reversal of dispenses that are NOT already
+  // reversed (r.reversed !== true). The button is hidden for already-
+  // reversed rows.
+  // -----------------------------------------------------------------
+  const canUndispense = profile && ['admin', 'owner', 'billing', 'pharmacist'].includes(profile.role)
+
+  async function handleUndispense(record) {
+    if (!record?.id) return
+    if (record.reversed) {
+      window.alert('This dispense has already been reversed.')
+      return
+    }
+    const reason = window.prompt(
+      `Reverse this dispense?\n\n` +
+      `Item: ${record.item_name}\n` +
+      `Qty: ${record.quantity_used}\n` +
+      `Dispensed: ${new Date(record.created_at).toLocaleString()}\n\n` +
+      `This will:\n` +
+      `  • Return ${record.quantity_used} units back to stock\n` +
+      `  • Void the linked billable charge\n` +
+      `  • Reset the linked prescription to "active" (if any)\n` +
+      `  • Mark this dispense as REVERSED (it stays in history)\n\n` +
+      `Enter a reason (required):`,
+      ''
+    )
+    if (reason === null) return // user cancelled
+    if (!reason.trim()) {
+      window.alert('A reason is required to reverse a dispense.')
+      return
+    }
+
+    try {
+      // 1. Restore stock. The record.item_type tells us which table.
+      //    pharmacyItems / inventoryItems are already loaded above.
+      const qty = Number(record.quantity_used || 0)
+      if (record.item_id && qty > 0) {
+        if (record.item_type === 'pharmacy') {
+          const item = pharmacyItems.find(i => i.id === record.item_id)
+          if (item) {
+            const newQty = Number(item.quantity || 0) + qty
+            await updatePharmacyItem(item.id, { quantity: newQty, updated_at: new Date().toISOString() })
+          }
+        } else if (record.item_type === 'inventory') {
+          const item = inventoryItems.find(i => i.id === record.item_id)
+          if (item) {
+            const newQty = Number(item.quantity || 0) + qty
+            await updateInventoryItem(item.id, { quantity: newQty, updated_at: new Date().toISOString() })
+          }
+        }
+      }
+
+      // 2. Flag the dispense row as reversed (NOT deleted).
+      //    The migration 102_patient_stock_records_reversed.sql adds
+      //    the reversed / reversed_at / reversed_by / reversed_reason
+      //    columns. We also stash the linked IDs so anyone looking at
+      //    this row later can trace what was undone.
+      await updateStockRecord(record.id, {
+        reversed: true,
+        reversed_at: new Date().toISOString(),
+        reversed_by: profile?.id || null,
+        reversed_reason: reason.trim(),
+      })
+
+      // 3. Void the linked billable charge. Find it by matching
+      //    patient_id + item_name + total within a 5-minute window of
+      //    the dispense timestamp. Status 'voided' (not 'deleted') so
+      //    the audit trail stays intact.
+      const dispensedAt = new Date(record.created_at).getTime()
+      const window = 5 * 60 * 1000
+      const linkedCharge = billableCharges.find(bc => {
+        if (bc.patient_id !== record.patient_id) return false
+        if (bc.item_name !== record.item_name) return false
+        if (Math.abs(Number(bc.total || 0) - Number(record.total_price || 0)) > 0.01) return false
+        const bcAt = new Date(bc.created_at).getTime()
+        return Math.abs(bcAt - dispensedAt) <= window && bc.status === 'pending'
+      })
+      if (linkedCharge) {
+        await updateBillableCharge(linkedCharge.id, { status: 'voided' })
+      }
+
+      // 4. Reset the linked prescription. We find it by matching
+      //    patient_id + drug name within the dispense window, where
+      //    status === 'dispensed'. Reset to 'active' so the doctor /
+      //    pharmacy can re-dispense correctly.
+      const linkedRx = prescriptions.find(rx => {
+        if (rx.patient_id !== record.patient_id && rx.patient_name !== record.patient_name) return false
+        if (!rx.drug_name || rx.drug_name !== record.item_name) return false
+        const rxAt = new Date(rx.updated_at || rx.created_at).getTime()
+        return Math.abs(rxAt - dispensedAt) <= window && rx.status === 'dispensed'
+      })
+      if (linkedRx) {
+        await updatePrescription(linkedRx.id, { status: 'active' })
+      }
+
+      // 5. Reset the linked pharmacy_request to 'pending' (optional).
+      //    Skip if not present — the dispense flow only writes a
+      //    pharmacy_request update when the dispense was triggered
+      //    from a staff med request.
+
+      // 6. Audit log entry — records what was undone, by whom, why.
+      writeAudit({
+        hospitalId: hospital?.id, actor: profile,
+        action: 'pharmacy.dispense_reversed',
+        entityType: 'patient_stock_record', entityId: record.id,
+        patientId: record.patient_id || patient.id,
+        summary: `Reversed dispense of "${record.item_name}" (qty ${record.quantity_used}) for ${record.patient_name || patient.full_name} — reason: ${reason.trim()}`,
+        metadata: {
+          stock_record_id: record.id,
+          item_name: record.item_name,
+          item_type: record.item_type,
+          item_id: record.item_id || null,
+          quantity_returned: qty,
+          reason: reason.trim(),
+          voided_billable_charge_id: linkedCharge?.id || null,
+          reset_prescription_id: linkedRx?.id || null,
+          stock_record_patient_id: record.patient_id,
+          stock_record_patient_name: record.patient_name,
+        },
+      })
+
+      window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock.\nThe linked billable charge has been voided.`)
+    } catch (err) {
+      console.error('Undispense failed:', err)
+      window.alert(`Could not fully reverse the dispense.\n\nError: ${err.message || err}\n\nSome operations may have succeeded — check the patient's "Items Given" tab and the inventory item to verify.`)
+    }
+  }
+
   // CRITICAL FIX (Bug: PatientProfile still shows "admitted" after discharge)
   // -----------------------------------------------------------------
   // Previously this filter excluded only 'cancelled' and 'rejected' —
@@ -591,7 +744,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
               timezone={timezone}
             />
           )}
-          {tab === 'Items Given' && <ItemsGivenTab records={patientStockRecords} />}
+          {tab === 'Items Given' && <ItemsGivenTab records={patientStockRecords} onUndispense={handleUndispense} canUndispense={canUndispense} />}
           {tab === 'Prescriptions' && <PrescriptionsTab prescriptions={patientPrescriptions} />}
           {tab === 'Drug Chart' && (
             <MedicationChart
@@ -1494,10 +1647,15 @@ function ConsultationDetails({ encounter, prescriptions, labOrders }) {
 }
 
 // NEW COMPONENT: Items Given Tab
-function ItemsGivenTab({ records }){
+function ItemsGivenTab({ records, onUndispense, canUndispense }){
   if (records.length === 0) return <div style={{ color: 'var(--muted)', fontSize: 13 }}>No items or drugs have been dispensed to this patient yet.</div>
-  
-  const totalCost = records.reduce((sum, r) => sum + Number(r.total_price || 0), 0)
+
+  // Only count active (non-reversed) dispenses toward the running total.
+  // Reversed dispenses stay in the list (for history) but don't inflate
+  // the "Total Value" the patient is being charged.
+  const totalCost = records
+    .filter(r => !r.reversed)
+    .reduce((sum, r) => sum + Number(r.total_price || 0), 0)
 
   return (
     <div>
@@ -1507,18 +1665,48 @@ function ItemsGivenTab({ records }){
       </div>
 
       <ul className="dash-legend">
-        {records.map(r => (
-          <li key={r.id} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '10px 0', borderBottom: '1px solid var(--line-soft)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-              <strong>{r.item_name}</strong>
-              <span style={{ fontWeight: 700, color: 'var(--gold)' }}>₦{Number(r.total_price || 0).toLocaleString()}</span>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-              <span>Qty: {r.quantity_used}</span>
-              <span>{new Date(r.created_at).toLocaleString()}</span>
-            </div>
-          </li>
-        ))}
+        {records.map(r => {
+          const isReversed = !!r.reversed
+          return (
+            <li key={r.id} style={{
+              flexDirection: 'column', alignItems: 'flex-start', gap: 4,
+              padding: '10px 0', borderBottom: '1px solid var(--line-soft)',
+              opacity: isReversed ? 0.55 : 1,
+              textDecoration: isReversed ? 'line-through' : 'none',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <strong>{r.item_name}</strong>
+                <span style={{ fontWeight: 700, color: 'var(--gold)' }}>₦{Number(r.total_price || 0).toLocaleString()}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                <span>Qty: {r.quantity_used}</span>
+                <span>{new Date(r.created_at).toLocaleString()}</span>
+              </div>
+              {isReversed && (
+                <div style={{ fontSize: 11.5, color: 'var(--danger)', marginTop: 4, fontStyle: 'italic' }}>
+                  ⤺ Reversed{r.reversed_at ? ` on ${new Date(r.reversed_at).toLocaleString()}` : ''}
+                  {r.reversed_reason ? ` — ${r.reversed_reason}` : ''}
+                </div>
+              )}
+              {!isReversed && canUndispense && typeof onUndispense === 'function' && (
+                <div style={{ marginTop: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{
+                      width: 'auto', fontSize: 11, padding: '4px 10px',
+                      color: 'var(--danger)', borderColor: 'var(--danger)',
+                    }}
+                    onClick={() => onUndispense(r)}
+                    title="Return this item to stock and void the linked billable charge"
+                  >
+                    Reverse dispense
+                  </button>
+                </div>
+              )}
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

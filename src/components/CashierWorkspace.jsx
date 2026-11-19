@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useRealtimeAlert } from '../lib/useRealtimeAlert'
 import { useOfflineTable } from '../lib/useOfflineTable'
 import InvoiceViewer from './InvoiceViewer'
@@ -10,7 +10,7 @@ import { useBillingCatalog, formatMoney, nextDocumentNumber, findContractForPati
 const METHODS = ['Cash', 'POS', 'Bank Transfer', 'Card', 'HMO', 'Insurance', 'Other']
 
 export default function CashierWorkspace({ patientId, patientName, hospital, profile, onClose }) {
-  const { records: charges, addRecord: addCharge, updateRecord: updateCharge } = useOfflineTable('billable_charges', hospital?.id)
+  const { records: charges, addRecord: addCharge, updateRecord: updateCharge, deleteRecord: deleteCharge } = useOfflineTable('billable_charges', hospital?.id)
   const { addRecord: addInvoice } = useOfflineTable('invoices', hospital?.id)
   const { addRecord: addInvoiceItem } = useOfflineTable('invoice_items', hospital?.id)
   const { records: patients, updateRecord: updatePatient } = useOfflineTable('patients', hospital?.id)
@@ -30,7 +30,6 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
   const { catalog, priceLists, priceListItems, contracts, paymentMethods } = useBillingCatalog()
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
 
-  const [selectedIds, setSelectedIds] = useState([])
   const [discount, setDiscount] = useState('')
   const [tax, setTax] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('Cash')
@@ -58,8 +57,36 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
     return charges.filter(c => c.patient_id === patientId && c.status === 'pending')
   }, [charges, patientId])
 
+  // Selected charge ids + the ids the user has explicitly removed via the
+  // per-row "x" delete or by unchecking. We track `removedIds` separately
+  // so the effect below only ADDs newly-arrived pending charges to the
+  // selection — it never re-selects a charge the user just unchecked or
+  // a charge whose id is in removedIds (already deleted). Without this,
+  // any change to `pendingCharges` (e.g. a new charge pushed via realtime,
+  // or the memo re-running with a new array reference) would wipe the
+  // user's un-checks and silently re-add the row to the total.
+  const [selectedIds, setSelectedIds] = useState([])
+  const removedIdsRef = useRef(new Set())
+
   useEffect(() => {
-    setSelectedIds(pendingCharges.map(c => c.id))
+    setSelectedIds(prev => {
+      const prevSet = new Set(prev)
+      const removed = removedIdsRef.current
+      const next = []
+      // Keep previously-selected ids that are STILL pending.
+      for (const id of prev) {
+        if (pendingCharges.some(c => c.id === id) && !removed.has(id)) {
+          next.push(id)
+        }
+      }
+      // Add NEW pending charges (not previously seen, not removed).
+      for (const c of pendingCharges) {
+        if (!prevSet.has(c.id) && !removed.has(c.id)) {
+          next.push(c.id)
+        }
+      }
+      return next
+    })
   }, [pendingCharges])
 
   function toggleCharge(id) {
@@ -501,6 +528,7 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {pendingCharges.map(c => {
                 const isSelected = selectedIds.includes(c.id)
+                const canDeleteCharge = profile && (profile.role === 'owner' || profile.role === 'admin')
                 return (
                   <div key={c.id} className={`billing-charge-row ${isSelected ? 'selected' : ''}`} onClick={() => toggleCharge(c.id)} style={{ cursor: 'pointer' }}>
                     <div className="billing-charge-check">{isSelected && <AppIcon name="check" size={12} strokeWidth={3} />}</div>
@@ -511,6 +539,49 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
                       </div>
                     </div>
                     <div style={{ fontWeight: 700, color: 'var(--teal)', fontFamily: 'var(--font-mono)' }}>{formatMoney(c.total)}</div>
+                    {canDeleteCharge && (
+                      <button
+                        type="button"
+                        className="dash-icon-btn"
+                        title="Delete this charge permanently"
+                        style={{ marginLeft: 6, color: 'var(--danger)', width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          if (!window.confirm(`Delete "${c.item_name}" (${formatMoney(c.total)}) permanently?\n\nThis cannot be undone.`)) return
+                          try {
+                            // Mark removed FIRST so the selection effect
+                            // doesn't re-add this id if pendingCharges
+                            // re-runs before the delete propagates.
+                            removedIdsRef.current.add(c.id)
+                            setSelectedIds(prev => prev.filter(id => id !== c.id))
+                            await deleteCharge(c.id)
+                            writeAudit({
+                              hospitalId: hospital?.id, actor: profile,
+                              action: 'billing.charge_deleted',
+                              entityType: 'billable_charge', entityId: c.id,
+                              patientId: patientId || null,
+                              summary: `Deleted pending charge "${c.item_name}" — ${formatMoney(c.total)} for ${patientName || 'patient'}`,
+                              metadata: {
+                                patient_id: patientId,
+                                patient_name: patientName,
+                                item_name: c.item_name,
+                                total: c.total,
+                                quantity: c.quantity,
+                                source_module: c.source_module,
+                                category: c.category,
+                              },
+                            })
+                            showToast(`Deleted "${c.item_name}"`)
+                          } catch (err) {
+                            // Restore on failure — allow re-selection.
+                            removedIdsRef.current.delete(c.id)
+                            showToast(err.message || 'Could not delete charge.')
+                          }
+                        }}
+                      >
+                        <AppIcon name="close" size={14} />
+                      </button>
+                    )}
                   </div>
                 )
               })}
