@@ -27,13 +27,21 @@ export function usePagination(items, { pageSize: initialPageSize = 20, resetKey 
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(initialPageSize)
 
+  // Defensive: `items` MUST be an array. If a caller ever passes a non-array
+  // (e.g. an options object by mistake, or a hook that returned null while
+  // loading), fall back to an empty array so `items.length` / `items.slice()`
+  // never throw `t.slice is not a function` and the page renders an empty
+  // list instead of a white screen. This does NOT change behaviour for any
+  // caller that already passes a real array.
+  const list = Array.isArray(items) ? items : []
+
   // Reset to page 1 whenever the search/filter changes.
   useEffect(() => {
     setCurrentPage(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey])
 
-  const totalItems = items.length
+  const totalItems = list.length
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
 
   // If the list shrank (e.g. a record was deleted) and the current page
@@ -46,8 +54,8 @@ export function usePagination(items, { pageSize: initialPageSize = 20, resetKey 
   const endIndex = Math.min(startIndex + pageSize, totalItems)
 
   const pageItems = useMemo(
-    () => items.slice(startIndex, endIndex),
-    [items, startIndex, endIndex]
+    () => list.slice(startIndex, endIndex),
+    [list, startIndex, endIndex]
   )
 
   function changePageSize(newSize) {
