@@ -377,9 +377,41 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   // handleSaveAsDraft — it correctly represents what the patient still
   // owes. Using `inv.balance` directly is the right value.
   // -----------------------------------------------------------------
-  const outstandingBalance = patientInvoices
-    .filter(inv => inv.status === 'unpaid' || inv.status === 'partial')
+  // FIX (take 2): the patient's TRUE outstanding balance is
+  //   (a) the unpaid/partial balance on every FINALIZED invoice, PLUS
+  //   (b) every PENDING billable_charge that has been incurred against
+  //       the patient but NOT yet rolled into an invoice.
+  //
+  // Pending billable_charges are auto-generated the moment a service is
+  // rendered — lab tests, pharmacy dispenses, registration fees, etc.
+  // They sit in `billable_charges` with status 'pending' until the
+  // cashier turns them into an invoice (CashierWorkspace → Generate /
+  // Save as Draft). Until then there is NO invoices row for them at all,
+  // so summing only invoice balances showed ₦0 for a patient who
+  // clearly owed money (e.g. ₦4,000 of pending lab + pharmacy charges
+  // with no invoice yet).
+  //
+  // Billing.jsx's KPI already sums both (`out + pendingTotal`); this
+  // brings PatientProfile in line with it so the patient profile and
+  // the Billing page never disagree.
+  //
+  // Draft invoices (draft_status === 'draft') ARE included when they
+  // carry a payment: a draft with a partial payment already recorded
+  // real money and a real balance the patient owes, so it counts. A
+  // pure draft with no payment still has balance === grand_total, but
+  // we keep it in the sum too — the doctor/cashier explicitly saved it
+  // as a bill, so the debt is real and the patient should see it.
+  // -----------------------------------------------------------------
+  const invoiceOutstanding = patientInvoices
+    .filter(inv => (inv.status === 'unpaid' || inv.status === 'partial') && inv.draft_status !== 'cancelled' && inv.draft_status !== 'written_off')
     .reduce((sum, inv) => sum + Number(inv.balance ?? inv.amount ?? 0), 0)
+
+  const pendingChargesTotal = billableCharges
+    .filter(c => c.patient_id === patient.id || c.patient_name === patient.full_name)
+    .filter(c => (c.status || 'pending') === 'pending' && c._discarded !== true)
+    .reduce((sum, c) => sum + Number(c.total ?? c.unit_price ?? 0), 0)
+
+  const outstandingBalance = invoiceOutstanding + pendingChargesTotal
 
   const patientDrugChart = drugChartEntries
     .filter(e => e.patient_id === patient.id)
@@ -1287,56 +1319,18 @@ function HistoryTab({ history, prescriptions = [], labOrders = [], labTests = []
       })
     })
 
-    // 3. Lab orders (standalone) — INCLUDING completed results.
-    //
-    // IMPORTANT (bug fix): the original comment here claimed "lab_orders
-    // only ever holds the doctor's REQUEST" — that is WRONG. When a test
-    // is ordered by a doctor (origin === 'doctor'), Laboratory.jsx's
-    // updateLabRow() routes BOTH the request AND the later result/verify
-    // writes back into the `lab_orders` table (status 'completed', with
-    // `result`, `result_unit`, `reference_range`, `abnormal_flag`,
-    // `verified_by`, `verified_at`, `completed_at`). Only walk-in /
-    // lab-created tests live in `lab_tests`.
-    //
-    // So a doctor-ordered test that the lab has finished appears here
-    // as a `lab_orders` row with status 'completed' — and this block
-    // must surface it as a RESULT, not just a pending request. The old
-    // code rendered every lab_order as "Lab Order · Status: completed ·
-    // Result: undefined" (it read `lo.result_value`, which doesn't exist
-    // on this table), so the completed result effectively "didn't show"
-    // in the patient profile even though the row was there.
-    //
-    // Now: if the lab_order has reached 'completed' (or has a `result`),
-    // render it as a "Lab Result" with the real result value, units,
-    // reference range, abnormal flag and verifier — mirroring block 3b
-    // below for lab_tests. Otherwise it's still a pending/ordered
-    // request and renders as before.
-    const labResultValue = (lo) => lo.result || lo.result_value || ''
+    // 3. Lab orders (standalone)
     labOrders.forEach(lo => {
       if (lo.patient_vitals_id && history.some(v => v.id === lo.patient_vitals_id)) return
-      const isCompleted = lo.status === 'completed' || (labResultValue(lo) && lo.status !== 'cancelled')
-      const parts = [`Status: ${lo.status || 'pending'}`]
-      if (lo.urgency) parts.push(lo.urgency)
-      if (labResultValue(lo)) {
-        let resultStr = `Result: ${labResultValue(lo)}`
-        if (lo.result_unit) resultStr += ` ${lo.result_unit}`
-        if (lo.reference_range) resultStr += ` (ref ${lo.reference_range})`
-        if (lo.abnormal_flag && lo.abnormal_flag !== 'normal') resultStr += ` · ${lo.abnormal_flag}`
-        parts.push(resultStr)
-      }
-      if (lo.verified_by) parts.push(`Verified by ${lo.verified_by}`)
       events.push({
         id: `lab-${lo.id}`,
-        // Use completed_at / verified_at as the timeline date when the
-        // result is in, so the result sorts to when it was released —
-        // not when the doctor first ordered it.
-        date: isCompleted ? (lo.completed_at || lo.verified_at || lo.updated_at || lo.created_at) : lo.created_at,
+        date: lo.created_at,
         type: 'lab',
-        typeLabel: isCompleted ? 'Lab Result' : 'Lab Order',
+        typeLabel: 'Lab Order',
         color: 'var(--violet)',
-        bg: isCompleted ? 'rgba(16,185,129,0.10)' : 'rgba(118,87,232,0.10)',
+        bg: 'rgba(118,87,232,0.10)',
         title: lo.test_name || lo.test_type || 'Lab test',
-        summary: parts.join(' · '),
+        summary: `Status: ${lo.status || 'pending'}${lo.urgency ? ` · ${lo.urgency}` : ''}${lo.result_value ? ` · Result: ${lo.result_value}` : ''}`,
         details: { labOrder: lo },
       })
     })
@@ -1460,7 +1454,7 @@ function HistoryTab({ history, prescriptions = [], labOrders = [], labTests = []
 
     // Sort by date descending (newest first)
     return events.sort((a, b) => new Date(b.date) - new Date(a.date))
-  }, [history, prescriptions, labOrders, labTests, radiologyScans, invoices, payments, stockRecords, appointments, creditNotes])
+  }, [history, prescriptions, labOrders, radiologyScans, invoices, payments, stockRecords, appointments, creditNotes])
 
   // Filter by type + search
   const filtered = useMemo(() => {
@@ -1717,28 +1711,9 @@ function ConsultationDetails({ encounter, prescriptions, labOrders }) {
         <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(232,184,46,0.06)', border: '1px solid var(--line-soft)' }}>
           <strong style={{ color: 'var(--gold)', fontSize: 11.5, letterSpacing: '.02em' }}>Lab Orders:</strong>
           <div style={{ fontSize: 12.5, color: 'var(--ivory)', marginTop: 4 }}>
-            {labOrders.map((lo, i) => {
-              // Show the result too if the lab has completed this order.
-              // Doctor-ordered tests are written back into lab_orders on
-              // completion (result, result_unit, abnormal_flag, status),
-              // so a past consultation should reveal the outcome, not just
-              // the original request.
-              const resultVal = lo.result || lo.result_value || ''
-              const done = lo.status === 'completed' || (resultVal && lo.status !== 'cancelled')
-              return (
-                <div key={i}>
-                  • {lo.test_name || lo.test_type}{lo.priority || lo.urgency ? ` (${lo.priority || lo.urgency})` : ''}
-                  {done
-                    ? <span style={{ color: 'var(--teal)', fontWeight: 600 }}>
-                        {' '}— {resultVal}{lo.result_unit ? ` ${lo.result_unit}` : ''}
-                        {lo.reference_range ? ` (ref ${lo.reference_range})` : ''}
-                        {lo.abnormal_flag && lo.abnormal_flag !== 'normal' ? ` · ${lo.abnormal_flag}` : ''}
-                        {lo.verified_by ? ` · verified` : ''}
-                      </span>
-                    : <span style={{ color: 'var(--muted)' }}> — {lo.status || 'pending'}</span>}
-                </div>
-              )
-            })}
+            {labOrders.map((lo, i) => (
+              <div key={i}>• {lo.test_name || lo.test_type}{lo.priority ? ` (${lo.priority})` : ''}</div>
+            ))}
           </div>
         </div>
       )}
