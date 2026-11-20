@@ -9,6 +9,38 @@ import { useBillingCatalog, formatMoney, nextDocumentNumber, findContractForPati
 
 const METHODS = ['Cash', 'POS', 'Bank Transfer', 'Card', 'HMO', 'Insurance', 'Other']
 
+// ---------------------------------------------------------------------
+// DOUBLE-SAVE / OFFLINE-SAFE WRITE HELPERS
+// ---------------------------------------------------------------------
+// Problem this solves:
+//   useOfflineTable.addRecord() writes to local IndexedDB FIRST, then
+//   attempts the Supabase INSERT. When the device is offline (or the
+//   request is slow) the remote call fails AFTER the local row already
+//   exists. addRecord then re-throws a friendly "server could not be
+//   reached" message. The save handler's catch shows that error and
+//   re-enables the button — but the modal stays open (the save "failed"
+//   from the user's point of view). The cashier clicks "Save as Draft"
+//   again, and a SECOND invoice row lands in IndexedDB. Both later sync
+//   to the server → duplicate invoices + duplicate payments.
+//
+// Fix:
+//   1. isRecoverableOfflineError() — recognises the offline/network
+//      error that addRecord throws. Because the local write already
+//      succeeded, this is NOT a real failure: the sync queue will push
+//      it when the connection returns. We treat it as success.
+//   2. INFLIGHT_SAVE_KEYS — a module-level Set keyed by patient + a
+//      per-save nonce. While a save for this patient is in flight (even
+//      one whose await hasn't settled yet), a second click is a no-op.
+//      This closes the narrow window where a slow network leaves the
+//      button clickable just long enough for a double-click, and it
+//      also stops the "click again after the offline error" path.
+// ---------------------------------------------------------------------
+const NETWORK_ERROR_RE = /failed to fetch|networkerror|load failed|fetch failed|network request failed|err_internet|server could not be reached|offline or unstable/i
+function isRecoverableOfflineError(err) {
+  return NETWORK_ERROR_RE.test(String(err?.message || err || ''))
+}
+const INFLIGHT_SAVE_KEYS = new Set()
+
 export default function CashierWorkspace({ patientId, patientName, hospital, profile, onClose }) {
   const { records: charges, addRecord: addCharge, updateRecord: updateCharge, deleteRecord: deleteCharge } = useOfflineTable('billable_charges', hospital?.id)
   const { addRecord: addInvoice } = useOfflineTable('invoices', hospital?.id)
@@ -204,6 +236,14 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
 
   async function handleGenerateInvoice() {
     if (selectedCharges.length === 0) return alert('No charges selected.')
+    // DOUBLE-SAVE GUARD: see comment on INFLIGHT_SAVE_KEYS above.
+    // Prevents a second "Generate Invoice" click from creating a
+    // duplicate invoice when the first click is still in flight or
+    // when an offline error left the modal open with the local row
+    // already written.
+    const saveKey = `generate:${patientId}`
+    if (INFLIGHT_SAVE_KEYS.has(saveKey)) return
+    INFLIGHT_SAVE_KEYS.add(saveKey)
 
     const pAmt = Number(amountPaid) || 0
     if (pAmt <= 0 && !canUseWallet && amountOwedByPatient > 0.001) {
@@ -214,7 +254,7 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
         `  Billing → Unpaid Invoices tab → Take Payment\n\n` +
         `Click OK to create the unpaid invoice, or Cancel to go back and enter an amount.`
       )
-      if (!proceed) return
+      if (!proceed) { INFLIGHT_SAVE_KEYS.delete(saveKey); return }
     }
     // If the wallet covers the whole balance, we don't need a manual amount.
     // Without this guard, the confirm dialog above would fire even when the
@@ -228,7 +268,7 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
         `  Billing → Unpaid Invoices tab → Take Payment\n\n` +
         `Click OK to proceed, or Cancel to enter a payment amount now.`
       )
-      if (!proceed) return
+      if (!proceed) { INFLIGHT_SAVE_KEYS.delete(saveKey); return }
     }
     setSaving(true)
     try {
@@ -413,14 +453,33 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
       setReceiptInvoice(newInv)
 
     } catch (err) {
-      alert(err.message || 'Failed to generate invoice')
+      // OFFLINE-SAFE: same rationale as handleSaveAsDraft. addInvoice /
+      // addPayment / addInvoiceItem all write to local IndexedDB before
+      // the remote INSERT, so an offline throw means the local rows
+      // already exist and the sync queue will deliver them. Treating it
+      // as a hard failure (and leaving the modal open) is what caused
+      // duplicate invoices on slow networks.
+      if (isRecoverableOfflineError(err)) {
+        showToast(`Invoice saved (offline) — saved on this device; it will sync automatically once you're back online.`)
+        onClose()
+      } else {
+        alert(err.message || 'Failed to generate invoice')
+      }
     } finally {
+      INFLIGHT_SAVE_KEYS.delete(saveKey)
       setSaving(false)
     }
   }
 
   async function handleSaveAsDraft() {
     if (selectedCharges.length === 0) return alert('No charges selected.')
+    // DOUBLE-SAVE GUARD: if a save for this patient is already in flight
+    // (the await hasn't settled, or an offline error left the modal
+    // open), ignore the click. The first click's write already landed in
+    // local IndexedDB — running it again would create a duplicate invoice.
+    const saveKey = `draft:${patientId}`
+    if (INFLIGHT_SAVE_KEYS.has(saveKey)) return
+    INFLIGHT_SAVE_KEYS.add(saveKey)
     setSaving(true)
     try {
       // ----------------------------------------------------------------
@@ -575,8 +634,26 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
       )
       onClose()
     } catch (err) {
-      alert(err.message || 'Failed to save draft')
+      // OFFLINE-SAFE: addInvoice/addPayment/addInvoiceItem write to local
+      // IndexedDB BEFORE attempting the remote INSERT. When the device is
+      // offline the remote call fails and the method re-throws a
+      // "server could not be reached" error — but the local row already
+      // exists and the sync queue will push it when reconnected.
+      // Treating that throw as a real failure (and leaving the modal open)
+      // is what caused duplicate drafts: the cashier saw the error,
+      // clicked "Save as Draft" again, and a second invoice was created.
+      if (isRecoverableOfflineError(err)) {
+        showToast(
+          totalPaid > 0
+            ? `Draft saved (offline) — paid ${formatMoney(totalPaid)}, balance ${formatMoney(bal)}. Saved on this device; it will sync automatically once you're back online. Review in Billing → Drafts`
+            : `Draft invoice saved (offline). Saved on this device; it will sync automatically once you're back online. Review in Billing → Drafts`
+        )
+        onClose()
+      } else {
+        alert(err.message || 'Failed to save draft')
+      }
     } finally {
+      INFLIGHT_SAVE_KEYS.delete(saveKey)
       setSaving(false)
     }
   }
