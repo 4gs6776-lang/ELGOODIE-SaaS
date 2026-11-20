@@ -445,101 +445,21 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     }
 
     try {
-      // OFFLINE-SAFE WRITES
-      // -----------------------------------------------------------------
-      // useOfflineTable.updateRecord() ALWAYS writes to local IndexedDB
-      // first, then attempts the Supabase remote update. When the
-      // device is offline (or the server is unreachable) the remote
-      // call fails — but the local copy is already updated AND queued
-      // for sync (the record is flagged _syncError:'transient' and the
-      // background sync queue will push it the moment the connection
-      // comes back). updateRecord then re-throws a friendly
-      // "server could not be reached" message.
-      //
-      // That re-throw is what broke this handler: a single offline
-      // write aborted the WHOLE reverse flow, so the dispense row was
-      // never flagged `reversed`, the billable charge was never voided,
-      // and the "Reverse dispense" button stayed clickable. Every
-      // retry then re-added the stock (double / triple restore).
-      //
-      // Fix: wrap each update in offlineSafeUpdate(). A network error
-      // is swallowed (the write is already safe locally and will sync
-      // later) — we only bail on a REAL error (schema missing column,
-      // permission denied, FK violation, etc.) which the sync queue
-      // cannot fix by itself.
-      // -----------------------------------------------------------------
-      const isRecoverableOfflineError = (err) => {
-        const msg = String(err?.message || err || '').toLowerCase()
-        // Mirrors NETWORK_ERROR_RE in useOfflineTable.js, plus the
-        // friendly string friendlyErrorMessage() returns for offline.
-        return /failed to fetch|networkerror|load failed|fetch failed|network request failed|err_internet|server could not be reached|offline or unstable/i.test(msg)
-      }
-      // Run an update; if it throws an offline/network error, treat it
-      // as success (queued locally) and remember it was queued so we
-      // can tell the user. Real errors propagate and abort the flow.
-      const offlineWrites = []
-      const offlineSafeUpdate = async (label, fn) => {
-        try {
-          await fn()
-        } catch (err) {
-          if (isRecoverableOfflineError(err)) {
-            offlineWrites.push(label)
-            return
-          }
-          throw err
-        }
-      }
-
-      // 1. Restore stock.
-      //
-      // IMPORTANT: every dispense in the app goes through
-      // Pharmacy.handleDispense, which decrements the `inventory_items`
-      // table — regardless of whether the drug is filed under "pharmacy"
-      // or "inventory" in the catalogue. The dispense row stamps
-      // `item_type: 'pharmacy'` on the patient_stock_records row, but
-      // the actual stock movement happened in inventory_items.
-      //
-      // Older versions of this code read item_type and restored to
-      // pharmacy_items for 'pharmacy' rows — which is empty in this
-      // app, so stock never came back. That is the bug: the drug was
-      // pulled from inventory_items at dispense time, and the reverse
-      // tried to push it back into pharmacy_items, found no matching
-      // row, and silently skipped.
-      //
-      // Fix: restore to inventory_items first (where the dispense
-      // actually took the stock from). Fall back to pharmacy_items
-      // only for legacy rows that genuinely live there.
+      // 1. Restore stock. The record.item_type tells us which table.
+      //    pharmacyItems / inventoryItems are already loaded above.
       const qty = Number(record.quantity_used || 0)
-      let stockRestored = false
       if (record.item_id && qty > 0) {
-        const invItem = inventoryItems.find(i => i.id === record.item_id)
-        if (invItem) {
-          const newQty = Number(invItem.quantity || 0) + qty
-          await offlineSafeUpdate(`inventory stock for "${invItem.name || record.item_name}"`, () =>
-            updateInventoryItem(invItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
-          )
-          stockRestored = true
-        } else {
-          // Legacy fallback: a handful of old dispenses may have
-          // referenced a pharmacy_items row. If we don't find the item
-          // in inventory_items, try pharmacy_items before giving up —
-          // otherwise the units would be lost.
-          const pharmaItem = pharmacyItems.find(i => i.id === record.item_id)
-          if (pharmaItem) {
-            const newQty = Number(pharmaItem.quantity || 0) + qty
-            await offlineSafeUpdate(`pharmacy stock for "${pharmaItem.name || record.item_name}"`, () =>
-              updatePharmacyItem(pharmaItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
-            )
-            stockRestored = true
-          } else {
-            // Neither list has the item (maybe it was deleted from
-            // inventory after the dispense). We still flag the dispense
-            // as reversed so the billable charge is voided and the
-            // patient's record is consistent — but we warn the user
-            // that the physical stock couldn't be returned.
-            console.warn('Reverse dispense: item not found in inventory_items or pharmacy_items; stock not restored.', {
-              record_id: record.id, item_id: record.item_id, item_name: record.item_name,
-            })
+        if (record.item_type === 'pharmacy') {
+          const item = pharmacyItems.find(i => i.id === record.item_id)
+          if (item) {
+            const newQty = Number(item.quantity || 0) + qty
+            await updatePharmacyItem(item.id, { quantity: newQty, updated_at: new Date().toISOString() })
+          }
+        } else if (record.item_type === 'inventory') {
+          const item = inventoryItems.find(i => i.id === record.item_id)
+          if (item) {
+            const newQty = Number(item.quantity || 0) + qty
+            await updateInventoryItem(item.id, { quantity: newQty, updated_at: new Date().toISOString() })
           }
         }
       }
@@ -549,14 +469,12 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
       //    the reversed / reversed_at / reversed_by / reversed_reason
       //    columns. We also stash the linked IDs so anyone looking at
       //    this row later can trace what was undone.
-      await offlineSafeUpdate('reversed flag on the dispense record', () =>
-        updateStockRecord(record.id, {
-          reversed: true,
-          reversed_at: new Date().toISOString(),
-          reversed_by: profile?.id || null,
-          reversed_reason: reason.trim(),
-        })
-      )
+      await updateStockRecord(record.id, {
+        reversed: true,
+        reversed_at: new Date().toISOString(),
+        reversed_by: profile?.id || null,
+        reversed_reason: reason.trim(),
+      })
 
       // 3. Void the linked billable charge. Find it by matching
       //    patient_id + item_name + total within a 5-minute window of
@@ -572,9 +490,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
         return Math.abs(bcAt - dispensedAt) <= window && bc.status === 'pending'
       })
       if (linkedCharge) {
-        await offlineSafeUpdate('voided status on the linked billable charge', () =>
-          updateBillableCharge(linkedCharge.id, { status: 'voided' })
-        )
+        await updateBillableCharge(linkedCharge.id, { status: 'voided' })
       }
 
       // 4. Reset the linked prescription. We find it by matching
@@ -588,9 +504,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
         return Math.abs(rxAt - dispensedAt) <= window && rx.status === 'dispensed'
       })
       if (linkedRx) {
-        await offlineSafeUpdate('active status on the linked prescription', () =>
-          updatePrescription(linkedRx.id, { status: 'active' })
-        )
+        await updatePrescription(linkedRx.id, { status: 'active' })
       }
 
       // 5. Reset the linked pharmacy_request to 'pending' (optional).
@@ -610,32 +524,16 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
           item_name: record.item_name,
           item_type: record.item_type,
           item_id: record.item_id || null,
-          quantity_returned: stockRestored ? qty : 0,
-          stock_restored: stockRestored,
+          quantity_returned: qty,
           reason: reason.trim(),
           voided_billable_charge_id: linkedCharge?.id || null,
           reset_prescription_id: linkedRx?.id || null,
           stock_record_patient_id: record.patient_id,
           stock_record_patient_name: record.patient_name,
-          offline_queued_writes: offlineWrites,
         },
       })
 
-      // Final alert — honest about what happened. Three outcomes:
-      //   (a) everything synced: "Dispense reversed. Stock returned."
-      //   (b) some writes queued offline (device is offline): same
-      //       success message PLUS a note that a few changes will sync
-      //       when the connection returns. The local state is already
-      //       correct, so the patient's "Items Given" tab updates now.
-      //   (c) stock couldn't be restored (item deleted from inventory).
-      const offlineNote = offlineWrites.length > 0
-        ? `\n\nNote: this device is offline, so ${offlineWrites.length} change(s) — ${offlineWrites.join('; ')} — are saved here and will sync to the server automatically once the connection is stable. The patient's "Items Given" tab is already updated.`
-        : ''
-      if (stockRestored) {
-        window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock in Inventory.\nThe linked billable charge has been voided.${offlineNote}`)
-      } else {
-        window.alert(`Dispense reversed.\n\nThe linked billable charge has been voided and the dispense flagged as reversed.\n\nNOTE: ${qty} units of "${record.item_name}" could NOT be returned to stock — the inventory item no longer exists. Add it back manually if needed.${offlineNote}`)
-      }
+      window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock.\nThe linked billable charge has been voided.`)
     } catch (err) {
       console.error('Undispense failed:', err)
       window.alert(`Could not fully reverse the dispense.\n\nError: ${err.message || err}\n\nSome operations may have succeeded — check the patient's "Items Given" tab and the inventory item to verify.`)
@@ -1389,18 +1287,56 @@ function HistoryTab({ history, prescriptions = [], labOrders = [], labTests = []
       })
     })
 
-    // 3. Lab orders (standalone)
+    // 3. Lab orders (standalone) — INCLUDING completed results.
+    //
+    // IMPORTANT (bug fix): the original comment here claimed "lab_orders
+    // only ever holds the doctor's REQUEST" — that is WRONG. When a test
+    // is ordered by a doctor (origin === 'doctor'), Laboratory.jsx's
+    // updateLabRow() routes BOTH the request AND the later result/verify
+    // writes back into the `lab_orders` table (status 'completed', with
+    // `result`, `result_unit`, `reference_range`, `abnormal_flag`,
+    // `verified_by`, `verified_at`, `completed_at`). Only walk-in /
+    // lab-created tests live in `lab_tests`.
+    //
+    // So a doctor-ordered test that the lab has finished appears here
+    // as a `lab_orders` row with status 'completed' — and this block
+    // must surface it as a RESULT, not just a pending request. The old
+    // code rendered every lab_order as "Lab Order · Status: completed ·
+    // Result: undefined" (it read `lo.result_value`, which doesn't exist
+    // on this table), so the completed result effectively "didn't show"
+    // in the patient profile even though the row was there.
+    //
+    // Now: if the lab_order has reached 'completed' (or has a `result`),
+    // render it as a "Lab Result" with the real result value, units,
+    // reference range, abnormal flag and verifier — mirroring block 3b
+    // below for lab_tests. Otherwise it's still a pending/ordered
+    // request and renders as before.
+    const labResultValue = (lo) => lo.result || lo.result_value || ''
     labOrders.forEach(lo => {
       if (lo.patient_vitals_id && history.some(v => v.id === lo.patient_vitals_id)) return
+      const isCompleted = lo.status === 'completed' || (labResultValue(lo) && lo.status !== 'cancelled')
+      const parts = [`Status: ${lo.status || 'pending'}`]
+      if (lo.urgency) parts.push(lo.urgency)
+      if (labResultValue(lo)) {
+        let resultStr = `Result: ${labResultValue(lo)}`
+        if (lo.result_unit) resultStr += ` ${lo.result_unit}`
+        if (lo.reference_range) resultStr += ` (ref ${lo.reference_range})`
+        if (lo.abnormal_flag && lo.abnormal_flag !== 'normal') resultStr += ` · ${lo.abnormal_flag}`
+        parts.push(resultStr)
+      }
+      if (lo.verified_by) parts.push(`Verified by ${lo.verified_by}`)
       events.push({
         id: `lab-${lo.id}`,
-        date: lo.created_at,
+        // Use completed_at / verified_at as the timeline date when the
+        // result is in, so the result sorts to when it was released —
+        // not when the doctor first ordered it.
+        date: isCompleted ? (lo.completed_at || lo.verified_at || lo.updated_at || lo.created_at) : lo.created_at,
         type: 'lab',
-        typeLabel: 'Lab Order',
+        typeLabel: isCompleted ? 'Lab Result' : 'Lab Order',
         color: 'var(--violet)',
-        bg: 'rgba(118,87,232,0.10)',
+        bg: isCompleted ? 'rgba(16,185,129,0.10)' : 'rgba(118,87,232,0.10)',
         title: lo.test_name || lo.test_type || 'Lab test',
-        summary: `Status: ${lo.status || 'pending'}${lo.urgency ? ` · ${lo.urgency}` : ''}${lo.result_value ? ` · Result: ${lo.result_value}` : ''}`,
+        summary: parts.join(' · '),
         details: { labOrder: lo },
       })
     })
@@ -1524,7 +1460,7 @@ function HistoryTab({ history, prescriptions = [], labOrders = [], labTests = []
 
     // Sort by date descending (newest first)
     return events.sort((a, b) => new Date(b.date) - new Date(a.date))
-  }, [history, prescriptions, labOrders, radiologyScans, invoices, payments, stockRecords, appointments, creditNotes])
+  }, [history, prescriptions, labOrders, labTests, radiologyScans, invoices, payments, stockRecords, appointments, creditNotes])
 
   // Filter by type + search
   const filtered = useMemo(() => {
@@ -1781,9 +1717,28 @@ function ConsultationDetails({ encounter, prescriptions, labOrders }) {
         <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 8, background: 'rgba(232,184,46,0.06)', border: '1px solid var(--line-soft)' }}>
           <strong style={{ color: 'var(--gold)', fontSize: 11.5, letterSpacing: '.02em' }}>Lab Orders:</strong>
           <div style={{ fontSize: 12.5, color: 'var(--ivory)', marginTop: 4 }}>
-            {labOrders.map((lo, i) => (
-              <div key={i}>• {lo.test_name || lo.test_type}{lo.priority ? ` (${lo.priority})` : ''}</div>
-            ))}
+            {labOrders.map((lo, i) => {
+              // Show the result too if the lab has completed this order.
+              // Doctor-ordered tests are written back into lab_orders on
+              // completion (result, result_unit, abnormal_flag, status),
+              // so a past consultation should reveal the outcome, not just
+              // the original request.
+              const resultVal = lo.result || lo.result_value || ''
+              const done = lo.status === 'completed' || (resultVal && lo.status !== 'cancelled')
+              return (
+                <div key={i}>
+                  • {lo.test_name || lo.test_type}{lo.priority || lo.urgency ? ` (${lo.priority || lo.urgency})` : ''}
+                  {done
+                    ? <span style={{ color: 'var(--teal)', fontWeight: 600 }}>
+                        {' '}— {resultVal}{lo.result_unit ? ` ${lo.result_unit}` : ''}
+                        {lo.reference_range ? ` (ref ${lo.reference_range})` : ''}
+                        {lo.abnormal_flag && lo.abnormal_flag !== 'normal' ? ` · ${lo.abnormal_flag}` : ''}
+                        {lo.verified_by ? ` · verified` : ''}
+                      </span>
+                    : <span style={{ color: 'var(--muted)' }}> — {lo.status || 'pending'}</span>}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
