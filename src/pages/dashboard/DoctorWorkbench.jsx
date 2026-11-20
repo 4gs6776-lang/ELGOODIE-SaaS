@@ -168,6 +168,25 @@ export default function DoctorWorkbench() {
   const [pendingLabSelection, setPendingLabSelection] = useState([])
   const { catalog, priceLists, priceListItems, contracts } = useBillingCatalog()
 
+  // ---- Expandable action workspaces (UI redesign) ----
+  // Lab Orders and Prescription forms used to be permanently rendered
+  // and consumed a lot of vertical space. They are now collapsed into
+  // two compact action tiles (Row 6) that expand an inline workspace
+  // below the tiles when clicked.
+  //
+  // IMPORTANT state rules:
+  //   • The two toggles are INDEPENDENT — opening Lab does not close
+  //     Prescription and vice versa. A doctor can keep both open.
+  //   • Closing a workspace only hides its JSX; it NEVER clears the
+  //     underlying form state (selectedLabTests, pendingLabSelection,
+  //     otherLabTests, labPriority, labNotes, medications, medBuilder,
+  //     …). All of those live in component state / sessionStorage, so
+  //     re-opening the workspace restores exactly what was entered.
+  //   • handleConfirmLabTests auto-opens the Lab workspace so the
+  //     doctor lands right on the "Send Lab Order" button.
+  const [showLabWorkspace, setShowLabWorkspace] = useState(false)
+  const [showPrescriptionWorkspace, setShowPrescriptionWorkspace] = useState(false)
+
   const [medications, setMedications] = useState([])
   const [medBuilder, setMedBuilder] = useState(EMPTY_MED)
   const [editingMedLocalId, setEditingMedLocalId] = useState(null)
@@ -556,6 +575,10 @@ export default function DoctorWorkbench() {
     setLabPriority(priority)
     setLabNotes(clinicalNotes)
     setShowLabPicker(false)
+    // Auto-open the expandable Lab workspace so the doctor lands right
+    // on the selection + "Send Lab Order" button. (The workspace JSX
+    // carries data-lab-panel; the scroll below then brings it into view.)
+    setShowLabWorkspace(true)
     // Auto-scroll the lab panel into view so the doctor sees the selection
     // and can click "Send Lab Order" to commit.
     setTimeout(() => {
@@ -856,21 +879,139 @@ export default function DoctorWorkbench() {
   }
 
   const historySummary = [chiefComplaints && `Chief complaint: ${chiefComplaints}`, historyPresenting && `HPC: ${historyPresenting}`, pastMedicalHistory && `PMH: ${pastMedicalHistory}`, pastSurgicalHistory && `PSH: ${pastSurgicalHistory}`, drugHistory && `Drug Hx: ${drugHistory}`, allergyHistory && `Allergies: ${allergyHistory}`, familySocialHistory && `Family/Social: ${familySocialHistory}`].filter(Boolean).join(' · ')
+  // ---- Redesign layout helpers ---------------------------------------
+  // A two-column responsive grid used for the "side-by-side" rows. We
+  // build it with inline styles (not a new CSS class) so the change is
+  // scoped to this page and cannot bleed into Nursing / Notifications /
+  // other dashboards that reuse `.dash-row-2` (which has no CSS rule
+  // of its own and therefore stacks vertically today).
+  const twoCol = { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 16, marginTop: 16 }
+  const twoColEven = { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16, marginTop: 16 }
+  const panelTight = { padding: 14, marginTop: 16 }
+  const compactField = { marginBottom: 10 }
+  // Wrap a textarea so it stays comfortable to type in (never below ~64px)
+  // while taking less vertical room than the old rows={3} default.
+  const noteArea = { minHeight: 56, resize: 'vertical' }
+
   return (
     <>
-      <div className="dash-stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', marginBottom: 20, gap: 12 }}>
-        <div className="dash-stat-card"><div className="dash-stat-icon" style={{ background: 'rgba(139,124,246,0.14)', color: 'var(--violet)' }}><AppIcon name="users" size={20} /></div><div><div className="dash-stat-label">Waiting for Doctor</div><div className="dash-stat-value">{queue.length}</div><div className="dash-stat-delta" style={{ color: 'var(--gold)' }}>triaged</div></div></div>
-        <div className="dash-stat-card"><div className="dash-stat-icon" style={{ background: 'var(--teal-soft)', color: 'var(--teal)' }}><AppIcon name="check" size={20} /></div><div><div className="dash-stat-label">Completed</div><div className="dash-stat-value">{vitals.filter(v => v.status === 'completed').length}</div><div className="dash-stat-delta">total</div></div></div>
-        <div className="dash-stat-card"><div className="dash-stat-icon" style={{ background: 'rgba(201,169,97,0.14)', color: 'var(--gold)' }}><AppIcon name="clipboard" size={20} /></div><div style={{ flex: 1, minWidth: 0 }}><div className="dash-stat-label">Active Consultation</div><div className="dash-stat-value" style={{ fontSize: 17, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activePatient?.full_name || 'None'}</div>{activePatient && patientMeta(activePatient) && <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--muted)', marginTop: 2 }}>{patientMeta(activePatient)}</div>}<div className="dash-stat-delta">{activeVitals ? 'in progress' : 'select'}</div>{activePatient && (() => { const req = getActiveAdmissionRequest(activePatient.id); if (!req) return <button type="button" className="btn btn-ghost" style={{ width: 'auto', marginTop: 10, padding: '6px 12px', fontSize: 12 }} onClick={() => setShowAdmissionModal(true)}>Recommend Admission</button>; const l = { pending: 'Requested', approved: 'Approved', converted: 'Admitted' }; const c = { pending: 'var(--gold)', approved: 'var(--teal)', converted: 'var(--teal)' }; return <div style={{ marginTop: 10, display: 'inline-block', padding: '5px 12px', borderRadius: 8, fontSize: 11.5, fontWeight: 700, color: c[req.status] || 'var(--muted)', background: 'var(--bg-elevated)', border: `1px solid ${c[req.status]}` }}>{l[req.status] || req.status}</div> })()}</div></div>
+      {/* ===================== ROW 1 — compact KPI tiles =====================
+          Same three statistics, same calculations — just shorter. The
+          admission recommendation that used to live inside the Active
+          Consultation stat card has moved to the Quick Actions toolbar
+          (Row 5) per the redesign brief. */}
+      <div className="dash-stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 4, gap: 12 }}>
+        <div className="dash-stat-card" style={{ padding: '12px 14px', minHeight: 'auto' }}>
+          <div className="dash-stat-icon" style={{ width: 34, height: 34, background: 'rgba(139,124,246,0.14)', color: 'var(--violet)' }}><AppIcon name="users" size={16} /></div>
+          <div><div className="dash-stat-label">Waiting for Doctor</div><div className="dash-stat-value">{queue.length}</div><div className="dash-stat-delta" style={{ color: 'var(--gold)' }}>triaged</div></div>
+        </div>
+        <div className="dash-stat-card" style={{ padding: '12px 14px', minHeight: 'auto' }}>
+          <div className="dash-stat-icon" style={{ width: 34, height: 34, background: 'var(--teal-soft)', color: 'var(--teal)' }}><AppIcon name="check" size={16} /></div>
+          <div><div className="dash-stat-label">Completed</div><div className="dash-stat-value">{vitals.filter(v => v.status === 'completed').length}</div><div className="dash-stat-delta">total</div></div>
+        </div>
+        <div className="dash-stat-card" style={{ padding: '12px 14px', minHeight: 'auto' }}>
+          <div className="dash-stat-icon" style={{ width: 34, height: 34, background: 'rgba(201,169,97,0.14)', color: 'var(--gold)' }}><AppIcon name="clipboard" size={16} /></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="dash-stat-label">Active Consultation</div>
+            <div className="dash-stat-value" style={{ fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activePatient?.full_name || 'None'}</div>
+            {activePatient && patientMeta(activePatient) && <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--muted)', marginTop: 1 }}>{patientMeta(activePatient)}</div>}
+            <div className="dash-stat-delta">{activeVitals ? 'in progress' : 'select a patient'}</div>
+          </div>
+        </div>
       </div>
 
-      <div className="dash-row dash-row-2">
-        <div className="dash-panel"><div className="dash-panel-head"><div><div className="dash-panel-title">Consultation Queue</div><div className="dash-panel-sub">Triaged patients</div></div></div>{loading ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Loading…</div> : queue.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>No patients waiting.</div> : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{queue.map(v => { const p = patients.find(pt => pt.id === v.patient_id); const isActive = activeVitalsId === v.id; return <div key={v.id} role="button" tabIndex={0} aria-label={`Open consultation for ${p?.full_name || v.patient_name}`} onClick={() => openConsultation(v)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConsultation(v) } }} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '10px 14px', borderRadius: 10, background: isActive ? 'var(--teal-soft)' : 'var(--bg-elevated)', border: isActive ? '1px solid var(--teal)' : '1px solid var(--line-soft)' }}><div style={{ minWidth: 0 }}><div style={{ fontWeight: 700, color: isActive ? 'var(--teal)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p?.full_name || v.patient_name}{patientMeta(p) && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: 'var(--muted)' }}>({patientMeta(p)})</span>}</div><div style={{ fontSize: 12, color: 'var(--muted)' }}>BP {v.blood_pressure || '—'} · Pulse {v.pulse_rate || '—'}</div></div><span style={{ fontSize: 11, fontWeight: 700, color: v.urgency === 'Emergency' ? 'var(--danger)' : 'var(--gold)', flexShrink: 0 }}>{v.urgency || 'Waiting'}</span></div> })}</div>}</div>
-        <div className="dash-panel"><div className="dash-panel-head"><div><div className="dash-panel-title">Recorded Vitals</div><div className="dash-panel-sub">{activePatient ? `${activePatient.full_name}${patientMeta(activePatient) ? ' · ' + patientMeta(activePatient) : ''}` : 'No patient selected'}</div></div></div>{!activeVitals ? <div style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>Select a patient from the queue.</div> : <><div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14 }}>{vitalRow('Blood Pressure', activeVitals.blood_pressure)}{vitalRow('Pulse', activeVitals.pulse_rate, 'bpm')}{vitalRow('Temperature', activeVitals.temperature, '°C')}{vitalRow('SpO2', activeVitals.spo2, '%')}{vitalRow('Resp Rate', activeVitals.respiratory_rate, 'bpm')}{vitalRow('Weight', activeVitals.weight, 'kg')}{vitalRow('Height', activeVitals.height, 'cm')}{vitalRow('Urgency', activeVitals.urgency)}</div>{activeVitals.nurse_notes && <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--line-soft)', fontSize: 12.5, color: 'var(--muted)', fontStyle: 'italic' }}>Nurse note: "{activeVitals.nurse_notes}"</div>}</>}</div>
+      {/* ===================== ROW 2 — Queue + Recorded Vitals ===================== */}
+      <div className="dw-grid-2" style={twoCol}>
+        <div className="dash-panel" style={{ padding: 14, marginTop: 16 }}>
+          <div className="dash-panel-head" style={{ marginBottom: 10 }}><div><div className="dash-panel-title">Consultation Queue</div><div className="dash-panel-sub">Triaged patients</div></div></div>
+          {loading ? <div style={{ textAlign: 'center', padding: 28, color: 'var(--muted)' }}>Loading…</div> : queue.length === 0 ? <div style={{ textAlign: 'center', padding: 28, color: 'var(--muted)' }}>No patients waiting.</div> : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {queue.map(v => {
+                const p = patients.find(pt => pt.id === v.patient_id)
+                const isActive = activeVitalsId === v.id
+                return (
+                  <div key={v.id} role="button" tabIndex={0} aria-label={`Open consultation for ${p?.full_name || v.patient_name}`} onClick={() => openConsultation(v)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openConsultation(v) } }}
+                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '8px 12px', borderRadius: 9, background: isActive ? 'var(--teal-soft)' : 'var(--bg-elevated)', border: isActive ? '1px solid var(--teal)' : '1px solid var(--line-soft)' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: isActive ? 'var(--teal)' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p?.full_name || v.patient_name}{patientMeta(p) && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: 'var(--muted)' }}>({patientMeta(p)})</span>}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>BP {v.blood_pressure || '—'} · Pulse {v.pulse_rate || '—'}</div>
+                    </div>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: v.urgency === 'Emergency' ? 'var(--danger)' : 'var(--gold)', flexShrink: 0, padding: '3px 8px', borderRadius: 12, background: v.urgency === 'Emergency' ? 'var(--danger-soft)' : 'rgba(232,184,46,0.10)' }}>{v.urgency || 'Waiting'}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+        <div className="dash-panel" style={{ padding: 14, marginTop: 16 }}>
+          <div className="dash-panel-head" style={{ marginBottom: 10 }}><div><div className="dash-panel-title">Recorded Vitals</div><div className="dash-panel-sub">{activePatient ? `${activePatient.full_name}${patientMeta(activePatient) ? ' · ' + patientMeta(activePatient) : ''}` : 'No patient selected'}</div></div></div>
+          {!activeVitals ? <div style={{ textAlign: 'center', padding: 28, color: 'var(--muted)' }}>Select a patient from the queue.</div> : (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                {vitalRow('Blood Pressure', activeVitals.blood_pressure)}
+                {vitalRow('Pulse', activeVitals.pulse_rate, 'bpm')}
+                {vitalRow('Temperature', activeVitals.temperature, '°C')}
+                {vitalRow('SpO2', activeVitals.spo2, '%')}
+                {vitalRow('Resp Rate', activeVitals.respiratory_rate, 'bpm')}
+                {vitalRow('Weight', activeVitals.weight, 'kg')}
+                {vitalRow('Height', activeVitals.height, 'cm')}
+                {vitalRow('Urgency', activeVitals.urgency)}
+              </div>
+              {activeVitals.nurse_notes && <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--line-soft)', fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>Nurse note: “{activeVitals.nurse_notes}”</div>}
+            </>
+          )}
+        </div>
       </div>
 
       {activeVitals && (
         <>
+          {/* ===================== ROW 3 — Patient Overview + History =====================
+              Patient Overview: demographics in a clean two-column grid
+              (drawn from the already-loaded `activePatient` record — no
+              new fetch). Patient History: a compact timeline of this
+              patient's previously completed consultations, derived from
+              the already-loaded `vitals` table (status='completed' for
+              this patient, newest first). Both panels only render while
+              a consultation is open. */}
+          <div className="dw-grid-2" style={twoCol}>
+            <div className="dash-panel" style={{ padding: 14, marginTop: 16 }}>
+              <div className="dash-panel-head" style={{ marginBottom: 10 }}><div><div className="dash-panel-title">Patient Overview</div><div className="dash-panel-sub">{activePatient?.full_name || 'No patient selected'}</div></div></div>
+              {activePatient ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
+                  <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Full Name</div><div style={{ fontSize: 13, fontWeight: 600 }}>{activePatient.full_name || '—'}</div></div>
+                  <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Age / Gender</div><div style={{ fontSize: 13, fontWeight: 600 }}>{patientMeta(activePatient) || '—'}</div></div>
+                  <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Phone</div><div style={{ fontSize: 13 }}>{activePatient.phone || '—'}</div></div>
+                  <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Category</div><div style={{ fontSize: 13 }}>{activePatient.category || 'general'}</div></div>
+                  <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Folder</div><div style={{ fontSize: 13 }}>{activePatient.folder || 'personal'}</div></div>
+                  {activePatient.hmo_provider && <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>HMO</div><div style={{ fontSize: 13 }}>{activePatient.hmo_provider}</div></div>}
+                  {activePatient.blood_group && <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Blood Group</div><div style={{ fontSize: 13 }}>{activePatient.blood_group}</div></div>}
+                  <div><div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>Queue Status</div><div style={{ fontSize: 13 }}>{activePatient.queue_status || '—'}</div></div>
+                </div>
+              ) : <div style={{ color: 'var(--muted)', fontSize: 12.5 }}>Select a patient from the queue.</div>}
+            </div>
+            <div className="dash-panel" style={{ padding: 14, marginTop: 16 }}>
+              <div className="dash-panel-head" style={{ marginBottom: 10 }}><div><div className="dash-panel-title">Patient History</div><div className="dash-panel-sub">Past consultations</div></div></div>
+              {(() => {
+                const past = activePatient ? vitals.filter(v => v.patient_id === activePatient.id && v.status === 'completed').sort((a, b) => new Date(b.completed_at || b.updated_at || 0) - new Date(a.completed_at || a.updated_at || 0)).slice(0, 6) : []
+                if (past.length === 0) return <div style={{ color: 'var(--muted)', fontSize: 12.5 }}>No previous consultations on record.</div>
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {past.map(v => (
+                      <div key={v.id} style={{ padding: '7px 10px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--line-soft)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--teal)' }}>{v.completed_at ? formatDate(v.completed_at, timezone) : (v.updated_at ? formatDate(v.updated_at, timezone) : '—')}</div>
+                          {v.completed_by_name && <div style={{ fontSize: 11, color: 'var(--muted)' }}>Dr {v.completed_by_name}</div>}
+                        </div>
+                        {v.diagnosis && <div style={{ fontSize: 12, marginTop: 2 }}>{v.diagnosis}</div>}
+                        {v.chief_complaints && !v.diagnosis && <div style={{ fontSize: 12, marginTop: 2, color: 'var(--muted)' }}>{v.chief_complaints}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+
           {/* ---- ANC banner (Section 4 enhancement) ----
               When the active patient is an ANC registrant, surface their
               obstetric context (LMP, EDD, gestational age, trimester,
@@ -903,78 +1044,195 @@ export default function DoctorWorkbench() {
             </div>
           )}
 
-          <div className="dash-panel" style={{ marginTop: 20 }}>
-            <div className="dash-panel-head"><div><div className="dash-panel-title">History & Clinical Notes</div><div className="dash-panel-sub">Consultation record</div></div></div>
-            <div className="field"><label>Chief Complaint</label><textarea rows={2} value={chiefComplaints} onChange={e => setChiefComplaints(e.target.value)} placeholder="e.g. Fever and headache for 3 days" /></div>
-            <div className="field"><label>History of Presenting Complaint</label><textarea rows={3} value={historyPresenting} onChange={e => setHistoryPresenting(e.target.value)} placeholder="Onset, duration, character, associated symptoms…" /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="field"><label>Past Medical History</label><textarea rows={2} value={pastMedicalHistory} onChange={e => setPastMedicalHistory(e.target.value)} placeholder="e.g. Hypertension diagnosed 2019" /></div>
-              <div className="field"><label>Past Surgical History</label><textarea rows={2} value={pastSurgicalHistory} onChange={e => setPastSurgicalHistory(e.target.value)} placeholder="e.g. Appendectomy 2015" /></div>
-              <div className="field"><label>Drug History</label><textarea rows={2} value={drugHistory} onChange={e => setDrugHistory(e.target.value)} placeholder="Current / regular medications" /></div>
-              <div className="field"><label>Allergy History</label><textarea rows={2} value={allergyHistory} onChange={e => setAllergyHistory(e.target.value)} placeholder="e.g. Penicillin — rash" /></div>
+          <div className="dash-panel" style={panelTight}>
+            <div className="dash-panel-head" style={{ marginBottom: 10 }}><div><div className="dash-panel-title">History & Clinical Notes</div><div className="dash-panel-sub">Consultation record</div></div></div>
+            {/* Presenting complaint spans full width (it's the headline). */}
+            <div className="field" style={compactField}><label>Chief Complaint</label><textarea rows={2} style={noteArea} value={chiefComplaints} onChange={e => setChiefComplaints(e.target.value)} placeholder="e.g. Fever and headache for 3 days" /></div>
+            <div className="field" style={compactField}><label>History of Presenting Complaint</label><textarea rows={3} style={noteArea} value={historyPresenting} onChange={e => setHistoryPresenting(e.target.value)} placeholder="Onset, duration, character, associated symptoms…" /></div>
+            {/* Two-column grid for related history pairs. */}
+            <div className="dw-notes-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field" style={compactField}><label>Past Medical History</label><textarea rows={2} style={noteArea} value={pastMedicalHistory} onChange={e => setPastMedicalHistory(e.target.value)} placeholder="e.g. Hypertension diagnosed 2019" /></div>
+              <div className="field" style={compactField}><label>Past Surgical History</label><textarea rows={2} style={noteArea} value={pastSurgicalHistory} onChange={e => setPastSurgicalHistory(e.target.value)} placeholder="e.g. Appendectomy 2015" /></div>
+              <div className="field" style={compactField}><label>Drug History</label><textarea rows={2} style={noteArea} value={drugHistory} onChange={e => setDrugHistory(e.target.value)} placeholder="Current / regular medications" /></div>
+              <div className="field" style={compactField}><label>Allergy History</label><textarea rows={2} style={noteArea} value={allergyHistory} onChange={e => setAllergyHistory(e.target.value)} placeholder="e.g. Penicillin — rash" /></div>
             </div>
-            <div className="field"><label>Family / Social History</label><textarea rows={2} value={familySocialHistory} onChange={e => setFamilySocialHistory(e.target.value)} placeholder="Smoking, alcohol, occupation, family conditions…" /></div>
-            <div className="field"><label>Symptoms</label><TagAutocomplete options={SYMPTOM_OPTIONS} value={symptoms} onChange={setSymptoms} placeholder="Type to search symptoms, e.g. fev…" /></div>
-            <div className="field"><label>Diagnosis</label><TagAutocomplete options={DIAGNOSIS_OPTIONS} value={diagnoses} onChange={setDiagnoses} placeholder="Type to search diagnoses, e.g. mala…" /></div>
-            <div className="field"><label>Examination Findings</label><textarea rows={3} value={examinationFindings} onChange={e => setExaminationFindings(e.target.value)} placeholder="On examination…" /></div>
-            <div className="field"><label>Clinical Notes</label><textarea rows={3} value={clinicalNotes} onChange={e => setClinicalNotes(e.target.value)} placeholder="Additional notes…" /></div>
-            <div className="field"><label>Treatment Plan</label><textarea rows={2} value={treatmentPlan} onChange={e => setTreatmentPlan(e.target.value)} placeholder="e.g. Antipyretics, rest, review in 3 days" /></div>
-            <div className="field"><label>Follow-up Notes</label><textarea rows={2} value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Return in 1 week, sooner if symptoms worsen" /></div>
+            <div className="field" style={compactField}><label>Family / Social History</label><textarea rows={2} style={noteArea} value={familySocialHistory} onChange={e => setFamilySocialHistory(e.target.value)} placeholder="Smoking, alcohol, occupation, family conditions…" /></div>
+            <div className="dw-notes-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field" style={compactField}><label>Symptoms</label><TagAutocomplete options={SYMPTOM_OPTIONS} value={symptoms} onChange={setSymptoms} placeholder="Type to search symptoms, e.g. fev…" /></div>
+              <div className="field" style={compactField}><label>Diagnosis</label><TagAutocomplete options={DIAGNOSIS_OPTIONS} value={diagnoses} onChange={setDiagnoses} placeholder="Type to search diagnoses, e.g. mala…" /></div>
+            </div>
+            <div className="dw-notes-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field" style={compactField}><label>Examination Findings</label><textarea rows={3} style={noteArea} value={examinationFindings} onChange={e => setExaminationFindings(e.target.value)} placeholder="On examination…" /></div>
+              <div className="field" style={compactField}><label>Clinical Notes</label><textarea rows={3} style={noteArea} value={clinicalNotes} onChange={e => setClinicalNotes(e.target.value)} placeholder="Additional notes…" /></div>
+            </div>
+            <div className="dw-notes-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="field" style={compactField}><label>Treatment Plan</label><textarea rows={2} style={noteArea} value={treatmentPlan} onChange={e => setTreatmentPlan(e.target.value)} placeholder="e.g. Antipyretics, rest, review in 3 days" /></div>
+              <div className="field" style={compactField}><label>Follow-up Notes</label><textarea rows={2} style={noteArea} value={followUpNotes} onChange={e => setFollowUpNotes(e.target.value)} placeholder="e.g. Return in 1 week, sooner if symptoms worsen" /></div>
+            </div>
           </div>
 
-          {/* CONSULTATION ACTION TOOLBAR — always visible when a patient is selected.
-              These buttons used to be buried inside the prescription section (which
-              only rendered when activeVitals was set). Now they're at the top level
-              so the doctor can access AI Assist, AI Codes, and Virtual Consult
-              without needing to add a medication first. */}
-          {activePatient && (
-            <div className="dash-panel" style={{ marginTop: 20, padding: 14 }}>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 8 }}>
-                  Quick Actions
-                </div>
-                <button type="button" className="btn btn-primary" style={{ width: 'auto', background: 'var(--violet)', color: '#fff', display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => setShowAiDiagnostics(true)} disabled={!activePatient} title="Get AI-assisted differential diagnosis and recommendations">
-                  AI Assist
-                </button>
-                <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--violet)', borderColor: 'rgba(118,87,232,0.3)' }} onClick={() => setShowCodePanel(s => !s)} disabled={!activeVitals} title="Get AI-suggested ICD-10 codes + discharge summary">
-                  AI Codes
-                </button>
-                <button type="button" className="btn btn-ghost" style={{ width: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--teal)', borderColor: 'var(--teal-border)' }} onClick={async () => {
-                  if (!activePatient) {
-                    setToast('Select a patient from the queue first')
-                    setTimeout(() => setToast(null), 3000)
-                    return
+          {/* ===================== ROW 5 — Quick Actions toolbar =====================
+              Compact toolbar of action buttons, always visible while a
+              consultation is open. The "Recommend Admission" button is
+              the headline change of the redesign: it used to be buried
+              inside the Active Consultation stat card; it now sits in
+              the Quick Actions area alongside AI Assist / AI Codes /
+              Virtual Consult, with a clear bed icon and a live admission
+              status badge. It opens the existing AdmissionRequestModal
+              (no second admission system) and is disabled — with a hint
+              — when no patient is selected. */}
+          <div className="dash-panel" style={{ marginTop: 16, padding: 12 }}>
+            <div className="dw-quick-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 4 }}>
+                Quick Actions
+              </div>
+              <button type="button" className="btn btn-primary" style={{ width: 'auto', padding: '7px 13px', fontSize: 12.5, background: 'var(--violet)', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowAiDiagnostics(true)} disabled={!activePatient} title="Get AI-assisted differential diagnosis and recommendations">
+                <AppIcon name="stethoscope" size={14} /> AI Assist
+              </button>
+              <button type="button" className="btn btn-ghost" style={{ width: 'auto', padding: '7px 13px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--violet)', borderColor: 'rgba(118,87,232,0.3)' }} onClick={() => setShowCodePanel(s => !s)} disabled={!activeVitals} title="Get AI-suggested ICD-10 codes + discharge summary">
+                <AppIcon name="clipboard" size={14} /> AI Codes
+              </button>
+              <button type="button" className="btn btn-ghost" style={{ width: 'auto', padding: '7px 13px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--teal)', borderColor: 'var(--teal-border)' }} onClick={async () => {
+                if (!activePatient) {
+                  setToast('Select a patient from the queue first')
+                  setTimeout(() => setToast(null), 3000)
+                  return
+                }
+                try {
+                  const roomId = `vc-${activePatient.id}-${Date.now()}`
+                  const { data, error } = await supabase.from('virtual_consultations').insert({
+                    hospital_id: hospital.id,
+                    patient_id: activePatient.id,
+                    patient_name: activePatient.full_name,
+                    doctor_id: profile.id,
+                    doctor_name: profile.full_name,
+                    status: 'scheduled',
+                    room_id: roomId,
+                    scheduled_start: new Date().toISOString(),
+                  }).select().single()
+                  if (error) throw error
+                  if (data) {
+                    setVirtualConsultData({ consultationId: data.id, roomId })
+                    setShowVirtualConsult(true)
                   }
-                  try {
-                    const roomId = `vc-${activePatient.id}-${Date.now()}`
-                    const { data, error } = await supabase.from('virtual_consultations').insert({
-                      hospital_id: hospital.id,
-                      patient_id: activePatient.id,
-                      patient_name: activePatient.full_name,
-                      doctor_id: profile.id,
-                      doctor_name: profile.full_name,
-                      status: 'scheduled',
-                      room_id: roomId,
-                      scheduled_start: new Date().toISOString(),
-                    }).select().single()
-                    if (error) throw error
-                    if (data) {
-                      setVirtualConsultData({ consultationId: data.id, roomId })
-                      setShowVirtualConsult(true)
-                    }
-                  } catch (err) {
-                    setToast('Could not start virtual consultation: ' + (err.message || 'Unknown error'))
-                    setTimeout(() => setToast(null), 5000)
+                } catch (err) {
+                  setToast('Could not start virtual consultation: ' + (err.message || 'Unknown error'))
+                  setTimeout(() => setToast(null), 5000)
+                }
+              }} disabled={!activePatient} title="Start a video consultation with this patient">
+                <AppIcon name="camera" size={14} /> Virtual Consult
+              </button>
+
+              {/* ---- Recommend Admission — prominent, bed-iconed, status-aware ----
+                  Opens the EXISTING AdmissionRequestModal with the active
+                  patient + consultation ID + pre-filled diagnosis (from the
+                  current diagnoses list). If the patient already has an
+                  active admission request, show its status as a badge
+                  instead of letting the doctor submit a duplicate. When no
+                  patient is selected the button is disabled with a hint. */}
+              <div className="dw-admission-wrap" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                {activePatient && (() => {
+                  const req = getActiveAdmissionRequest(activePatient.id)
+                  if (req) {
+                    const l = { pending: 'Requested', approved: 'Approved', converted: 'Admitted' }
+                    const c = { pending: 'var(--gold)', approved: 'var(--teal)', converted: 'var(--teal)' }
+                    return (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 11px', borderRadius: 8, fontSize: 11.5, fontWeight: 700, color: c[req.status] || 'var(--muted)', background: 'var(--bg-elevated)', border: `1px solid ${c[req.status] || 'var(--line)'}` }} title={`Admission ${l[req.status] || req.status}`}>
+                        <AppIcon name="bed" size={13} /> Admission: {l[req.status] || req.status}
+                      </span>
+                    )
                   }
-                }} disabled={!activePatient} title="Start a video consultation with this patient">
-                  Virtual Consult
+                  return null
+                })()}
+                <button type="button" className="btn btn-primary" style={{ width: 'auto', padding: '7px 14px', fontSize: 12.5, background: 'var(--gold)', color: '#1a1a1a', display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }} onClick={() => setShowAdmissionModal(true)} disabled={!activePatient} title={activePatient ? 'Recommend this patient for admission' : 'Select a patient from the queue first'}>
+                  <AppIcon name="bed" size={15} /> Recommend Admission
                 </button>
+                {!activePatient && <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>select a patient first</span>}
               </div>
             </div>
-          )}
+          </div>
 
-          <div className="dash-row dash-row-2" style={{ marginTop: 20 }}>
-            <div className="dash-panel" data-lab-panel>
+          {/* ===================== ROW 6 — Lab Orders + Prescription action tiles =====================
+              Two compact, attractive tiles replace the permanently-expanded
+              Lab Orders + Prescription forms (which used to dominate the
+              screen). Each tile is a functional button that toggles its own
+              expandable workspace (Row 7). The two workspaces are
+              INDEPENDENT (opening one does not close the other) and closing
+              either one ONLY hides its JSX — the underlying form state
+              (selectedLabTests, pendingLabSelection, otherLabTests,
+              labPriority, labNotes, medications, medBuilder, …) is untouched,
+              so re-opening restores exactly what was entered. */}
+          <div className="dw-tiles" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
+            {/* TILE A — LAB ORDERS (blue/teal) */}
+            <button
+              type="button"
+              onClick={() => setShowLabWorkspace(s => !s)}
+              disabled={!activeVitals}
+              aria-expanded={showLabWorkspace}
+              title={activeVitals ? (showLabWorkspace ? 'Collapse lab orders' : 'Expand to order laboratory investigations') : 'Select a patient first'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+                padding: '16px 18px', borderRadius: 12, cursor: activeVitals ? 'pointer' : 'not-allowed',
+                textAlign: 'left', fontFamily: 'inherit',
+                background: showLabWorkspace ? 'rgba(0,199,199,0.10)' : 'var(--bg-card)',
+                border: `1px solid ${showLabWorkspace ? 'var(--teal)' : 'var(--teal-border)'}`,
+                transition: 'border-color .18s, transform .18s, background .18s',
+              }}
+            >
+              <div style={{ width: 46, height: 46, borderRadius: 11, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--teal-soft)', color: 'var(--teal)' }}>
+                <AppIcon name="lab" size={22} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--teal)' }}>Lab Orders</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {pendingLabSelection.length > 0
+                    ? `${pendingLabSelection.length} test${pendingLabSelection.length === 1 ? '' : 's'} selected`
+                    : 'Order laboratory investigations'}
+                </div>
+              </div>
+              <AppIcon name="chevron" size={18} style={{ transform: showLabWorkspace ? 'rotate(90deg)' : 'none', transition: 'transform .18s', color: 'var(--teal)' }} />
+            </button>
+
+            {/* TILE B — PRESCRIPTION (purple) */}
+            <button
+              type="button"
+              onClick={() => setShowPrescriptionWorkspace(s => !s)}
+              disabled={!activeVitals}
+              aria-expanded={showPrescriptionWorkspace}
+              title={activeVitals ? (showPrescriptionWorkspace ? 'Collapse prescription' : 'Expand to prescribe medications') : 'Select a patient first'}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+                padding: '16px 18px', borderRadius: 12, cursor: activeVitals ? 'pointer' : 'not-allowed',
+                textAlign: 'left', fontFamily: 'inherit',
+                background: showPrescriptionWorkspace ? 'rgba(139,124,246,0.10)' : 'var(--bg-card)',
+                border: `1px solid ${showPrescriptionWorkspace ? 'var(--violet)' : 'rgba(118,87,232,0.30)'}`,
+                transition: 'border-color .18s, transform .18s, background .18s',
+              }}
+            >
+              <div style={{ width: 46, height: 46, borderRadius: 11, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(139,124,246,0.14)', color: 'var(--violet)' }}>
+                <AppIcon name="pharmacy" size={22} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--violet)' }}>Prescription</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                  {medications.length > 0
+                    ? `${medications.length} medication${medications.length === 1 ? '' : 's'} in draft`
+                    : 'Prescribe medications'}
+                </div>
+              </div>
+              <AppIcon name="chevron" size={18} style={{ transform: showPrescriptionWorkspace ? 'rotate(90deg)' : 'none', transition: 'transform .18s', color: 'var(--violet)' }} />
+            </button>
+          </div>
+
+          {/* ===================== ROW 7a — expandable Lab Orders workspace =====================
+              Renders only when showLabWorkspace is true. The `data-lab-panel`
+              attribute is preserved so handleConfirmLabTests can scroll the
+              workspace into view after the doctor confirms a selection. All
+              state below (pendingLabSelection, otherLabTests, labPriority,
+              labNotes, savingLabOrder, activePatientLabOrders) survives a
+              collapse/re-expand because it lives in component state. */}
+          {showLabWorkspace && (
+            <div className="dash-panel" data-lab-panel style={{ padding: 16, marginTop: 16 }}>
               <div className="dash-panel-head">
                 <div>
                   <div className="dash-panel-title">Lab Orders</div>
@@ -1038,7 +1296,7 @@ export default function DoctorWorkbench() {
               <form onSubmit={handleSendLabOrders}>
                 {/* Free-text extras (kept for non-catalog tests) */}
                 <div className="field"><label>Other Tests (not in catalog)</label><input value={otherLabTests} onChange={e => setOtherLabTests(e.target.value)} placeholder="Comma-separated, e.g. Special Stain" /></div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="dw-notes-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="field">
                     <label>Priority</label>
                     <select value={labPriority} onChange={e => setLabPriority(e.target.value)}>
@@ -1058,8 +1316,16 @@ export default function DoctorWorkbench() {
               </form>
               {activePatientLabOrders.length > 0 && <ul className="dash-legend" style={{ marginTop: 16 }}>{activePatientLabOrders.map(o => { const stage = labStage(o.status); return <li key={o.id}><span className="dash-legend-name"><span className="dash-legend-dot" style={{ background: o.priority === 'stat' ? 'var(--danger)' : o.priority === 'urgent' ? 'var(--gold)' : 'var(--teal)' }} />{o.test_name}</span><span className="dash-legend-val" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><span className={`lab-stage is-${stage}`}>{LAB_STAGE_LABEL[stage]}</span>{stage === 'completed' && <button type="button" className="btn btn-ghost" style={{ width: 'auto', padding: '3px 9px', fontSize: 11 }} onClick={() => openLabViewer(normalizeLabRow(o, 'doctor'))} aria-label={`View completed result for ${o.test_name}`}>View Result</button>}</span></li> })}</ul>}
             </div>
+          )}
 
-            <div className="dash-panel">
+          {/* ===================== ROW 7b — expandable Prescription workspace =====================
+              Renders only when showPrescriptionWorkspace is true. Independent
+              of the Lab workspace. All medication state (medications,
+              medBuilder, editingMedLocalId, medicationAlerts, showPreview,
+              savingPrescriptions) survives a collapse/re-expand because it
+              lives in component state. */}
+          {showPrescriptionWorkspace && (
+            <div className="dash-panel" style={{ padding: 16, marginTop: 16 }}>
               <div className="dash-panel-head"><div><div className="dash-panel-title">Prescription</div><div className="dash-panel-sub">Build medications</div></div></div>
               <div className="field"><label>Load Template</label><div style={{ display: 'flex', gap: 8 }}><select value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} style={{ flex: 1 }}><option value="">Select…</option><optgroup label="Built-in">{DEFAULT_TEMPLATES.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>{hospitalTemplates.length > 0 && <optgroup label="Hospital">{hospitalTemplates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</optgroup>}</select><button type="button" className="btn btn-ghost" style={{ width: 'auto' }} onClick={handleApplyTemplate} disabled={!selectedTemplateId}>Load</button></div></div>
 
@@ -1096,7 +1362,7 @@ export default function DoctorWorkbench() {
                 {medBuilder.accepted_unavailable && <div style={{ fontSize: 12, color: 'var(--gold)', marginBottom: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}><AppIcon name="warning" size={13} /> UNAVAILABLE AT TIME OF PRESCRIPTION</div>}
                 {medBuilder.availability_status === 'AVAILABLE' && medBuilder.drugName && <div style={{ fontSize: 12, color: 'var(--teal)', marginBottom: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}><AppIcon name="check" size={13} /> AVAILABLE (Hospital Stock: {medBuilder.stock_at_prescription})</div>}
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="dw-notes-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="field"><label>Dose</label><input value={medBuilder.dose} onChange={e => setMedBuilder(b => ({ ...b, dose: e.target.value }))} placeholder="e.g. 500 mg" /></div>
                   <div className="field"><label>Route</label><select value={medBuilder.route} onChange={e => setMedBuilder(b => ({ ...b, route: e.target.value }))}><option value="">Select route…</option>{ROUTE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
                   <div className="field"><label>Frequency</label><select value={medBuilder.frequency} onChange={e => setMedBuilder(b => ({ ...b, frequency: e.target.value }))}><option value="">Select frequency…</option>{FREQUENCY_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}</select></div>
@@ -1150,97 +1416,101 @@ export default function DoctorWorkbench() {
                 </div>
               )}
             </div>
-          </div>
+          )}
 
-          {/* LABORATORY RESULTS — dedicated panel (global lab workflow
-              rule). Completed/verified results for the selected patient
-              across ALL encounters; abnormal flags lead the list; realtime
-              + a 30s poll keep it live; every row opens the shared
-              LabResultViewer with comparison history. */}
-          <div className="dash-panel" style={{ marginTop: 20 }}>
-            <div className="dash-panel-head" style={{ flexWrap: 'wrap', gap: 10 }}>
-              <div>
-                <div className="dash-panel-title">Laboratory Results</div>
-                <div className="dash-panel-sub">{activePatient ? `${activePatient.full_name}${patientMeta(activePatient) ? ' · ' + patientMeta(activePatient) : ''}` : 'No patient selected'} · completed &amp; verified results, newest first</div>
+
+          {/* ===================== ROW 8 — Laboratory Results + Consultation Summary =====================
+              Side-by-side on desktop. Lab Results keeps every behaviour
+              (completed + in-progress, abnormal flags lead, realtime +
+              30s poll, opens LabResultViewer). Summary keeps all seven
+              rows. Both are tightened (smaller paddings, tighter rows). */}
+          <div className="dw-grid-2" style={twoColEven}>
+            <div className="dash-panel" style={{ padding: 14, marginTop: 16 }}>
+              <div className="dash-panel-head" style={{ marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <div className="dash-panel-title">Laboratory Results</div>
+                  <div className="dash-panel-sub">{activePatient ? `${activePatient.full_name}${patientMeta(activePatient) ? ' · ' + patientMeta(activePatient) : ''}` : 'No patient selected'} · completed &amp; verified, newest first</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ width: 'auto', padding: '5px 10px', fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  onClick={() => { syncLabOrders(); syncLabTests() }}
+                  aria-label="Refresh laboratory results"
+                >
+                  <AppIcon name="refresh" size={14} /> Refresh
+                </button>
               </div>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                style={{ width: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                onClick={() => { syncLabOrders(); syncLabTests() }}
-                aria-label="Refresh laboratory results"
-              >
-                <AppIcon name="refresh" size={14} /> Refresh
-              </button>
+
+              {!activeVitals ? (
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>Select a patient from the queue to see their lab results.</div>
+              ) : sortedCompletedResults.length === 0 && patientLabRows.active.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>No lab results for this patient yet. Order tests from the Lab Orders tile.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {sortedCompletedResults.map(r => (
+                    <div
+                      key={r.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Open result for ${r.testName}${r.abnormalFlag && r.abnormalFlag !== 'normal' ? ` (${r.abnormalFlag})` : ''}`}
+                      onClick={() => openLabViewer(r)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLabViewer(r) } }}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                        padding: '8px 12px', borderRadius: 9, cursor: 'pointer',
+                        background: r.abnormalFlag && r.abnormalFlag !== 'normal' ? 'var(--danger-soft)' : 'var(--bg-elevated)',
+                        border: r.abnormalFlag && r.abnormalFlag !== 'normal' ? '1px solid rgba(240,79,95,0.35)' : '1px solid var(--line-soft)',
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          {r.testName}
+                          {r.abnormalFlag && r.abnormalFlag !== 'normal' && <span className={`lab-flag is-${r.abnormalFlag}`}>{r.abnormalFlag}</span>}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
+                          Resulted {r.resultedAt ? formatDateTime(r.resultedAt, timezone) : '—'}
+                          {r.verifiedBy ? ` · by ${r.verifiedBy}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.result || '—'}{r.resultUnit ? ` ${r.resultUnit}` : ''}
+                        </span>
+                        <AppIcon name="chevron" size={14} />
+                      </div>
+                    </div>
+                  ))}
+                  {patientLabRows.active.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, margin: '4px 0' }}>In progress</div>
+                      {patientLabRows.active.map(r => (
+                        <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '7px 12px', borderRadius: 9, background: 'var(--bg-elevated)', border: '1px solid var(--line-soft)', marginBottom: 5 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 12.5 }}>{r.testName}{r.origin === 'lab' ? <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: 'rgba(201,169,97,0.14)', color: 'var(--gold)', verticalAlign: 'middle' }}>LAB-RAISED</span> : null}</div>
+                            <div style={{ fontSize: 11, color: 'var(--muted)' }}>Requested {r.requestedAt ? formatDateTime(r.requestedAt, timezone) : '—'}</div>
+                          </div>
+                          <span className={`lab-stage is-${r.stage}`} style={{ flexShrink: 0 }}>{LAB_STAGE_LABEL[r.stage]}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
-            {!activeVitals ? (
-              <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>Select a patient from the queue to see their lab results.</div>
-            ) : sortedCompletedResults.length === 0 && patientLabRows.active.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>No lab results for this patient yet. Order tests from the Lab Orders panel.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {sortedCompletedResults.map(r => (
-                  <div
-                    key={r.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Open result for ${r.testName}${r.abnormalFlag && r.abnormalFlag !== 'normal' ? ` (${r.abnormalFlag})` : ''}`}
-                    onClick={() => openLabViewer(r)}
-                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLabViewer(r) } }}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
-                      padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
-                      background: r.abnormalFlag && r.abnormalFlag !== 'normal' ? 'var(--danger-soft)' : 'var(--bg-elevated)',
-                      border: r.abnormalFlag && r.abnormalFlag !== 'normal' ? '1px solid rgba(240,79,95,0.35)' : '1px solid var(--line-soft)',
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                        {r.testName}
-                        {r.abnormalFlag && r.abnormalFlag !== 'normal' && <span className={`lab-flag is-${r.abnormalFlag}`}>{r.abnormalFlag}</span>}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        Resulted {r.resultedAt ? formatDateTime(r.resultedAt, timezone) : '—'}
-                        {r.verifiedBy ? ` · by ${r.verifiedBy}` : ''}
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 700, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {r.result || '—'}{r.resultUnit ? ` ${r.resultUnit}` : ''}
-                      </span>
-                      <AppIcon name="chevron" size={15} />
-                    </div>
-                  </div>
-                ))}
-                {patientLabRows.active.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 1, margin: '6px 0' }}>In progress</div>
-                    {patientLabRows.active.map(r => (
-                      <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 14px', borderRadius: 10, background: 'var(--bg-elevated)', border: '1px solid var(--line-soft)', marginBottom: 6 }}>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13 }}>{r.testName}{r.origin === 'lab' ? <span style={{ marginLeft: 8, fontSize: 9.5, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: 'rgba(201,169,97,0.14)', color: 'var(--gold)', verticalAlign: 'middle' }}>LAB-RAISED</span> : null}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>Requested {r.requestedAt ? formatDateTime(r.requestedAt, timezone) : '—'}</div>
-                        </div>
-                        <span className={`lab-stage is-${r.stage}`} style={{ flexShrink: 0 }}>{LAB_STAGE_LABEL[r.stage]}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            <div className="dash-panel" style={{ padding: 14, marginTop: 16 }}>
+              <div className="dash-panel-head" style={{ marginBottom: 8 }}><div><div className="dash-panel-title">Consultation Summary</div><div className="dash-panel-sub">At-a-glance</div></div></div>
+              <div>{summaryRow('Patient', activePatient ? `${activePatient.full_name}${patientMeta(activePatient) ? ' · ' + patientMeta(activePatient) : ''}` : null)}{summaryRow('History', historySummary)}{summaryRow('Symptoms', symptoms.map(s => s.label).join(', '))}{summaryRow('Vitals', `BP ${activeVitals.blood_pressure || '—'} · Pulse ${activeVitals.pulse_rate || '—'}`)}{summaryRow('Diagnosis', diagnoses.map(d => d.label).join(', '))}{summaryRow('Prescription', medications.map(m => m.drugName).join('; '))}{summaryRow('Plan', treatmentPlan)}</div>
+            </div>
           </div>
 
-          <div className="dash-panel" style={{ marginTop: 20 }}>
-            <div className="dash-panel-head"><div><div className="dash-panel-title">Consultation Summary</div></div></div>
-            <div>{summaryRow('Patient', activePatient ? `${activePatient.full_name}${patientMeta(activePatient) ? ' · ' + patientMeta(activePatient) : ''}` : null)}{summaryRow('History', historySummary)}{summaryRow('Symptoms', symptoms.map(s => s.label).join(', '))}{summaryRow('Vitals', `BP ${activeVitals.blood_pressure || '—'} · Pulse ${activeVitals.pulse_rate || '—'}`)}{summaryRow('Diagnosis', diagnoses.map(d => d.label).join(', '))}{summaryRow('Prescription', medications.map(m => m.drugName).join('; '))}{summaryRow('Plan', treatmentPlan)}</div>
-          </div>
-
-          <div className="dash-panel" style={{ marginTop: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {/* ===================== ROW 9 — Finish Up ===================== */}
+          <div className="dash-panel" style={{ marginTop: 16, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div><div className="dash-panel-title">Finish Up</div><div className="dash-panel-sub">Finalizes meds and completes visit</div></div>
             <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-ghost" onClick={clearWorkbench}>Cancel</button>
-              <button className="btn btn-primary" style={{ width: 'auto' }} onClick={handleCompleteConsultation} disabled={completing}>{completing ? 'Completing…' : 'Complete Consultation'}</button>
+              <button type="button" className="btn btn-ghost" onClick={clearWorkbench}>Cancel</button>
+              <button type="button" className="btn btn-primary" style={{ width: 'auto' }} onClick={handleCompleteConsultation} disabled={completing}>{completing ? 'Completing…' : 'Complete Consultation'}</button>
             </div>
           </div>
         </>
