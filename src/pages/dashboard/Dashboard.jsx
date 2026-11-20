@@ -1503,7 +1503,7 @@ export default function Dashboard(){
             {tab === 'appointments' && <Appointments initialSearch={deepLinkSearch}/>}
           {tab === 'patients' && (
             profilePatientId ? (
-              <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+              <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} onDischarge={() => { setProfilePatientId(null); setTab('discharge') }} />
             ) : (
               <>
                 {/* NEW: ATTENDED TODAY SECTION */}

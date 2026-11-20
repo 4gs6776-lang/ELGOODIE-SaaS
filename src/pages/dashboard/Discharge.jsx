@@ -115,8 +115,49 @@ export default function Discharge() {
   const [showNewModal, setShowNewModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
 
+  // Quick-access "Discharge" button on the patient profile: find an
+  // existing in-flight discharge for this patient and open it, or create
+  // a fresh one (linking the active admission) and open the editor. This
+  // is the same path the New Discharge modal takes, just triggered from
+  // the profile so the nurse doesn't have to come back to this list.
+  async function openDischargeForPatient(thePatient){
+    if (!thePatient) return
+    const existing = dischargeRequests.find(d =>
+      d.patient_id === thePatient.id && d.status && d.status !== 'cancelled' && d.status !== 'discharged'
+    )
+    if (existing) {
+      setProfilePatientId(null)
+      setEditingId(existing.id)
+      return
+    }
+    const activeAdm = admissions.find(a => a.patient_id === thePatient.id && a.status === 'active')
+    try {
+      const created = await addDischarge({
+        hospital_id: hospital.id,
+        patient_id: thePatient.id,
+        patient_name: thePatient.full_name,
+        admission_id: activeAdm?.id || null,
+        discharge_type: 'home',
+        status: 'doctor_pending',
+        created_by: profile?.id,
+      })
+      writeAudit({
+        hospitalId: hospital?.id, actor: profile,
+        action: 'discharge.created',
+        entityType: 'discharge_request', entityId: created.id,
+        patientId: thePatient.id,
+        summary: `Initiated discharge request for ${thePatient.full_name || 'patient'} (from patient profile)`,
+        metadata: { discharge_id: created.id, discharge_type: 'home', source: 'patient_profile' },
+      })
+      setProfilePatientId(null)
+      setEditingId(created.id)
+    } catch (err) {
+      window.alert(`Could not start discharge: ${err.message || err}`)
+    }
+  }
+
   if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} onDischarge={openDischargeForPatient} />
   }
 
   // Enrich discharge rows with patient + computed outstanding balance
@@ -254,53 +295,18 @@ export default function Discharge() {
     }
   }
 
-  // Convert take-home drugs to billable charges (so the cashier /
-  // pharmacy can dispense them through the normal flow).
-  async function sendTakeHomeToPharmacy(theDischarge) {
-    if (!theDischarge.take_home_drugs || !Array.isArray(theDischarge.take_home_drugs) || theDischarge.take_home_drugs.length === 0) {
-      window.alert('No take-home drugs recorded for this discharge.')
-      return
-    }
-    if (!window.confirm(`Send ${theDischarge.take_home_drugs.length} take-home drug(s) to the Billing Queue?\n\nThe cashier will see pending charges for each drug — the patient pays, then the pharmacy dispenses.`)) return
-    try {
-      for (const drug of theDischarge.take_home_drugs) {
-        // Look up the pharmacy item to get its current selling price
-        const item = pharmacyItems.find(p => (p.name || '').toLowerCase() === String(drug.drug || '').toLowerCase())
-        const unitPrice = item ? Number(item.selling_price || 0) : Number(drug.unit_price || 0)
-        const qty = Number(drug.quantity || 1)
-        await addBillableCharge({
-          hospital_id: hospital.id,
-          patient_id: theDischarge.patient_id,
-          patient_name: theDischarge.patient_name,
-          source_module: 'Discharge',
-          source_transaction_id: `DISCH-${theDischarge.id.slice(0, 8)}-${Date.now().toString().slice(-4)}`,
-          item_name: `${drug.drug}${drug.dosage ? ` ${drug.dosage}` : ''}`,
-          category: 'Drug',
-          quantity: qty,
-          unit_price: unitPrice,
-          total: unitPrice * qty,
-          status: 'pending',
-          created_by: profile?.id,
-        })
-      }
-      writeAudit({
-        hospitalId: hospital?.id, actor: profile,
-        action: 'discharge.take_home_drugs_to_pharmacy',
-        entityType: 'discharge_request', entityId: theDischarge.id,
-        patientId: theDischarge.patient_id,
-        summary: `Sent ${theDischarge.take_home_drugs.length} take-home drug(s) from discharge of ${theDischarge.patient_name} to the Billing Queue`,
-        metadata: { discharge_id: theDischarge.id, drug_count: theDischarge.take_home_drugs.length },
-      })
-      window.alert(`${theDischarge.take_home_drugs.length} take-home drug(s) sent to Billing Queue.`)
-    } catch (err) {
-      window.alert(`Could not send drugs to pharmacy: ${err.message || err}`)
-    }
-  }
+  // Take-home drugs are NO LONGER auto-sent to Pharmacy/Billing from
+  // this screen. They are recorded by the doctor (TakeHomeDrugsEditor)
+  // and shown as a read-only list in DischargeDetailModal. The nurse
+  // reviews them on the patient profile and sends them to the Pharmacy
+  // queue from there (PatientProfile → Overview → "Take-Home Drugs
+  // (Discharge)" → "Send to Pharmacy"), using the pharmacy_request
+  // pattern — not billable_charges.
 
   const {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
-    pageItems, setCurrentPage: setPage, setPageSize,
-  } = usePagination(filtered, { pageSize: 10, resetKey: `${search}|${statusFilter}` })
+    pageItems, setPage, setPageSize,
+  } = usePagination({ items: filtered, initialPageSize: 10 })
 
   return (
     <>
@@ -475,7 +481,6 @@ export default function Discharge() {
           onClose={() => setEditingId(null)}
           onUpdate={handleUpdate}
           onAdvance={handleAdvance}
-          onSendToPharmacy={sendTakeHomeToPharmacy}
         />
       )}
     </>
@@ -558,7 +563,7 @@ function NewDischargeModal({ patients, admissions, onClose, onSave }) {
 // =====================================================================
 // DischargeDetailModal — multi-section workflow form
 // =====================================================================
-function DischargeDetailModal({ theDischarge, inventoryItems = [], onClose, onUpdate, onAdvance, onSendToPharmacy }) {
+function DischargeDetailModal({ theDischarge, inventoryItems = [], onClose, onUpdate, onAdvance }) {
   const currentStatusIdx = STATUS_FLOW.findIndex(s => s.value === theDischarge.status)
   const isFinal = theDischarge.status === 'discharged' || theDischarge.status === 'cancelled'
   const doctorDone = !!theDischarge.doctor_signed_at
@@ -745,16 +750,25 @@ function DischargeDetailModal({ theDischarge, inventoryItems = [], onClose, onUp
           )}
         </Section>
 
-        {/* ---- Take-home drugs → pharmacy ---- */}
+        {/* ---- Take-home drugs (read-only list here) ----
+            Take-home drugs are NOT auto-sent to Pharmacy or Billing from
+            this screen anymore. They are recorded by the doctor (editor
+            above) and shown here as a plain list. The nurse reviews and
+            sends them to the Pharmacy queue from the patient's profile
+            (PatientProfile → Overview → "Take-Home Drugs (Discharge)"). */}
         {theDischarge.take_home_drugs && Array.isArray(theDischarge.take_home_drugs) && theDischarge.take_home_drugs.length > 0 && (
-          <Section title="Take-Home Drugs → Pharmacy" locked={false}>
+          <Section title="Take-Home Drugs" locked={false}>
             <div style={{ gridColumn: '1 / -1' }}>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-                Send the take-home drugs to the Billing Queue so the cashier charges for them and the pharmacy dispenses. The drugs will appear as pending charges for this patient.
+                Recorded by the doctor. These are <strong>not</strong> charged or sent automatically — open the patient profile to send them to the Pharmacy queue when ready.
               </div>
-              <button type="button" className="btn btn-ghost" style={{ borderColor: 'var(--violet)', color: 'var(--violet)' }} onClick={() => onSendToPharmacy(theDischarge)}>
-                Send {theDischarge.take_home_drugs.length} drug(s) to Pharmacy →
-              </button>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7, color: 'var(--text)' }}>
+                {theDischarge.take_home_drugs.map((d, i) => (
+                  <li key={i}>
+                    <strong>{d.drug || 'Unknown drug'}</strong>{d.dosage ? ` ${d.dosage}` : ''}{d.quantity ? ` ×${d.quantity}` : ''}{d.instructions ? ` — ${d.instructions}` : ''}
+                  </li>
+                ))}
+              </ul>
             </div>
           </Section>
         )}
