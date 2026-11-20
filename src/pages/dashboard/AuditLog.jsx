@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useOfflineTable } from '../../lib/useOfflineTable'
+import { usePagination } from '../../lib/usePagination'
+import Pagination from '../../components/common/Pagination'
 
 // =====================================================================
 // GOODIE-MEDHUB — Audit Log viewer (front-end for migration 007's
@@ -57,6 +59,17 @@ export default function AuditLog(){
       })
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   }, [events, actionFilter, entityFilter, dateFrom, dateTo, search])
+
+  // Global Pagination Rule: audit_events grows forever, so page the list.
+  // Any filter/search change snaps back to page 1 so the user never lands
+  // on an out-of-range page after narrowing the results.
+  const {
+    pageItems, currentPage, setCurrentPage, pageSize, setPageSize,
+    totalPages, totalItems, startIndex, endIndex,
+  } = usePagination(filtered, {
+    pageSize: 20,
+    resetKey: `${search}|${actionFilter}|${entityFilter}|${dateFrom}|${dateTo}`,
+  })
 
   function formatDate(ts){
     if (!ts) return '—'
@@ -123,6 +136,7 @@ export default function AuditLog(){
         ) : filtered.length === 0 ? (
           <div style={{ padding: 20, opacity: 0.7 }}>No audit events match these filters.</div>
         ) : (
+          <>
           <div style={{ overflowX: 'auto' }}>
             <table className="dash-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
@@ -135,7 +149,7 @@ export default function AuditLog(){
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(e => (
+                {pageItems.map(e => (
                   <tr
                     key={e.id}
                     onClick={() => setSelected(e)}
@@ -151,6 +165,18 @@ export default function AuditLog(){
               </tbody>
             </table>
           </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalItems}
+              startIndex={startIndex}
+              endIndex={endIndex}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              itemLabel="events"
+            />
+          </>
         )}
       </div>
 
