@@ -244,7 +244,7 @@ export default function Discharge() {
           patient_id: theDischarge.patient_id,
           patient_name: theDischarge.patient_name,
           source_module: 'Discharge',
-          source_transaction_id: `DISCH-${theDischarge.id.slice(0, 8)}-${Date.now().toString().slice(-4)}`,
+          source_transaction_id: `DISCH-${String(theDischarge.id).slice(0, 8)}-${Date.now().toString().slice(-4)}`,
           item_name: `${drug.drug}${drug.dosage ? ` ${drug.dosage}` : ''}`,
           category: 'Drug',
           quantity: qty,
@@ -270,8 +270,8 @@ export default function Discharge() {
 
   const {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
-    pageItems, setPage, setPageSize,
-  } = usePagination({ items: filtered, initialPageSize: 10 })
+    pageItems, setCurrentPage, setPageSize,
+  } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
 
   return (
     <>
@@ -405,7 +405,7 @@ export default function Discharge() {
               startIndex={startIndex}
               endIndex={endIndex}
               pageSize={pageSize}
-              onPageChange={setPage}
+              onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
               itemLabel="discharges"
             />

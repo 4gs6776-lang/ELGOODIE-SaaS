@@ -171,8 +171,8 @@ export default function OperatingTheatre() {
 
   const {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
-    pageItems, setPage, setPageSize,
-  } = usePagination({ items: filtered, initialPageSize: 10 })
+    pageItems, setCurrentPage, setPageSize,
+  } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
 
   // ---- Case detail save handler (partial updates — same pattern as
   // PatientProfile's updatePatient). Each section of the detail modal
@@ -185,7 +185,7 @@ export default function OperatingTheatre() {
         action: `theatre.case_${section}_updated`,
         entityType: 'theatre_case', entityId: theCase.id,
         patientId: theCase.patient_id,
-        summary: `Updated ${section} for theatre case "${theCase.procedure_name}" (${theCase.case_number || theCase.id.slice(0, 8)}) — patient ${theCase.patient_name}`,
+        summary: `Updated ${section} for theatre case "${theCase.procedure_name}" (${theCase.case_number || String(theCase.id).slice(0, 8)}) — patient ${theCase.patient_name}`,
         metadata: { case_id: theCase.id, section, updates_keys: Object.keys(updates) },
       })
       // Refresh the editingCase object so the modal shows the latest values
@@ -306,7 +306,7 @@ export default function OperatingTheatre() {
                     const statusInfo = STATUS_FLOW.find(s => s.value === c.status) || STATUS_FLOW[0]
                     return (
                       <tr key={c.id}>
-                        <td style={{ padding: 12, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{c.case_number || c.id.slice(0, 8)}</td>
+                        <td style={{ padding: 12, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{c.case_number || String(c.id).slice(0, 8)}</td>
                         <td style={{ padding: 12 }}>
                           <div style={{ fontWeight: 700 }}>{c.patient_name}</div>
                           {c.patient?.hospital_number && <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{c.patient.hospital_number}</div>}
@@ -348,7 +348,7 @@ export default function OperatingTheatre() {
               startIndex={startIndex}
               endIndex={endIndex}
               pageSize={pageSize}
-              onPageChange={setPage}
+              onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
               itemLabel="cases"
             />

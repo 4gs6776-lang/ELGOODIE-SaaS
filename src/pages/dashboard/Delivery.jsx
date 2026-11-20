@@ -195,8 +195,8 @@ export default function Delivery() {
   // Pagination
   const {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
-    pageItems, setPage, setPageSize,
-  } = usePagination({ items: filtered, initialPageSize: 10 })
+    pageItems, setCurrentPage, setPageSize,
+  } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
 
   return (
     <>
@@ -364,7 +364,7 @@ export default function Delivery() {
               startIndex={startIndex}
               endIndex={endIndex}
               pageSize={pageSize}
-              onPageChange={setPage}
+              onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
               itemLabel="ANC patients"
             />
