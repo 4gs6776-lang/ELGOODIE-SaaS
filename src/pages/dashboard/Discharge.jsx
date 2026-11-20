@@ -299,8 +299,8 @@ export default function Discharge() {
 
   const {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
-    pageItems, setPage, setPageSize,
-  } = usePagination({ items: filtered, initialPageSize: 10 })
+    pageItems, setCurrentPage: setPage, setPageSize,
+  } = usePagination(filtered, { pageSize: 10, resetKey: `${search}|${statusFilter}` })
 
   return (
     <>
