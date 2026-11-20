@@ -445,6 +445,51 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     }
 
     try {
+      // OFFLINE-SAFE WRITES
+      // -----------------------------------------------------------------
+      // useOfflineTable.updateRecord() ALWAYS writes to local IndexedDB
+      // first, then attempts the Supabase remote update. When the
+      // device is offline (or the server is unreachable) the remote
+      // call fails — but the local copy is already updated AND queued
+      // for sync (the record is flagged _syncError:'transient' and the
+      // background sync queue will push it the moment the connection
+      // comes back). updateRecord then re-throws a friendly
+      // "server could not be reached" message.
+      //
+      // That re-throw is what broke this handler: a single offline
+      // write aborted the WHOLE reverse flow, so the dispense row was
+      // never flagged `reversed`, the billable charge was never voided,
+      // and the "Reverse dispense" button stayed clickable. Every
+      // retry then re-added the stock (double / triple restore).
+      //
+      // Fix: wrap each update in offlineSafeUpdate(). A network error
+      // is swallowed (the write is already safe locally and will sync
+      // later) — we only bail on a REAL error (schema missing column,
+      // permission denied, FK violation, etc.) which the sync queue
+      // cannot fix by itself.
+      // -----------------------------------------------------------------
+      const isRecoverableOfflineError = (err) => {
+        const msg = String(err?.message || err || '').toLowerCase()
+        // Mirrors NETWORK_ERROR_RE in useOfflineTable.js, plus the
+        // friendly string friendlyErrorMessage() returns for offline.
+        return /failed to fetch|networkerror|load failed|fetch failed|network request failed|err_internet|server could not be reached|offline or unstable/i.test(msg)
+      }
+      // Run an update; if it throws an offline/network error, treat it
+      // as success (queued locally) and remember it was queued so we
+      // can tell the user. Real errors propagate and abort the flow.
+      const offlineWrites = []
+      const offlineSafeUpdate = async (label, fn) => {
+        try {
+          await fn()
+        } catch (err) {
+          if (isRecoverableOfflineError(err)) {
+            offlineWrites.push(label)
+            return
+          }
+          throw err
+        }
+      }
+
       // 1. Restore stock.
       //
       // IMPORTANT: every dispense in the app goes through
@@ -470,7 +515,9 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
         const invItem = inventoryItems.find(i => i.id === record.item_id)
         if (invItem) {
           const newQty = Number(invItem.quantity || 0) + qty
-          await updateInventoryItem(invItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+          await offlineSafeUpdate(`inventory stock for "${invItem.name || record.item_name}"`, () =>
+            updateInventoryItem(invItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+          )
           stockRestored = true
         } else {
           // Legacy fallback: a handful of old dispenses may have
@@ -480,7 +527,9 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
           const pharmaItem = pharmacyItems.find(i => i.id === record.item_id)
           if (pharmaItem) {
             const newQty = Number(pharmaItem.quantity || 0) + qty
-            await updatePharmaItem(pharmaItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+            await offlineSafeUpdate(`pharmacy stock for "${pharmaItem.name || record.item_name}"`, () =>
+              updatePharmacyItem(pharmaItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+            )
             stockRestored = true
           } else {
             // Neither list has the item (maybe it was deleted from
@@ -500,12 +549,14 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
       //    the reversed / reversed_at / reversed_by / reversed_reason
       //    columns. We also stash the linked IDs so anyone looking at
       //    this row later can trace what was undone.
-      await updateStockRecord(record.id, {
-        reversed: true,
-        reversed_at: new Date().toISOString(),
-        reversed_by: profile?.id || null,
-        reversed_reason: reason.trim(),
-      })
+      await offlineSafeUpdate('reversed flag on the dispense record', () =>
+        updateStockRecord(record.id, {
+          reversed: true,
+          reversed_at: new Date().toISOString(),
+          reversed_by: profile?.id || null,
+          reversed_reason: reason.trim(),
+        })
+      )
 
       // 3. Void the linked billable charge. Find it by matching
       //    patient_id + item_name + total within a 5-minute window of
@@ -521,7 +572,9 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
         return Math.abs(bcAt - dispensedAt) <= window && bc.status === 'pending'
       })
       if (linkedCharge) {
-        await updateBillableCharge(linkedCharge.id, { status: 'voided' })
+        await offlineSafeUpdate('voided status on the linked billable charge', () =>
+          updateBillableCharge(linkedCharge.id, { status: 'voided' })
+        )
       }
 
       // 4. Reset the linked prescription. We find it by matching
@@ -535,7 +588,9 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
         return Math.abs(rxAt - dispensedAt) <= window && rx.status === 'dispensed'
       })
       if (linkedRx) {
-        await updatePrescription(linkedRx.id, { status: 'active' })
+        await offlineSafeUpdate('active status on the linked prescription', () =>
+          updatePrescription(linkedRx.id, { status: 'active' })
+        )
       }
 
       // 5. Reset the linked pharmacy_request to 'pending' (optional).
@@ -562,13 +617,24 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
           reset_prescription_id: linkedRx?.id || null,
           stock_record_patient_id: record.patient_id,
           stock_record_patient_name: record.patient_name,
+          offline_queued_writes: offlineWrites,
         },
       })
 
+      // Final alert — honest about what happened. Three outcomes:
+      //   (a) everything synced: "Dispense reversed. Stock returned."
+      //   (b) some writes queued offline (device is offline): same
+      //       success message PLUS a note that a few changes will sync
+      //       when the connection returns. The local state is already
+      //       correct, so the patient's "Items Given" tab updates now.
+      //   (c) stock couldn't be restored (item deleted from inventory).
+      const offlineNote = offlineWrites.length > 0
+        ? `\n\nNote: this device is offline, so ${offlineWrites.length} change(s) — ${offlineWrites.join('; ')} — are saved here and will sync to the server automatically once the connection is stable. The patient's "Items Given" tab is already updated.`
+        : ''
       if (stockRestored) {
-        window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock in Inventory.\nThe linked billable charge has been voided.`)
+        window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock in Inventory.\nThe linked billable charge has been voided.${offlineNote}`)
       } else {
-        window.alert(`Dispense reversed.\n\nThe linked billable charge has been voided and the dispense flagged as reversed.\n\nNOTE: ${qty} units of "${record.item_name}" could NOT be returned to stock — the inventory item no longer exists. Add it back manually if needed.`)
+        window.alert(`Dispense reversed.\n\nThe linked billable charge has been voided and the dispense flagged as reversed.\n\nNOTE: ${qty} units of "${record.item_name}" could NOT be returned to stock — the inventory item no longer exists. Add it back manually if needed.${offlineNote}`)
       }
     } catch (err) {
       console.error('Undispense failed:', err)
