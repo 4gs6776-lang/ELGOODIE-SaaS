@@ -20,7 +20,7 @@ const TABS = ['Overview', 'Vitals', 'Wallet', 'History', 'Items Given', 'Prescri
 // Full-screen patient dashboard, opened by clicking a patient anywhere in
 // the app. Reuses the same offline-first tables every other module reads —
 // nothing new is stored here except through those existing hooks.
-export default function PatientProfile({ patientId, patient: initialPatient, onClose }){
+export default function PatientProfile({ patientId, patient: initialPatient, onClose, onDischarge }){
   const { profile, hospital } = useAuth()
   const timezone = getTimezone(hospital)
   const { records: patients, addRecord: addPatient, updateRecord: updatePatient, loadError: patientsLoadError } = useOfflineTable('patients', hospital?.id)
@@ -100,6 +100,26 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   // Phase 5: radiology scans + appointments for the "Everything" history
   const { records: radiologyScans } = useOfflineTable('radiology_scans', hospital?.id)
   const { records: appointments } = useOfflineTable('appointments', hospital?.id)
+
+  // Discharge requests for this patient — used to surface the
+  // take-home drugs recorded during discharge so the nurse can review
+  // them on the profile and send them to Pharmacy from here (the
+  // discharge screen no longer auto-sends them).
+  const { records: dischargeRequests } = useOfflineTable('discharge_requests', hospital?.id)
+  const patientDischarges = useMemo(
+    () => dischargeRequests
+      .filter(d => d.patient_id === patient?.id)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+    [dischargeRequests, patient?.id]
+  )
+  // The active discharge is the most recent one that is NOT cancelled or
+  // fully discharged — take-home drugs for an in-flight discharge are the
+  // ones the nurse will want to send to Pharmacy.
+  const activeDischarge = patientDischarges.find(d => d.status && d.status !== 'cancelled' && d.status !== 'discharged') || null
+  const takeHomeDrugs = useMemo(() => {
+    const src = activeDischarge?.take_home_drugs
+    return Array.isArray(src) ? src : []
+  }, [activeDischarge])
 
   // FIX: The "Edit Info" tab is now gated by DB-backed permissions.
   // - Admin/owner: always can edit (FULL_ACCESS_ROLES)
@@ -610,6 +630,48 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .filter(a => a.patient_id === patient.id && a.status === 'discharged')
     .sort((a, b) => new Date(b.discharge_date || b.updated_at || b.created_at) - new Date(a.discharge_date || a.updated_at || a.created_at))[0] || null
 
+  // Send this patient's take-home drugs (from the active discharge) to the
+  // Pharmacy queue using the SAME pattern as the "Send to Pharmacy" modal:
+  // one pharmacy_request row, plain-text, with priority. We deliberately
+  // do NOT create billable_charges here — the discharge screen no longer
+  // auto-pushes take-home drugs to Billing, and the nurse controls when
+  // (and whether) to send them from the patient profile.
+  async function sendTakeHomeToPharmacy(){
+    if (!activeDischarge) { showToast('No active discharge found for this patient.'); return }
+    if (takeHomeDrugs.length === 0) { showToast('No take-home drugs recorded for this discharge.'); return }
+    const lines = takeHomeDrugs.map(d => {
+      const name = `${d.drug || 'Unknown drug'}${d.dosage ? ` ${d.dosage}` : ''}`
+      const qty = d.quantity ? ` ×${d.quantity}` : ''
+      const sig = d.instructions ? ` — ${d.instructions}` : ''
+      return `• ${name}${qty}${sig}`
+    })
+    const text = `Take-home drugs on discharge (Discharge #${String(activeDischarge.id).slice(0, 8)}):\n${lines.join('\n')}`
+    if (!window.confirm(`Send ${takeHomeDrugs.length} take-home drug(s) to the Pharmacy queue?\n\nThis creates a pharmacy request (routine priority) — it does NOT add charges to Billing.`)) return
+    try {
+      await addPharmacyRequest({
+        hospital_id: hospital.id,
+        patient_id: patient.id,
+        patient_name: patient.full_name,
+        request_text: text,
+        priority: 'routine',
+        status: 'pending',
+        requested_by: profile?.id || null,
+        requested_by_name: profile?.full_name || null,
+      })
+      writeAudit({
+        hospitalId: hospital?.id, actor: profile,
+        action: 'discharge.take_home_drugs_sent_from_profile',
+        entityType: 'discharge_request', entityId: activeDischarge.id,
+        patientId: patient.id,
+        summary: `Sent ${takeHomeDrugs.length} take-home drug(s) for ${patient.full_name} to Pharmacy from the patient profile`,
+        metadata: { discharge_id: activeDischarge.id, drug_count: takeHomeDrugs.length },
+      })
+      showToast(`${takeHomeDrugs.length} take-home drug(s) sent to Pharmacy.`)
+    } catch (err) {
+      showToast(`Could not send to pharmacy: ${err.message || err}`)
+    }
+  }
+
   function findPharmacyMatch(drugName){
     if (!drugName) return null
     const q = drugName.toLowerCase()
@@ -662,6 +724,16 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {activeAdmissionRequest && onDischarge && (
+              <button
+                className="btn btn-primary"
+                style={{ width: 'auto', padding: '6px 12px', fontSize: 11.5, background: 'var(--teal)', color: '#fff' }}
+                onClick={() => onDischarge(patient)}
+                title="Open the Discharge workflow for this admitted patient"
+              >
+                Discharge
+              </button>
+            )}
             <button
               className="btn btn-primary"
               style={{ width: 'auto', padding: '6px 12px', fontSize: 11.5, background: 'var(--violet)', color: '#fff' }}
@@ -769,7 +841,7 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
 
         <div className="thin-scroll" style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
           {tab === 'Overview' && (
-            <OverviewTab patient={patient} latestConsultation={history[0]} activePrescriptions={activePrescriptions} outstandingBalance={outstandingBalance} walletBalance={walletBalance} admissionRequest={activeAdmissionRequest} />
+            <OverviewTab patient={patient} latestConsultation={history[0]} activePrescriptions={activePrescriptions} outstandingBalance={outstandingBalance} walletBalance={walletBalance} admissionRequest={activeAdmissionRequest} takeHomeDrugs={takeHomeDrugs} onSendTakeHome={sendTakeHomeToPharmacy} />
           )}
           {tab === 'Vitals' && (
             <VitalsTab
@@ -1172,10 +1244,43 @@ function AdmissionStatusCard({ request }){
   )
 }
 
-function OverviewTab({ patient, latestConsultation, activePrescriptions, outstandingBalance, walletBalance, admissionRequest }){
+function OverviewTab({ patient, latestConsultation, activePrescriptions, outstandingBalance, walletBalance, admissionRequest, takeHomeDrugs = [], onSendTakeHome }){
   return (
     <div>
       <AdmissionStatusCard request={admissionRequest} />
+
+      {/* ---- Take-home drugs recorded during discharge ----
+          These are NOT auto-sent to Pharmacy/Billing from the discharge
+          screen. They sit here as a plain list so the nurse can review
+          them on the profile and send them to the Pharmacy queue when
+          ready (uses the same pharmacy_request pattern as the header
+          "Send to Pharmacy" button). */}
+      {takeHomeDrugs.length > 0 && (
+        <div className="dash-panel" style={{ marginTop: 14, marginBottom: 14, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 13.5 }}>Take-Home Drugs (Discharge)</h3>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ width: 'auto', padding: '5px 12px', fontSize: 11.5, borderColor: 'var(--violet)', color: 'var(--violet)' }}
+              onClick={onSendTakeHome}
+              title="Send these take-home drugs to the Pharmacy queue"
+            >
+              Send {takeHomeDrugs.length} to Pharmacy →
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            Recorded by the doctor on discharge. They are not charged or dispensed automatically — send them to Pharmacy from here when ready.
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7 }}>
+            {takeHomeDrugs.map((d, i) => (
+              <li key={i}>
+                <strong>{d.drug || 'Unknown drug'}</strong>{d.dosage ? ` ${d.dosage}` : ''}{d.quantity ? ` ×${d.quantity}` : ''}{d.instructions ? ` — ${d.instructions}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
         {detailRow('Hospital No. (MRN)', patient.hospital_number)}
         {detailRow('Registered', patient.created_at ? new Date(patient.created_at).toLocaleString() : null)}
