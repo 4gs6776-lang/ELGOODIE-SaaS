@@ -267,3 +267,36 @@ img, svg{ max-width:100%; }
   .hd-row-meta, .hd-row-time{ font-size:9.5px; }
   .hd-seg button{ font-size:9.5px; padding:3px 6px; }
 }
+
+/* =========================================================
+   DOCTOR WORKBENCH REDESIGN — scoped responsive rules
+   ---------------------------------------------------------
+   Only elements carrying the `dw-` prefixed classes below are
+   affected, so Nursing / Notifications / other dashboards that
+   reuse `.dash-row-2` (which has no rule of its own) are not
+   touched. These collapse the inline two-column grids on tablet
+   and mobile so the redesigned Workbench reads cleanly on small
+   screens without horizontal scrolling.
+   ========================================================= */
+
+/* Tablet: lab/prescription action tiles + side-by-side panels
+   drop to a single column. */
+@media (max-width: 900px) {
+  .dw-grid-2,
+  .dw-tiles { grid-template-columns: 1fr !important; }
+  /* Clinical-notes inner 2-col grid also collapses so the
+     documentation fields stay comfortably wide. */
+  .dw-notes-grid { grid-template-columns: 1fr !important; }
+}
+
+/* Mobile: keep everything stacked; tighten the quick-actions
+   toolbar so buttons wrap onto their own lines. */
+@media (max-width: 600px) {
+  .dw-grid-2,
+  .dw-tiles,
+  .dw-notes-grid { grid-template-columns: 1fr !important; gap: 10px !important; }
+  .dw-quick-actions { flex-wrap: wrap; gap: 6px !important; }
+  .dw-quick-actions .btn { flex: 1 1 auto; }
+  .dw-admission-wrap { margin-left: 0 !important; width: 100%; }
+  .dw-admission-wrap .btn { width: 100%; }
+}
