@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useOfflineTable } from '../../lib/useOfflineTable'
+import { useRealtimeAlert } from '../../lib/useRealtimeAlert'
 import { usePagination } from '../../lib/usePagination'
 import Pagination from '../../components/common/Pagination'
 import SearchInput from '../../components/common/SearchInput'
@@ -28,18 +29,46 @@ import ModuleHistoryButton from '../../components/ModuleHistoryButton'
 
 export default function AncPatients() {
   const { hospital } = useAuth()
-  const { records: patients, loading } = useOfflineTable('patients', hospital?.id)
+  const { records: patients, syncFromServer: syncPatients, loading } = useOfflineTable('patients', hospital?.id)
+  const { records: deliveries, syncFromServer: syncDeliveries } = useOfflineTable('deliveries', hospital?.id)
 
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('active') // all | active | pregnant | delivered | miscarried
   const [profilePatientId, setProfilePatientId] = useState(null)
 
-  // ---- Filter to ANC patients only + alphabetical sort by name ----------
-  // Section 7: alphabetical A-Z is the system-wide default for patient lists.
-  // Secondary sort by patient_id (stable for identical names).
+  // Realtime: when a delivery is recorded in the Delivery module, the
+  // patient's `anc_delivery_status` flips to 'delivered' and a new row
+  // lands in the `deliveries` table. Both fire Realtime events —
+  // refresh from server so this list updates live without a manual reload.
+  useRealtimeAlert('deliveries', hospital?.id, () => { syncDeliveries(); syncPatients() })
+  useRealtimeAlert('patients', hospital?.id, () => { syncPatients() })
+
+  // ---- Filter to ANC patients only + derive delivery status ----------
+  // `anc_delivery_status` is written by the Delivery module when a
+  // midwife records a delivery. Null/undefined means the patient is
+  // still pregnant (the column was added in migration 103; pre-existing
+  // ANC patients are backfilled to 'pregnant' on the database side, but
+  // we also default here so the UI is never ambiguous for rows synced
+  // before that backfill ran).
+  //
+  // Sort: active (pregnant) patients first, then miscarried, then
+  // delivered — so the people who still need attention stay at the top.
+  // Within each group, alphabetical A-Z (Section 7 default).
   const ancPatients = useMemo(() => {
     return patients
       .filter(p => p.category === 'anc')
+      .map(p => {
+        let status = p.anc_delivery_status || 'pregnant'
+        // Defensive: if a delivery row exists but the status column
+        // wasn't synced yet, infer from anc_delivery_date.
+        if (status === 'pregnant' && p.anc_delivery_date) status = 'delivered'
+        return { ...p, _deliveryStatus: status }
+      })
       .sort((a, b) => {
+        const order = { pregnant: 0, miscarried: 1, delivered: 2 }
+        const so = order[a._deliveryStatus] ?? 0
+        const bo = order[b._deliveryStatus] ?? 0
+        if (so !== bo) return so - bo
         const nameA = (a.full_name || '').trim().toLowerCase()
         const nameB = (b.full_name || '').trim().toLowerCase()
         if (nameA < nameB) return -1
@@ -87,23 +116,41 @@ export default function AncPatients() {
   }, [ancPatients])
 
   // ---- Summary card stats --------------------------------------------
+  // NOTE: trimester + EDD stats only count ACTIVE (pregnant) patients.
+  // Once a patient is delivered or miscarried, their gestational age
+  // and EDD are no longer clinically relevant — keeping them in the
+  // "overdue EDD" count was misleading (it flagged mothers who had
+  // already delivered as "overdue"). Total + queue counts still
+  // include everyone so the register stays complete.
   const summary = useMemo(() => {
     const total = ancWithComputed.length
-    const t1 = ancWithComputed.filter(p => p._trimester === 1).length
-    const t2 = ancWithComputed.filter(p => p._trimester === 2).length
-    const t3 = ancWithComputed.filter(p => p._trimester === 3).length
-    const upcomingEdd = ancWithComputed.filter(p => p._daysToEdd != null && p._daysToEdd >= 0 && p._daysToEdd <= 30).length
-    const overdueEdd = ancWithComputed.filter(p => p._daysToEdd != null && p._daysToEdd < 0).length
+    const pregnant = ancWithComputed.filter(p => p._deliveryStatus === 'pregnant')
+    const delivered = ancWithComputed.filter(p => p._deliveryStatus === 'delivered').length
+    const miscarried = ancWithComputed.filter(p => p._deliveryStatus === 'miscarried').length
+    const active = pregnant
+    const t1 = active.filter(p => p._trimester === 1).length
+    const t2 = active.filter(p => p._trimester === 2).length
+    const t3 = active.filter(p => p._trimester === 3).length
+    const upcomingEdd = active.filter(p => p._daysToEdd != null && p._daysToEdd >= 0 && p._daysToEdd <= 30).length
+    const overdueEdd = active.filter(p => p._daysToEdd != null && p._daysToEdd < 0).length
     const inQueue = ancWithComputed.filter(p => p.queue_status).length
 
-    return { total, t1, t2, t3, upcomingEdd, overdueEdd, inQueue }
+    return { total, pregnant: pregnant.length, delivered, miscarried, t1, t2, t3, upcomingEdd, overdueEdd, inQueue }
   }, [ancWithComputed])
 
-  // ---- Search filter --------------------------------------------------
+  // ---- Status + search filter ---------------------------------------
   const filtered = useMemo(() => {
+    let list = ancWithComputed
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'active') {
+        list = list.filter(p => p._deliveryStatus === 'pregnant')
+      } else {
+        list = list.filter(p => p._deliveryStatus === statusFilter)
+      }
+    }
     const q = search.trim().toLowerCase()
-    if (!q) return ancWithComputed
-    return ancWithComputed.filter(p => {
+    if (!q) return list
+    return list.filter(p => {
       return [
         p.full_name,
         p.anc_husband_name,
@@ -111,7 +158,7 @@ export default function AncPatients() {
         p.phone,
       ].some(v => String(v || '').toLowerCase().includes(q))
     })
-  }, [ancWithComputed, search])
+  }, [ancWithComputed, search, statusFilter])
 
   // ---- Pagination -----------------------------------------------------
   const {
@@ -153,6 +200,17 @@ export default function AncPatients() {
           <div>
             <div className="dash-stat-label">Total ANC Patients</div>
             <div className="dash-stat-value">{summary.total}</div>
+            <div className="dash-stat-delta" style={{ fontSize: 10 }}>
+              <span style={{ color: 'var(--teal)' }}>{summary.pregnant} pregnant</span>
+              <span style={{ color: 'var(--muted)' }}> · </span>
+              <span style={{ color: 'var(--gold)' }}>{summary.delivered} delivered</span>
+              {summary.miscarried > 0 && (
+                <>
+                  <span style={{ color: 'var(--muted)' }}> · </span>
+                  <span style={{ color: 'var(--danger)' }}>{summary.miscarried} miscarried</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
         <div className="dash-stat-card">
@@ -209,13 +267,55 @@ export default function AncPatients() {
           <ModuleHistoryButton moduleKey="anc" />
         </div>
 
+        {/* ---- Delivery status filter chips ---- */}
+        {/* Default to "Active" so the register opens on the patients who
+            still need attention. Delivered/miscarried patients stay in
+            the system (switch to "All" to see them) but no longer crowd
+            the active list. Counts come straight from the summary. */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '12px 16px', borderBottom: '1px solid var(--line-soft)' }}>
+          {[
+            { v: 'active',      label: 'Active (pregnant)',  count: summary.pregnant,   color: 'var(--teal)' },
+            { v: 'delivered',   label: 'Delivered',          count: summary.delivered,  color: 'var(--gold)' },
+            { v: 'miscarried',  label: 'Miscarried',         count: summary.miscarried, color: 'var(--danger)' },
+            { v: 'all',         label: 'All',                count: summary.total,      color: 'var(--muted)' },
+          ].map(chip => {
+            const active = statusFilter === chip.v
+            const disabled = chip.v !== 'all' && chip.count === 0
+            return (
+              <button
+                key={chip.v}
+                type="button"
+                onClick={() => setStatusFilter(chip.v)}
+                disabled={disabled}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '5px 12px', fontSize: 12, fontWeight: 600,
+                  borderRadius: 14, cursor: disabled ? 'not-allowed' : 'pointer',
+                  border: `1px solid ${active ? chip.color : 'var(--line)'}`,
+                  background: active ? `${chip.color}1a` : 'transparent',
+                  color: active ? chip.color : disabled ? 'var(--muted)' : 'var(--text)',
+                  opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                {chip.label}
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 8,
+                  background: active ? `${chip.color}33` : 'rgba(154,170,183,0.18)',
+                }}>{chip.count}</span>
+              </button>
+            )
+          })}
+        </div>
+
         {loading ? (
           <div className="dash-empty-state">Loading…</div>
         ) : filtered.length === 0 ? (
           <div className="dash-empty-state">
             {search.trim()
               ? `No ANC patients match "${search}".`
-              : 'No ANC patients yet. Register one via Reception with the "ANC Folder" category.'}
+              : statusFilter === 'all'
+                ? 'No ANC patients yet. Register one via Reception with the "ANC Folder" category.'
+                : `No ${statusFilter} ANC patients. Switch filters or record a delivery in the Delivery module.`}
           </div>
         ) : (
           <>
@@ -224,6 +324,7 @@ export default function AncPatients() {
                 <thead>
                   <tr>
                     <th>Name</th>
+                    <th>Status</th>
                     <th>EDD</th>
                     <th>Gest. Age</th>
                     <th>Trimester</th>
@@ -232,10 +333,30 @@ export default function AncPatients() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageItems.map(p => (
-                    <tr key={p.id}>
+                  {pageItems.map(p => {
+                    const statusMeta = {
+                      pregnant:   { label: 'Pregnant',   color: 'var(--teal)' },
+                      delivered:  { label: 'Delivered',  color: 'var(--gold)' },
+                      miscarried: { label: 'Miscarried', color: 'var(--danger)' },
+                    }[p._deliveryStatus] || { label: 'Pregnant', color: 'var(--teal)' }
+                    return (
+                    <tr key={p.id} style={{ opacity: p._deliveryStatus === 'pregnant' ? 1 : 0.72 }}>
                       <td onClick={() => setProfilePatientId(p.id)} style={{ cursor: 'pointer', fontWeight: 700 }}>
                         {p.full_name || 'Unnamed'}
+                      </td>
+                      <td>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 12,
+                          background: `${statusMeta.color}1a`, color: statusMeta.color,
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {statusMeta.label}
+                        </span>
+                        {p._deliveryStatus !== 'pregnant' && p.anc_delivery_date && (
+                          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3 }}>
+                            {new Date(p.anc_delivery_date).toLocaleDateString()}
+                          </div>
+                        )}
                       </td>
                       <td style={{ fontSize: 11.5 }}>
                         <span style={{
@@ -244,20 +365,24 @@ export default function AncPatients() {
                                  'var(--muted)',
                           fontWeight: (p._daysToEdd != null && p._daysToEdd <= 30) ? 700 : 400,
                         }}>
-                          {formatEdd(p._edd, p._daysToEdd)}
+                          {p._deliveryStatus === 'pregnant'
+                            ? formatEdd(p._edd, p._daysToEdd)
+                            : '—'}
                         </span>
                       </td>
                       <td style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                        {p._gestAgeWeeks != null ? `${p._gestAgeWeeks}w` : '—'}
+                        {p._deliveryStatus === 'pregnant' && p._gestAgeWeeks != null ? `${p._gestAgeWeeks}w` : '—'}
                       </td>
                       <td>
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 12,
-                          background: p._trimester ? `${trimesterColor(p._trimester)}22` : 'rgba(154,170,183,0.14)',
-                          color: p._trimester ? trimesterColor(p._trimester) : 'var(--muted)',
-                        }}>
-                          {trimesterLabel(p._trimester)}
-                        </span>
+                        {p._deliveryStatus === 'pregnant' ? (
+                          <span style={{
+                            fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 12,
+                            background: p._trimester ? `${trimesterColor(p._trimester)}22` : 'rgba(154,170,183,0.14)',
+                            color: p._trimester ? trimesterColor(p._trimester) : 'var(--muted)',
+                          }}>
+                            {trimesterLabel(p._trimester)}
+                          </span>
+                        ) : <span style={{ color: 'var(--muted)' }}>—</span>}
                       </td>
                       <td style={{ fontSize: 11.5, color: 'var(--muted)' }}>{p.anc_husband_name || '—'}</td>
                       <td style={{ fontSize: 11.5 }}>
@@ -270,7 +395,8 @@ export default function AncPatients() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
