@@ -10,6 +10,11 @@ import PatientProfile from '../../components/PatientProfile'
 import ModuleHistoryButton from '../../components/ModuleHistoryButton'
 import AppIcon from '../../components/icons'
 import { writeAudit } from '../../lib/audit'
+// Shared drug-catalogue picker — same hospital inventory list as
+// DoctorWorkbench's prescription writer, so take-home drugs can be
+// picked from the drugs the pharmacy actually stocks.
+import { buildDrugOptions } from '../../lib/drugOptions'
+import { DrugSearchInput } from '../../components/ClinicalAutocomplete'
 
 // =====================================================================
 // GOODIE-MEDHUB — Discharge module
@@ -93,8 +98,14 @@ export default function Discharge() {
   const { records: patients, updateRecord: updatePatient } = useOfflineTable('patients', hospital?.id)
   const { records: admissions, updateRecord: updateAdmission } = useOfflineTable('admissions', hospital?.id)
   const { records: invoices } = useOfflineTable('invoices', hospital?.id)
+  const { records: billableCharges } = useOfflineTable('billable_charges', hospital?.id)
   const { addRecord: addBillableCharge } = useOfflineTable('billable_charges', hospital?.id)
   const { records: pharmacyItems } = useOfflineTable('pharmacy_items', hospital?.id)
+  // Take-home drugs picker needs the actual drug catalogue (with live
+  // stock), exactly like DoctorWorkbench's prescription writer. Eager
+  // because Discharge is not consult-gated — the picker must work the
+  // moment the discharge form opens.
+  const { records: inventoryItems } = useOfflineTable('inventory_items', hospital?.id)
 
   useRealtimeAlert('discharge_requests', hospital?.id, () => { syncDischarges() })
 
@@ -104,18 +115,40 @@ export default function Discharge() {
   const [showNewModal, setShowNewModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
 
+  if (profilePatientId) {
+    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+  }
+
   // Enrich discharge rows with patient + computed outstanding balance
   const enriched = useMemo(() => {
     return dischargeRequests.map(d => {
       const patient = patients.find(p => p.id === d.patient_id)
       const patientInvoices = invoices.filter(inv => inv.patient_id === d.patient_id || inv.patient_name === patient?.full_name)
-      const outstanding = patientInvoices
-        .filter(inv => inv.status === 'unpaid' || inv.status === 'partial')
+      // Outstanding = finalized invoice balances PLUS pending
+      // billable_charges not yet invoiced (lab/pharmacy/registration
+      // charges that the cashier hasn't rolled into an invoice yet).
+      // PatientProfile computes the same thing — kept in sync so the
+      // Billing step's "clear outstanding balance" gate matches what
+      // the patient profile shows.
+      const invoiceOutstanding = patientInvoices
+        .filter(inv => (inv.status === 'unpaid' || inv.status === 'partial') && inv.draft_status !== 'cancelled' && inv.draft_status !== 'written_off')
         .reduce((sum, inv) => sum + Number(inv.balance ?? inv.amount ?? 0), 0)
-      const activeAdmission = admissions.find(a => a.patient_id === d.patient_id && a.status === 'active')
-      return { ...d, patient, patient_name: patient?.full_name || 'Unknown patient', outstandingBalance: outstanding, activeAdmission }
+      const pendingChargesTotal = billableCharges
+        .filter(c => c.patient_id === d.patient_id || c.patient_name === patient?.full_name)
+        .filter(c => (c.status || 'pending') === 'pending' && c._discarded !== true)
+        .reduce((sum, c) => sum + Number(c.total ?? c.unit_price ?? 0), 0)
+      const outstanding = invoiceOutstanding + pendingChargesTotal
+      // Link the admission by admission_id FIRST (the discharge row's
+      // own link is the precise one), then fall back to the patient +
+      // active-status match. The old code only did the patient match,
+      // which silently broke for re-admissions or when an admission
+      // had already been flipped to 'discharged' before the discharge
+      // request was opened.
+      const activeAdmission = (d.admission_id && admissions.find(a => a.id === d.admission_id))
+        || admissions.find(a => a.patient_id === d.patient_id && a.status === 'active')
+      return { ...d, patient, patient_name: patient?.full_name || 'Unknown patient', outstandingBalance: outstanding, activeAdmission, linkedAdmission: activeAdmission }
     })
-  }, [dischargeRequests, patients, invoices, admissions])
+  }, [dischargeRequests, patients, invoices, billableCharges, admissions])
 
   const sorted = useMemo(() => {
     return [...enriched].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
@@ -240,7 +273,7 @@ export default function Discharge() {
           patient_id: theDischarge.patient_id,
           patient_name: theDischarge.patient_name,
           source_module: 'Discharge',
-          source_transaction_id: `DISCH-${String(theDischarge.id).slice(0, 8)}-${Date.now().toString().slice(-4)}`,
+          source_transaction_id: `DISCH-${theDischarge.id.slice(0, 8)}-${Date.now().toString().slice(-4)}`,
           item_name: `${drug.drug}${drug.dosage ? ` ${drug.dosage}` : ''}`,
           category: 'Drug',
           quantity: qty,
@@ -266,15 +299,8 @@ export default function Discharge() {
 
   const {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
-    pageItems, setCurrentPage, setPageSize,
-  } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
-
-  // Patient profile overlay. MUST come after every hook above, or React
-  // throws error #300 ("Rendered more hooks than during the previous
-  // render") the moment profilePatientId becomes non-null.
-  if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
-  }
+    pageItems, setPage, setPageSize,
+  } = usePagination({ items: filtered, initialPageSize: 10 })
 
   return (
     <>
@@ -408,7 +434,7 @@ export default function Discharge() {
               startIndex={startIndex}
               endIndex={endIndex}
               pageSize={pageSize}
-              onPageChange={setCurrentPage}
+              onPageChange={setPage}
               onPageSizeChange={setPageSize}
               itemLabel="discharges"
             />
@@ -445,6 +471,7 @@ export default function Discharge() {
       {editingCase && (
         <DischargeDetailModal
           theDischarge={editingCase}
+          inventoryItems={inventoryItems}
           onClose={() => setEditingId(null)}
           onUpdate={handleUpdate}
           onAdvance={handleAdvance}
@@ -531,10 +558,35 @@ function NewDischargeModal({ patients, admissions, onClose, onSave }) {
 // =====================================================================
 // DischargeDetailModal — multi-section workflow form
 // =====================================================================
-function DischargeDetailModal({ theDischarge, onClose, onUpdate, onAdvance, onSendToPharmacy }) {
+function DischargeDetailModal({ theDischarge, inventoryItems = [], onClose, onUpdate, onAdvance, onSendToPharmacy }) {
   const currentStatusIdx = STATUS_FLOW.findIndex(s => s.value === theDischarge.status)
   const isFinal = theDischarge.status === 'discharged' || theDischarge.status === 'cancelled'
   const doctorDone = !!theDischarge.doctor_signed_at
+
+  // -----------------------------------------------------------------
+  // Auto-fill "Admission Diagnosis" from the linked admission record.
+  // The discharge row already carries admission_id (saved at creation
+  // time) and the enriched row carries activeAdmission / linkedAdmission
+  // (resolved in the parent). The admissions table stores the
+  // diagnosis the doctor entered at admission time (Admissions.jsx
+  // copies it from admission_requests on approval). Re-typing it here
+  // is pure duplication and a common source of mismatched records.
+  //
+  // We resolve the linked admission, and if the discharge's
+  // admission_diagnosis is empty but the admission has one, we show it
+  // as a read-only hint with a one-click "use this" affordance that
+  // writes it onto the discharge row via the normal onUpdate path
+  // (so the audit trail records who pulled it in).
+  // -----------------------------------------------------------------
+  const linkedAdmission = theDischarge.linkedAdmission || theDischarge.activeAdmission
+  const admissionDiagnosisSource = linkedAdmission?.diagnosis || linkedAdmission?.provisional_diagnosis || null
+  const showAdmissionDiagnosisHint = !theDischarge.admission_diagnosis && admissionDiagnosisSource
+
+  // Drug-catalogue options for the take-home-drugs picker — same merge
+  // of inventory_items + GLOBAL_MEDICATIONS that DoctorWorkbench uses,
+  // so the discharge doctor sees exactly the drugs the pharmacy stocks
+  // (with live stock counts), not a blank free-text box.
+  const drugOptions = useMemo(() => buildDrugOptions(inventoryItems), [inventoryItems])
   const nurseDone = !!theDischarge.nurse_signed_at
   const billingDone = !!theDischarge.billing_signed_at
 
@@ -576,6 +628,24 @@ function DischargeDetailModal({ theDischarge, onClose, onUpdate, onAdvance, onSe
         <Section title="1. Doctor — Discharge Summary" locked={doctorDone || isFinal}>
           <EditableRow label="Discharge Type" type="select" options={DISCHARGE_TYPES} value={theDischarge.discharge_type || 'home'} onSave={v => onUpdate(theDischarge, { discharge_type: v }, 'doctor')} />
           <EditableRow label="Admission Diagnosis" value={theDischarge.admission_diagnosis || ''} onSave={v => onUpdate(theDischarge, { admission_diagnosis: v || null }, 'doctor')} />
+          {showAdmissionDiagnosisHint && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', fontSize: 12.5 }}>
+              <AppIcon name="info" size={14} />
+              <span style={{ color: 'var(--text)' }}>
+                Pulled from the admission record
+                {linkedAdmission?.admission_number ? ` (${linkedAdmission.admission_number})` : ''}:
+                <strong style={{ marginLeft: 6 }}>{admissionDiagnosisSource}</strong>
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ width: 'auto', padding: '3px 10px', fontSize: 11, marginLeft: 'auto' }}
+                onClick={() => onUpdate(theDischarge, { admission_diagnosis: admissionDiagnosisSource }, 'doctor')}
+              >
+                Use this
+              </button>
+            </div>
+          )}
           <EditableRow label="Working Diagnosis" value={theDischarge.working_diagnosis || ''} onSave={v => onUpdate(theDischarge, { working_diagnosis: v || null }, 'doctor')} />
           <EditableRow label="Discharge Diagnosis" value={theDischarge.discharge_diagnosis || ''} onSave={v => onUpdate(theDischarge, { discharge_diagnosis: v || null }, 'doctor')} />
           <EditableRow label="Course in Hospital" type="textarea" value={theDischarge.course_in_hospital || ''} onSave={v => onUpdate(theDischarge, { course_in_hospital: v || null }, 'doctor')} />
@@ -592,6 +662,7 @@ function DischargeDetailModal({ theDischarge, onClose, onUpdate, onAdvance, onSe
           <div style={{ gridColumn: '1 / -1' }}>
             <TakeHomeDrugsEditor
               drugs={theDischarge.take_home_drugs || []}
+              drugOptions={drugOptions}
               onChange={drugs => onUpdate(theDischarge, { take_home_drugs: drugs }, 'doctor')}
             />
           </div>
@@ -715,14 +786,39 @@ function DischargeDetailModal({ theDischarge, onClose, onUpdate, onAdvance, onSe
 
 // =====================================================================
 // TakeHomeDrugsEditor — list of take-home drugs (JSONB array)
+//
+// The "Drug" field is a real combobox backed by the hospital's
+// inventory_items (+ a small built-in reference list), exactly like the
+// DoctorWorkbench prescription writer. That means:
+//   • the doctor picks from drugs the pharmacy ACTUALLY stocks,
+//   • each option shows live stock ("In stock: N" / "Out of stock"),
+//   • the chosen row carries inventory_item_id + stock_at_prescription,
+//     so the later "Send to Pharmacy" step matches by ID instead of a
+//     fragile name comparison, and the pharmacy dispenses the right item.
+// Free-typing is still allowed (the combobox has allowFreeText) for the
+// rare drug that isn't in inventory.
 // =====================================================================
-function TakeHomeDrugsEditor({ drugs, onChange }) {
+function TakeHomeDrugsEditor({ drugs, drugOptions = [], onChange }) {
   function add() {
-    onChange([...(drugs || []), { drug: '', dosage: '', frequency: '', duration: '', quantity: 1, instructions: '' }])
+    onChange([...(drugs || []), { drug: '', inventory_item_id: null, stock_at_prescription: 0, dosage: '', frequency: '', duration: '', quantity: 1, instructions: '' }])
   }
   function update(idx, key, value) {
     const next = [...drugs]
     next[idx] = { ...next[idx], [key]: value }
+    onChange(next)
+  }
+  function selectDrug(idx, item) {
+    if (!item) { update(idx, 'drug', ''); update(idx, 'inventory_item_id', null); update(idx, 'stock_at_prescription', 0); return }
+    const next = [...drugs]
+    next[idx] = {
+      ...next[idx],
+      drug: item.label,
+      inventory_item_id: item.inventoryId ?? null,
+      stock_at_prescription: item.stock ?? 0,
+      // Pre-fill dosage with the picked option's strength if the doctor
+      // hasn't typed one yet — same convenience as DoctorWorkbench.
+      dosage: next[idx].dosage || item.strength || '',
+    }
     onChange(next)
   }
   function remove(idx) {
@@ -735,11 +831,27 @@ function TakeHomeDrugsEditor({ drugs, onChange }) {
       {(!drugs || drugs.length === 0) && (
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>No take-home drugs added yet.</div>
       )}
-      {drugs && drugs.map((d, i) => (
+      {drugs && drugs.map((d, i) => {
+        const stock = Number(d.stock_at_prescription || 0)
+        const qty = Number(d.quantity || 1)
+        const overStock = d.inventory_item_id && qty > stock && stock > 0
+        return (
         <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'end' }}>
           <div className="field" style={{ margin: 0 }}>
             <label style={{ fontSize: 10 }}>Drug</label>
-            <input value={d.drug || ''} onChange={e => update(i, 'drug', e.target.value)} placeholder="e.g. Paracetamol" />
+            <DrugSearchInput
+              drugOptions={drugOptions}
+              value={d.drug ? { label: d.drug } : null}
+              onChange={item => selectDrug(i, item)}
+              placeholder="Search hospital pharmacy / inventory…"
+              emptyText="No match in hospital inventory or the global reference list"
+            />
+            {d.inventory_item_id && stock <= 0 && (
+              <div style={{ fontSize: 10, color: 'var(--danger)', marginTop: 2 }}>Out of stock — confirm before sending to pharmacy</div>
+            )}
+            {overStock && (
+              <div style={{ fontSize: 10, color: 'var(--gold)', marginTop: 2 }}>Only {stock} in stock — qty exceeds available</div>
+            )}
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label style={{ fontSize: 10 }}>Dosage</label>
@@ -759,7 +871,8 @@ function TakeHomeDrugsEditor({ drugs, onChange }) {
           </div>
           <button type="button" className="icon-btn-delete" title="Remove" onClick={() => remove(i)}>✕</button>
         </div>
-      ))}
+        )
+      })}
       <button type="button" className="btn btn-ghost" style={{ width: 'auto', padding: '4px 10px', fontSize: 11, marginTop: 6 }} onClick={add}>+ Add Drug</button>
     </div>
   )
