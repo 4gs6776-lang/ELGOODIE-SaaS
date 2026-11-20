@@ -130,11 +130,6 @@ export default function Delivery() {
   const [viewDeliveryFor, setViewDeliveryFor] = useState(null) // patientId — shows delivery summary modal
   const [recordFor, setRecordFor] = useState(null)             // patientId — opens record-delivery modal
 
-  // Open the patient profile overlay (reuses the existing component).
-  if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
-  }
-
   // All ANC patients + computed fields
   const ancPatients = useMemo(() => {
     return patients
@@ -197,6 +192,15 @@ export default function Delivery() {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
     pageItems, setCurrentPage, setPageSize,
   } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
+
+  // Open the patient profile overlay (reuses the existing component).
+  // IMPORTANT: this early return MUST come AFTER every hook above
+  // (useMemo / usePagination / useState). Putting it before any hook
+  // causes React error #300 ("Rendered more hooks than during the
+  // previous render") the moment profilePatientId flips to non-null.
+  if (profilePatientId) {
+    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+  }
 
   return (
     <>

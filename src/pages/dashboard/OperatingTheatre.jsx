@@ -117,10 +117,6 @@ export default function OperatingTheatre() {
   const [showNewCaseModal, setShowNewCaseModal] = useState(false)
   const [editingCase, setEditingCase] = useState(null) // case object — opens detail modal
 
-  if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
-  }
-
   // Enrich cases with patient name
   const casesWithPatient = useMemo(() => {
     return cases.map(c => {
@@ -173,6 +169,13 @@ export default function OperatingTheatre() {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
     pageItems, setCurrentPage, setPageSize,
   } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
+
+  // Patient profile overlay. MUST come after every hook above, or React
+  // throws error #300 ("Rendered more hooks than during the previous
+  // render") the moment profilePatientId becomes non-null.
+  if (profilePatientId) {
+    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+  }
 
   // ---- Case detail save handler (partial updates — same pattern as
   // PatientProfile's updatePatient). Each section of the detail modal

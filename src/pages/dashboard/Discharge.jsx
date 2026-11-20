@@ -104,10 +104,6 @@ export default function Discharge() {
   const [showNewModal, setShowNewModal] = useState(false)
   const [editingId, setEditingId] = useState(null)
 
-  if (profilePatientId) {
-    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
-  }
-
   // Enrich discharge rows with patient + computed outstanding balance
   const enriched = useMemo(() => {
     return dischargeRequests.map(d => {
@@ -272,6 +268,13 @@ export default function Discharge() {
     currentPage, totalPages, totalItems, startIndex, endIndex, pageSize,
     pageItems, setCurrentPage, setPageSize,
   } = usePagination(filtered, { pageSize: 10, resetKey: search + statusFilter })
+
+  // Patient profile overlay. MUST come after every hook above, or React
+  // throws error #300 ("Rendered more hooks than during the previous
+  // render") the moment profilePatientId becomes non-null.
+  if (profilePatientId) {
+    return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} />
+  }
 
   return (
     <>
