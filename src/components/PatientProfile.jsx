@@ -445,21 +445,52 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     }
 
     try {
-      // 1. Restore stock. The record.item_type tells us which table.
-      //    pharmacyItems / inventoryItems are already loaded above.
+      // 1. Restore stock.
+      //
+      // IMPORTANT: every dispense in the app goes through
+      // Pharmacy.handleDispense, which decrements the `inventory_items`
+      // table — regardless of whether the drug is filed under "pharmacy"
+      // or "inventory" in the catalogue. The dispense row stamps
+      // `item_type: 'pharmacy'` on the patient_stock_records row, but
+      // the actual stock movement happened in inventory_items.
+      //
+      // Older versions of this code read item_type and restored to
+      // pharmacy_items for 'pharmacy' rows — which is empty in this
+      // app, so stock never came back. That is the bug: the drug was
+      // pulled from inventory_items at dispense time, and the reverse
+      // tried to push it back into pharmacy_items, found no matching
+      // row, and silently skipped.
+      //
+      // Fix: restore to inventory_items first (where the dispense
+      // actually took the stock from). Fall back to pharmacy_items
+      // only for legacy rows that genuinely live there.
       const qty = Number(record.quantity_used || 0)
+      let stockRestored = false
       if (record.item_id && qty > 0) {
-        if (record.item_type === 'pharmacy') {
-          const item = pharmacyItems.find(i => i.id === record.item_id)
-          if (item) {
-            const newQty = Number(item.quantity || 0) + qty
-            await updatePharmacyItem(item.id, { quantity: newQty, updated_at: new Date().toISOString() })
-          }
-        } else if (record.item_type === 'inventory') {
-          const item = inventoryItems.find(i => i.id === record.item_id)
-          if (item) {
-            const newQty = Number(item.quantity || 0) + qty
-            await updateInventoryItem(item.id, { quantity: newQty, updated_at: new Date().toISOString() })
+        const invItem = inventoryItems.find(i => i.id === record.item_id)
+        if (invItem) {
+          const newQty = Number(invItem.quantity || 0) + qty
+          await updateInventoryItem(invItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+          stockRestored = true
+        } else {
+          // Legacy fallback: a handful of old dispenses may have
+          // referenced a pharmacy_items row. If we don't find the item
+          // in inventory_items, try pharmacy_items before giving up —
+          // otherwise the units would be lost.
+          const pharmaItem = pharmacyItems.find(i => i.id === record.item_id)
+          if (pharmaItem) {
+            const newQty = Number(pharmaItem.quantity || 0) + qty
+            await updatePharmaItem(pharmaItem.id, { quantity: newQty, updated_at: new Date().toISOString() })
+            stockRestored = true
+          } else {
+            // Neither list has the item (maybe it was deleted from
+            // inventory after the dispense). We still flag the dispense
+            // as reversed so the billable charge is voided and the
+            // patient's record is consistent — but we warn the user
+            // that the physical stock couldn't be returned.
+            console.warn('Reverse dispense: item not found in inventory_items or pharmacy_items; stock not restored.', {
+              record_id: record.id, item_id: record.item_id, item_name: record.item_name,
+            })
           }
         }
       }
@@ -524,7 +555,8 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
           item_name: record.item_name,
           item_type: record.item_type,
           item_id: record.item_id || null,
-          quantity_returned: qty,
+          quantity_returned: stockRestored ? qty : 0,
+          stock_restored: stockRestored,
           reason: reason.trim(),
           voided_billable_charge_id: linkedCharge?.id || null,
           reset_prescription_id: linkedRx?.id || null,
@@ -533,7 +565,11 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
         },
       })
 
-      window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock.\nThe linked billable charge has been voided.`)
+      if (stockRestored) {
+        window.alert(`Dispense reversed.\n\n${qty} units of "${record.item_name}" returned to stock in Inventory.\nThe linked billable charge has been voided.`)
+      } else {
+        window.alert(`Dispense reversed.\n\nThe linked billable charge has been voided and the dispense flagged as reversed.\n\nNOTE: ${qty} units of "${record.item_name}" could NOT be returned to stock — the inventory item no longer exists. Add it back manually if needed.`)
+      }
     } catch (err) {
       console.error('Undispense failed:', err)
       window.alert(`Could not fully reverse the dispense.\n\nError: ${err.message || err}\n\nSome operations may have succeeded — check the patient's "Items Given" tab and the inventory item to verify.`)
