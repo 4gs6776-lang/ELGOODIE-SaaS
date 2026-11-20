@@ -106,20 +106,6 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   // them on the profile and send them to Pharmacy from here (the
   // discharge screen no longer auto-sends them).
   const { records: dischargeRequests } = useOfflineTable('discharge_requests', hospital?.id)
-  const patientDischarges = useMemo(
-    () => dischargeRequests
-      .filter(d => d.patient_id === patient?.id)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
-    [dischargeRequests, patient?.id]
-  )
-  // The active discharge is the most recent one that is NOT cancelled or
-  // fully discharged — take-home drugs for an in-flight discharge are the
-  // ones the nurse will want to send to Pharmacy.
-  const activeDischarge = patientDischarges.find(d => d.status && d.status !== 'cancelled' && d.status !== 'discharged') || null
-  const takeHomeDrugs = useMemo(() => {
-    const src = activeDischarge?.take_home_drugs
-    return Array.isArray(src) ? src : []
-  }, [activeDischarge])
 
   // FIX: The "Edit Info" tab is now gated by DB-backed permissions.
   // - Admin/owner: always can edit (FULL_ACCESS_ROLES)
@@ -157,6 +143,26 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
   // patient record in scope — pass it through so we don't have to
   // re-fetch it.
   const patient = initialPatient || patients.find(p => p.id === patientId)
+
+  // Discharge requests for this patient — used to surface the take-home
+  // drugs recorded during discharge so the nurse can review them on the
+  // profile and send them to Pharmacy from here (the discharge screen no
+  // longer auto-sends them). MUST live after `patient` is defined so the
+  // useMemo deps don't hit the Temporal Dead Zone.
+  const patientDischarges = useMemo(
+    () => dischargeRequests
+      .filter(d => d.patient_id === patient?.id)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
+    [dischargeRequests, patient?.id]
+  )
+  // The active discharge is the most recent one that is NOT cancelled or
+  // fully discharged — take-home drugs for an in-flight discharge are the
+  // ones the nurse will want to send to Pharmacy.
+  const activeDischarge = patientDischarges.find(d => d.status && d.status !== 'cancelled' && d.status !== 'discharged') || null
+  const takeHomeDrugs = useMemo(() => {
+    const src = activeDischarge?.take_home_drugs
+    return Array.isArray(src) ? src : []
+  }, [activeDischarge])
 
   // ---- Phase 5: Folder expiry computation (category-based) ----
   // Personal + Emergency: 3 years
