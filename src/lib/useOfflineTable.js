@@ -959,6 +959,7 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
       _syncError: false,
       _syncErrorMessage: null,
       _syncErrorKind: null,
+      _syncAttempts: 0,
     }
 
     const db = await openDB()
@@ -986,6 +987,7 @@ export function useOfflineTable(tableName, hospitalId, options = {}) {
             _syncError: false,
             _syncErrorMessage: null,
             _syncErrorKind: null,
+            _syncAttempts: 0,
           }
           await putLocalRecord(db, syncedRecord)
         }
@@ -1272,6 +1274,7 @@ export async function flushTableQueue(tableName = null, { force = false } = {}) 
           _syncError: false,
           _syncErrorMessage: null,
           _syncErrorKind: null,
+          _syncAttempts: 0,
         })
       } catch (error) {
         const kind = classifyError(error)
@@ -1316,12 +1319,48 @@ export async function flushTableQueue(tableName = null, { force = false } = {}) 
           }
         }
 
+        // Permission (RLS 42501) errors will NEVER succeed by retrying —
+        // the row is rejected by a database policy, and no amount of
+        // re-sending changes that. Previously these retried on every
+        // flush and jammed the sync queue forever (the user saw a
+        // permanent "Sync queue · N items waiting" banner with only
+        // Retry/Skip, and Retry always failed again).
+        //
+        // Cap permission-error retries: after PERM_MAX_ATTEMPTS failed
+        // attempts, auto-discard the row (same as the explicit "Skip"
+        // button — _synced=true, _discarded=true) so the queue drains
+        // and the user is not permanently blocked. The data loss is
+        // explicit and auditable via _discardedAt, and the original
+        // error message is preserved in _syncErrorMessage.
+        const PERM_MAX_ATTEMPTS = 3
+        const attempts = (record._syncAttempts || 0) + 1
+
+        if (kind === 'permission' && attempts >= PERM_MAX_ATTEMPTS) {
+          console.warn(
+            `Auto-discarding ${record.table_name} row ${record.id}: ` +
+            `permission error persisted ${attempts}× (RLS policy denies this row). ` +
+            `Original error: ${error?.message || error}`
+          )
+          await putLocalRecord(db, {
+            ...record,
+            _synced: true,
+            _discarded: true,
+            _discardedAt: nowISO(),
+            _syncError: false,
+            _syncErrorMessage: friendlyErrorMessage(error, record.table_name, op),
+            _syncErrorKind: null,
+            _syncAttempts: attempts,
+          })
+          continue
+        }
+
         await putLocalRecord(db, {
           ...record,
           _synced: false,
           _syncError: true,
           _syncErrorKind: kind,
           _syncErrorMessage: friendlyErrorMessage(error, record.table_name, op),
+          _syncAttempts: attempts,
         })
       }
     }
