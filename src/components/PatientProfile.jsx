@@ -636,6 +636,26 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
     .filter(a => a.patient_id === patient.id && a.status === 'discharged')
     .sort((a, b) => new Date(b.discharge_date || b.updated_at || b.created_at) - new Date(a.discharge_date || a.updated_at || a.created_at))[0] || null
 
+  // Quick-access "Discharge" button. Host pages that render this profile
+  // can pass an `onDischarge(patient)` callback to open their own
+  // discharge UI inline. When no callback is passed (e.g. the profile is
+  // opened from Nursing / HMO / ANC / Delivery / OT), we fall back to a
+  // sessionStorage handoff: write the patient id, navigate to the
+  // dashboard, and the Discharge module picks it up on mount to open the
+  // discharge editor. This keeps the button visible from EVERY host page
+  // for an admitted patient, matching the "Send to Pharmacy" /
+  // "Create Portal Account" buttons that always show.
+  function handleDischarge(thePatient){
+    if (onDischarge) { onDischarge(thePatient); return }
+    try {
+      sessionStorage.setItem('gmedhub-pending-discharge', JSON.stringify({
+        patientId: thePatient.id, ts: Date.now(),
+      }))
+    } catch { /* sessionStorage may be unavailable — ignore */ }
+    if (onClose) onClose()
+    window.location.assign('/dashboard')
+  }
+
   // Send this patient's take-home drugs (from the active discharge) to the
   // Pharmacy queue using the SAME pattern as the "Send to Pharmacy" modal:
   // one pharmacy_request row, plain-text, with priority. We deliberately
@@ -730,11 +750,11 @@ export default function PatientProfile({ patientId, patient: initialPatient, onC
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {activeAdmissionRequest && onDischarge && (
+            {activeAdmissionRequest && (
               <button
                 className="btn btn-primary"
                 style={{ width: 'auto', padding: '6px 12px', fontSize: 11.5, background: 'var(--teal)', color: '#fff' }}
-                onClick={() => onDischarge(patient)}
+                onClick={() => handleDischarge(patient)}
                 title="Open the Discharge workflow for this admitted patient"
               >
                 Discharge
