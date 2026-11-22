@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useOfflineTable } from '../../lib/useOfflineTable'
 import { useRealtimeAlert } from '../../lib/useRealtimeAlert'
@@ -155,6 +155,35 @@ export default function Discharge() {
       window.alert(`Could not start discharge: ${err.message || err}`)
     }
   }
+
+  // Cross-module handoff: when the "Discharge" quick-access button on a
+  // patient profile is clicked from a page that doesn't host a discharge
+  // UI (Nursing / HMO / ANC / Delivery / OT), PatientProfile writes a
+  // pending-discharge patient id to sessionStorage and navigates here.
+  // On mount, pick it up and open the discharge editor for that patient,
+  // then clear the flag so a refresh doesn't re-trigger it. We wait for
+  // the `patients` list to load so we can pass the full patient record
+  // into openDischargeForPatient (it uses thePatient.full_name etc.).
+  useEffect(() => {
+    let pending = null
+    try {
+      const raw = sessionStorage.getItem('gmedhub-pending-discharge')
+      if (raw) pending = JSON.parse(raw)
+    } catch { /* ignore malformed */ }
+    if (!pending || !pending.patientId) return
+    try { sessionStorage.removeItem('gmedhub-pending-discharge') } catch {}
+    // Stale guard: ignore flags older than 60s (e.g. a leftover from a
+    // crashed session) so we don't auto-open a discharge unexpectedly.
+    if (Date.now() - (pending.ts || 0) > 60000) return
+    const thePatient = patients.find(p => p.id === pending.patientId)
+    if (thePatient) {
+      openDischargeForPatient(thePatient)
+    } else if (patients.length > 0) {
+      // Patients loaded but this id wasn't found — don't loop forever.
+      window.alert('Could not find that patient to open discharge.')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patients])
 
   if (profilePatientId) {
     return <PatientProfile patientId={profilePatientId} onClose={() => setProfilePatientId(null)} onDischarge={openDischargeForPatient} />

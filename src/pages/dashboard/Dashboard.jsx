@@ -282,7 +282,17 @@ export default function Dashboard(){
   const isHospitalAdmin = profile?.role === 'admin'
   const subAlerts = useSubscriptionAlerts(hospital?.id, isHospitalAdmin)
 
-  const [tab, setTab] = useState('overview')
+  const [tab, setTab] = useState(() => {
+    // Cross-module handoff: if a patient profile elsewhere (Nursing /
+    // HMO / ANC / Delivery / OT) triggered the "Discharge" quick-access
+    // button, PatientProfile wrote a pending-discharge flag to
+    // sessionStorage and navigated here. Start on the discharge tab so
+    // the Discharge module can pick up the flag and open the editor.
+    try {
+      if (sessionStorage.getItem('gmedhub-pending-discharge')) return 'discharge'
+    } catch { /* ignore */ }
+    return 'overview'
+  })
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('gmedhub-theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' }
