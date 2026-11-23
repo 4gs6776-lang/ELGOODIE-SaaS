@@ -41,7 +41,7 @@ function isRecoverableOfflineError(err) {
 }
 const INFLIGHT_SAVE_KEYS = new Set()
 
-export default function CashierWorkspace({ patientId, patientName, hospital, profile, onClose }) {
+export default function CashierWorkspace({ patientId, patientName, hospital, profile, onClose, onRegisterCalcTarget, onClearCalcTarget, onApplyDiscount }) {
   const { records: charges, addRecord: addCharge, updateRecord: updateCharge, deleteRecord: deleteCharge } = useOfflineTable('billable_charges', hospital?.id)
   const { addRecord: addInvoice } = useOfflineTable('invoices', hospital?.id)
   const { addRecord: addInvoiceItem } = useOfflineTable('invoice_items', hospital?.id)
@@ -769,10 +769,10 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
             </div>
           )}
 
-          <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid var(--line-soft)' }}>
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid var(--line-soft)' }} data-calc-avoid>
             <div className="dash-field-grid" style={{ margin: '0 0 16px' }}>
               <div className="field">
-                <label>Discount (₦)</label>
+                <label>Discount (₦) <span style={{ fontSize: 10, color: 'var(--muted)' }}>(quick flat amount)</span></label>
                 <input type="number" value={discount} onChange={e => setDiscount(e.target.value)} placeholder="0.00" />
               </div>
               <div className="field">
@@ -780,6 +780,50 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
                 <input type="number" value={tax} onChange={e => setTax(e.target.value)} placeholder="0.00" />
               </div>
             </div>
+
+            {/* Structured discount management — opens the Apply Discount
+                modal (percentage / fixed / per-item / approval flow).
+                Only shown when the parent has wired onApplyDiscount. */}
+            {onApplyDiscount && profile && ['admin', 'owner', 'billing'].includes(profile.role) && (
+              <div style={{ marginBottom: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Build a lightweight invoice-shaped object so the
+                    // modal can preview against the in-progress totals
+                    // before the invoice is actually saved. If no invoice
+                    // has been generated yet, the modal shows the preview
+                    // and the cashier must save the invoice first to apply.
+                    onApplyDiscount({
+                      id: receiptInvoice?.id || null,
+                      invoice_number: receiptInvoice?.invoice_number || null,
+                      patient_id: patientId,
+                      patient_name: patientName,
+                      subtotal,
+                      discount: discountAmt,
+                      grand_total: grandTotal,
+                      amount_paid: Number(amountPaid) || 0,
+                      hmo_contract_id: hasHmo ? 'hmo' : null,
+                      draft_status: receiptInvoice ? receiptInvoice.draft_status : 'unsaved',
+                    })
+                  }}
+                  style={{
+                    width: 'auto', padding: '7px 14px', fontSize: 12.5, display: 'inline-flex',
+                    alignItems: 'center', gap: 6, cursor: 'pointer',
+                    border: '1px solid var(--teal)', background: 'var(--teal-soft, #e6f7f5)',
+                    color: 'var(--teal)', borderRadius: 8, fontWeight: 700,
+                  }}
+                  title="Percentage, fixed-amount, or per-item discount with approval flow"
+                >
+                  % Apply Discount
+                </button>
+                {discountAmt > 0 && (
+                  <span style={{ marginLeft: 10, fontSize: 11.5, color: 'var(--muted)' }}>
+                    Current discount: <b style={{ color: 'var(--danger)' }}>- {formatMoney(discountAmt)}</b>
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="billing-summary-row"><span>Subtotal</span><span>{formatMoney(subtotal)}</span></div>
             <div className="billing-summary-row" style={{ color: 'var(--danger)' }}><span>Discount</span><span>- {formatMoney(discountAmt)}</span></div>
@@ -852,6 +896,8 @@ export default function CashierWorkspace({ patientId, patientName, hospital, pro
                 type="number"
                 value={amountPaid}
                 onChange={e => setAmountPaid(e.target.value)}
+                onFocus={() => onRegisterCalcTarget?.('→ Amount Paid', (v) => setAmountPaid(String(v)))}
+                onBlur={() => onClearCalcTarget?.()}
                 placeholder={balanceDueAfterWallet.toFixed(2)}
                 style={{ fontSize: 16, fontWeight: 700 }}
               />

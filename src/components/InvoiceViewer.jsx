@@ -30,7 +30,7 @@ function escapeHtml(s) {
     .replace(/'/g, '&#39;')
 }
 
-export default function InvoiceViewer({ invoice, onClose, hospital, profile }) {
+export default function InvoiceViewer({ invoice, onClose, hospital, profile, onRegisterCalcTarget, onClearCalcTarget, onApplyDiscount }) {
   const timezone = getTimezone(hospital)
   const { updateRecord: updateInvoice } = useOfflineTable('invoices', hospital?.id)
   const { records: allItems } = useOfflineTable('invoice_items', hospital?.id)
@@ -343,6 +343,7 @@ export default function InvoiceViewer({ invoice, onClose, hospital, profile }) {
         </table>
         <div class="totals">
           <div><span>Subtotal</span> <span>₦${Number(invoice.subtotal||grandTotal).toFixed(2)}</span></div>
+          ${Number(invoice.discount || 0) > 0 ? `<div><span>Discount${invoice.discount_type && invoice.discount_type !== 'none' && invoice.discount_type !== 'fixed' ? ` (${invoice.discount_type === 'percent' ? Number(invoice.discount_percent||0)+'%' : invoice.discount_type})` : ''}${invoice.discount_reason ? ' — '+escapeHtml(invoice.discount_reason) : ''}</span> <span>- ₦${Number(invoice.discount).toFixed(2)}</span></div>` : ''}
           ${walletDeduction > 0 ? `<div><span>Paid from Wallet</span> <span>₦${walletDeduction.toFixed(2)}</span></div>` : ''}
           ${cashierCollected > 0 ? `<div><span>Amount Paid (${escapeHtml(invoice.payment_method || 'Cash')})</span> <span>₦${cashierCollected.toFixed(2)}</span></div>` : (walletDeduction === 0 ? `<div><span>Amount Paid</span> <span>₦${totalPaid.toFixed(2)}</span></div>` : '')}
           <div class="grand"><span>Balance Due</span> <span>₦${balance.toFixed(2)}</span></div>
@@ -421,7 +422,27 @@ export default function InvoiceViewer({ invoice, onClose, hospital, profile }) {
             )}
           </div>
 
-          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--line-soft)' }}>
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--line-soft)' }} data-calc-avoid>
+            {/* Discount breakdown — shows original subtotal, discount
+                (with type + percent when structured), and final total.
+                Preserves the original amount; never overwrites it. */}
+            {Number(invoice.discount || 0) > 0 && (
+              <>
+                <div className="billing-summary-row" style={{ color: 'var(--muted)' }}>
+                  <span>Original Subtotal</span>
+                  <span>{formatMoney(Number(invoice.subtotal || 0) + Number(invoice.discount || 0))}</span>
+                </div>
+                <div className="billing-summary-row" style={{ color: 'var(--danger)' }}>
+                  <span>
+                    Discount{invoice.discount_type && invoice.discount_type !== 'none' && invoice.discount_type !== 'fixed'
+                      ? ` (${invoice.discount_type === 'percent' ? `${Number(invoice.discount_percent || 0)}%` : invoice.discount_type})`
+                      : ''}
+                    {invoice.discount_reason ? ` — ${invoice.discount_reason}` : ''}
+                  </span>
+                  <span>- {formatMoney(invoice.discount)}</span>
+                </div>
+              </>
+            )}
             <div className="billing-summary-row"><span>Grand Total</span><span style={{ fontWeight: 700, color: 'var(--ivory)' }}>{formatMoney(grandTotal)}</span></div>
             {walletDeduction > 0 && (
               <div className="billing-summary-row" style={{ color: 'var(--teal)' }}>
@@ -487,6 +508,16 @@ export default function InvoiceViewer({ invoice, onClose, hospital, profile }) {
           <button className="btn btn-ghost" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7 }} onClick={handlePrint}>
             <AppIcon name="print" size={15} /> Print Receipt
           </button>
+          {onApplyDiscount && invoice && invoice.draft_status !== 'written_off' && invoice.status !== 'cancelled' && (
+            <button
+              className="btn btn-ghost"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: 'var(--teal)', borderColor: 'var(--teal)' }}
+              onClick={() => onApplyDiscount(invoice)}
+              title="Apply a percentage, fixed-amount, or per-item discount to this invoice"
+            >
+              % Apply Discount
+            </button>
+          )}
           {balance > 0 && <button className="btn btn-primary" onClick={() => { setPayError(''); setShowPay(true) }}>Record Payment</button>}
         </div>
       </div>
@@ -538,6 +569,8 @@ export default function InvoiceViewer({ invoice, onClose, hospital, profile }) {
                     type="number"
                     value={payAmount}
                     onChange={e => setPayAmount(e.target.value)}
+                    onFocus={() => onRegisterCalcTarget?.('→ Amount to Collect', (v) => setPayAmount(String(v)))}
+                    onBlur={() => onClearCalcTarget?.()}
                     placeholder={walletCanCover > 0
                       ? (remainingAfterWallet > 0 ? `Max: ${remainingAfterWallet.toFixed(2)} (wallet covers the rest)` : '0 — wallet covers everything')
                       : `Max: ${balance.toFixed(2)}`
