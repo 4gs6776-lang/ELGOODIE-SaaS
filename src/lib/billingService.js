@@ -1771,3 +1771,186 @@ export function evaluateCreditControl({ patient, invoices, rules }) {
 export function getActivePatientBlock(patientId, blocks) {
   return (blocks || []).find(b => b.patient_id === patientId && b.status === 'active')
 }
+
+// =====================================================================
+// DISCOUNT MANAGEMENT — integrated with the Billing module.
+// Server-authoritative: every apply/ approve call goes through a
+// SECURITY DEFINER RPC (111_billing_discounts_and_calculator.sql) that
+// re-validates hospital_id, recomputes totals inside a transaction, and
+// writes the audit row. The frontend value is only a preview.
+// =====================================================================
+
+// Read the per-hospital discount settings (auto-creates defaults if
+// the hospital has no row yet). Returns null if offline / on error so
+// callers fall back to sensible defaults.
+export async function fetchDiscountSettings(hospitalId) {
+  if (!hospitalId) return null
+  try {
+    const { data, error } = await supabase.rpc('get_discount_settings', { p_hospital_id: hospitalId })
+    if (error) { console.warn('get_discount_settings RPC failed:', error); return null }
+    return data
+  } catch (e) {
+    console.warn('fetchDiscountSettings failed (offline?):', e)
+    return null
+  }
+}
+
+// Default settings used when the RPC is unreachable (offline). Matches
+// the SQL defaults so the cashier's self-apply limit is conservative.
+export const DEFAULT_DISCOUNT_SETTINGS = {
+  max_cashier_discount_percent: 5,
+  review_threshold_percent: 20,
+  max_invoice_discount_amount: 0,
+  enable_item_discounts: true,
+  enable_invoice_discounts: true,
+  requires_reason: true,
+  approver_roles: ['admin', 'owner'],
+}
+
+// Apply a discount to an invoice via the authoritative RPC.
+// payload: { invoiceId, type:'percent'|'fixed'|'item', value, reason,
+//            itemDiscounts?:[{item_id, amount, percent}] }
+// Returns { ok, error?, ...computed } from the server.
+export async function applyInvoiceDiscount(payload) {
+  const { invoiceId, type, value, reason, itemDiscounts } = payload || {}
+  if (!invoiceId || !type) return { ok: false, error: 'Missing invoice or discount type' }
+  try {
+    const { data, error } = await supabase.rpc('apply_invoice_discount', {
+      p_invoice_id: invoiceId,
+      p_discount_type: type,
+      p_discount_value: Number(value) || 0,
+      p_reason: reason || null,
+      p_item_discounts: type === 'item' ? (itemDiscounts || []) : null,
+    })
+    if (error) return { ok: false, error: error.message || String(error) }
+    return data || { ok: false, error: 'No response from server' }
+  } catch (e) {
+    return { ok: false, error: e?.message || 'Network error applying discount' }
+  }
+}
+
+// Submit a discount for supervisor approval (cashier over their limit).
+// payload: { invoiceId, type, value, reason }
+export async function createDiscountApprovalRequest(payload) {
+  const { invoiceId, type, value, reason } = payload || {}
+  if (!invoiceId || !type) return { ok: false, error: 'Missing invoice or discount type' }
+  try {
+    const { data, error } = await supabase.rpc('create_discount_approval_request', {
+      p_invoice_id: invoiceId,
+      p_discount_type: type,
+      p_discount_value: Number(value) || 0,
+      p_reason: reason || null,
+    })
+    if (error) return { ok: false, error: error.message || String(error) }
+    return data || { ok: false, error: 'No response from server' }
+  } catch (e) {
+    return { ok: false, error: e?.message || 'Network error submitting approval' }
+  }
+}
+
+// Apply a previously-approved discount request. Called by the supervisor
+// from the ApprovalQueueModal: on approve, re-run apply_invoice_discount
+// passing the approval_request_id so the RPC verifies status='approved'
+// and stamps the approver on the invoice.
+export async function applyApprovedDiscount(invoiceId, approvalRequestId, reason) {
+  if (!invoiceId || !approvalRequestId) return { ok: false, error: 'Missing invoice or approval id' }
+  try {
+    // Fetch the approved request to recover the discount type/value.
+    const { data: req, error: e1 } = await supabase
+      .from('approval_requests')
+      .select('payload, status, amount')
+      .eq('id', approvalRequestId)
+      .single()
+    if (e1) return { ok: false, error: e1.message }
+    if (!req) return { ok: false, error: 'Approval request not found' }
+    if (req.status !== 'approved') return { ok: false, error: 'Discount has not been approved' }
+    const p = req.payload || {}
+    const { data, error } = await supabase.rpc('apply_invoice_discount', {
+      p_invoice_id: invoiceId,
+      p_discount_type: p.discount_type || 'fixed',
+      p_discount_value: Number(p.discount_value || req.amount || 0),
+      p_reason: reason || p.reason || 'Approved discount',
+      p_approval_request_id: approvalRequestId,
+    })
+    if (error) return { ok: false, error: error.message }
+    return data || { ok: false, error: 'No response from server' }
+  } catch (e) {
+    return { ok: false, error: e?.message || 'Network error applying approved discount' }
+  }
+}
+
+// =====================================================================
+// DISCOUNT REPORTS — pure client-side aggregator (matches the existing
+// report-aggregator pattern in this file: getDailyCollectionSummary etc.).
+// Feeds the new "Discounts" tab in Reports.jsx.
+// =====================================================================
+export function getDiscountSummary({ invoices, approvals, periodFrom, periodTo }) {
+  const from = periodFrom ? new Date(periodFrom) : null
+  const to = periodTo ? new Date(periodTo) : null
+  const inRange = (d) => {
+    if (!d) return false
+    const t = new Date(d).getTime()
+    if (from && t < from.getTime()) return false
+    if (to && t > to.getTime() + 86400000) return false
+    return true
+  }
+
+  // Discounts applied = invoices with discount_type <> 'none' and a
+  // non-zero discount, created/updated within the period. We use
+  // updated_at so re-Discounting still shows in the right period.
+  const discounted = (invoices || []).filter(inv =>
+    inv.discount_type && inv.discount_type !== 'none' &&
+    Number(inv.discount || 0) > 0 &&
+    inRange(inv.updated_at || inv.created_at)
+  )
+
+  const totalDiscountAmount = discounted.reduce((s, i) => s + Number(i.discount || 0), 0)
+  const totalOriginalSubtotal = discounted.reduce((s, i) => s + Number(i.subtotal || 0), 0)
+  const totalFinalPayable = discounted.reduce((s, i) => s + Number(i.grand_total || 0), 0)
+
+  // By cashier (requested_by_name on approval_requests, or the audit
+  // trail). We approximate via approval_requests payload.requested_by_name.
+  const discountReqs = (approvals || []).filter(a =>
+    a.request_type === 'discount' && inRange(a.requested_at || a.created_at))
+  const byCashier = {}
+  for (const a of discountReqs) {
+    const name = a.requested_by_name || 'Unknown'
+    if (!byCashier[name]) byCashier[name] = { count: 0, amount: 0 }
+    byCashier[name].count += 1
+    byCashier[name].amount += Number(a.amount || 0)
+  }
+  // By approver.
+  const byApprover = {}
+  for (const a of discountReqs.filter(a => a.status === 'approved' || a.status === 'rejected')) {
+    const name = a.approver_name || 'Unknown'
+    if (!byApprover[name]) byApprover[name] = { approved: 0, rejected: 0, amount: 0 }
+    if (a.status === 'approved') { byApprover[name].approved += 1; byApprover[name].amount += Number(a.amount || 0) }
+    else byApprover[name].rejected += 1
+  }
+
+  // By discount type (percent / fixed / item).
+  const byType = { percent: 0, fixed: 0, item: 0 }
+  for (const inv of discounted) {
+    if (byType[inv.discount_type] !== undefined) byType[inv.discount_type] += Number(inv.discount || 0)
+  }
+
+  // Approval outcomes.
+  const pending = discountReqs.filter(a => a.status === 'pending').length
+  const approved = discountReqs.filter(a => a.status === 'approved').length
+  const rejected = discountReqs.filter(a => a.status === 'rejected').length
+
+  return {
+    totalDiscountAmount,
+    totalOriginalSubtotal,
+    totalFinalPayable,
+    discountCount: discounted.length,
+    avgDiscountPercent: totalOriginalSubtotal > 0 ? (totalDiscountAmount / totalOriginalSubtotal) * 100 : 0,
+    byCashier,
+    byApprover,
+    byType,
+    approvals: { pending, approved, rejected, total: discountReqs.length },
+    // Revenue impact = original revenue that was given up as discounts.
+    revenueImpact: totalDiscountAmount,
+  }
+}
+
