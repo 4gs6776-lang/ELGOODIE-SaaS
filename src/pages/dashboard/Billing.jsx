@@ -24,8 +24,15 @@ import {
   createCreditNote,
   DRAFT_STATUSES,
   CREDIT_NOTE_REASONS,
+  fetchDiscountSettings,
+  applyInvoiceDiscount,
+  createDiscountApprovalRequest,
+  DEFAULT_DISCOUNT_SETTINGS,
 } from '../../lib/billingService'
 import { nextDocumentNumber } from '../../lib/billingService'
+import FloatingCalculator from '../../components/FloatingCalculator'
+import { useSmartPosition } from '../../lib/useSmartPosition'
+import ApplyDiscountModal from '../../components/ApplyDiscountModal'
 
 function Icon({ name, size = 18 }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -43,10 +50,27 @@ function Icon({ name, size = 18 }) {
 
 const SPARK = "M2 27 C12 22 15 10 25 18 S38 29 48 16 S61 8 70 22 S80 24 88 11"
 
+// Compact calculator glyph for the toolbar button.
+function CalcIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="2" width="16" height="20" rx="2" />
+      <rect x="7" y="5" width="10" height="4" rx="1" fill="currentColor" stroke="none" opacity="0.85" />
+      <circle cx="8" cy="13" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="13" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="13" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="17" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="17" r="0.8" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 export default function Billing({ initialSearch = '' }) {
   const { profile, hospital } = useAuth()
   const timezone = getTimezone(hospital)
-  const { records: invoices, updateRecord: updateInvoice, loading, isOnline, pendingCount } = useOfflineTable('invoices', hospital?.id)
+  const { records: invoices, updateRecord: updateInvoice, loading, isOnline, pendingCount, syncFromServer: syncInvoices } = useOfflineTable('invoices', hospital?.id)
   const { records: billableCharges, syncFromServer: syncCharges } = useOfflineTable('billable_charges', hospital?.id)
   // Wallet transactions — for the Transactions tab + wallet credit on reversal
   const { records: walletTxns, addRecord: addWalletTxn, loading: txnsLoading } = useOfflineTable('patient_wallet_transactions', hospital?.id)
@@ -78,6 +102,18 @@ export default function Billing({ initialSearch = '' }) {
   const [multiPayPatient, setMultiPayPatient] = useState(null)
   const [showApprovals, setShowApprovals] = useState(false)
   const [showEndOfDay, setShowEndOfDay] = useState(false)
+  // ---- Integrated Smart Calculator & Discount Management ----
+  // The calculator is lifted to the Billing shell so it persists across
+  // the cashier's workspace modal and the invoice viewer. The transfer
+  // target records which amount field is currently active so the
+  // calculator's "→ Transfer" button writes into the right input.
+  const [calcOpen, setCalcOpen] = useState(false)
+  const [calcTransfer, setCalcTransfer] = useState(null) // { label, apply: (n)=>void }
+  // Apply-discount modal state: which invoice is being discounted.
+  const [discountInvoice, setDiscountInvoice] = useState(null)
+  const [discountItems, setDiscountItems] = useState([])
+  const [discountSettings, setDiscountSettings] = useState(DEFAULT_DISCOUNT_SETTINGS)
+  const { position: calcPos, handlePositionChange: onCalcPosChange } = useSmartPosition(calcOpen)
   const [cnSearch, setCnSearch] = useState('')  // credit notes tab search
 
   const [toast, setToast] = useState(null)
@@ -117,6 +153,54 @@ export default function Billing({ initialSearch = '' }) {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
   const formatMoney = (n) => '₦' + Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  // Load the per-hospital discount settings (cashier self-apply limit,
+  // review threshold, etc.) via the authoritative RPC. Falls back to the
+  // conservative DEFAULT_DISCOUNT_SETTINGS when offline so the cashier
+  // can still self-apply up to 5% without blocking billing.
+  useEffect(() => {
+    let active = true
+    if (!hospital?.id) { setDiscountSettings(DEFAULT_DISCOUNT_SETTINGS); return }
+    fetchDiscountSettings(hospital.id).then(s => {
+      if (active && s) setDiscountSettings(s)
+    })
+    return () => { active = false }
+  }, [hospital?.id])
+
+  // Apply a discount via the server-authoritative RPC. The modal passes
+  // { invoiceId, type, value, reason, itemDiscounts? }; we forward to
+  // applyInvoiceDiscount (billingService.js → apply_invoice_discount RPC).
+  const handleApplyDiscount = async (payload) => {
+    const res = await applyInvoiceDiscount(payload)
+    if (res?.ok) {
+      // Refresh the invoice list so the new totals show immediately.
+      syncInvoices?.()
+      return res
+    }
+    return res
+  }
+
+  // Submit a discount for supervisor approval (cashier over their limit).
+  const handleRequestDiscountApproval = async (payload) => {
+    const res = await createDiscountApprovalRequest(payload)
+    if (res?.ok) showToast('Approval request submitted to supervisors')
+    return res
+  }
+
+  // Open the Apply Discount modal for an invoice. Loads its line items so
+  // the modal can render the item-discount table.
+  const openDiscountModal = async (invoice) => {
+    setDiscountInvoice(invoice)
+    try {
+      const { data } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', invoice.id)
+        .eq('hospital_id', hospital?.id)
+      setDiscountItems(data || [])
+    } catch { setDiscountItems([]) }
+  }
+
 
   // Live alert — the instant Pharmacy, Lab, or any module sends a new
   // charge, the cashier sees it immediately without refreshing.
@@ -600,6 +684,16 @@ export default function Billing({ initialSearch = '' }) {
           </button>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ width: 'auto', padding: '8px 14px', fontSize: 12.5, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => setCalcOpen(o => !o)}
+            title="Open the floating calculator (keyboard + transfer into amount fields)"
+            aria-pressed={calcOpen}
+          >
+            <CalcIcon /> Calculator
+          </button>
           {profile && ['admin', 'owner', 'billing'].includes(profile.role) && (
             <button
               type="button"
@@ -1685,6 +1779,14 @@ export default function Billing({ initialSearch = '' }) {
           hospital={hospital}
           profile={profile}
           onClose={() => setSelectedPatient(null)}
+          // Calculator integration: the workspace registers its active
+          // amount-paid input as the transfer target so the floating
+          // calculator's "→ Transfer" button writes directly into it.
+          onRegisterCalcTarget={(label, apply) => setCalcTransfer({ label, apply })}
+          onClearCalcTarget={() => setCalcTransfer(null)}
+          // Discount integration: open the Apply Discount modal for the
+          // invoice just generated/saved.
+          onApplyDiscount={openDiscountModal}
         />
       )}
 
@@ -1768,8 +1870,43 @@ export default function Billing({ initialSearch = '' }) {
           hospital={hospital}
           profile={profile}
           onClose={() => setViewInvoice(null)}
+          // Calculator integration: register the pay-amount input as the
+          // transfer target while the record-payment modal is focused.
+          onRegisterCalcTarget={(label, apply) => setCalcTransfer({ label, apply })}
+          onClearCalcTarget={() => setCalcTransfer(null)}
+          // Discount integration: "Apply Discount" action on the invoice
+          // opens the dedicated modal. Permission-gated to billing/admin.
+          onApplyDiscount={profile && ['admin', 'owner', 'billing'].includes(profile.role) ? (inv) => openDiscountModal(inv) : undefined}
         />
       )}
+
+      {/* Integrated floating calculator — smart-positioned, draggable,
+          keyboard-supported, transfers results into the active billing
+          amount field. Never auto-modifies an invoice. */}
+      <FloatingCalculator
+        open={calcOpen}
+        onClose={() => { setCalcOpen(false); setCalcTransfer(null) }}
+        position={calcPos}
+        onPositionChange={onCalcPosChange}
+        onTransfer={(v) => { calcTransfer?.apply(v) }}
+        transferLabel={calcTransfer?.label}
+        canTransfer={!!calcTransfer}
+      />
+
+      {/* Apply Discount modal — server-authoritative via RPCs; routes
+          over-limit discounts to the existing approval_requests queue. */}
+      <ApplyDiscountModal
+        open={!!discountInvoice}
+        onClose={() => { setDiscountInvoice(null); setDiscountItems([]) }}
+        invoice={discountInvoice}
+        items={discountItems}
+        profile={profile}
+        hospital={hospital}
+        settings={discountSettings}
+        onApplyDiscount={handleApplyDiscount}
+        onRequestApproval={handleRequestDiscountApproval}
+        showToast={showToast}
+      />
 
       {toast && <div className="billing-toast">{toast}</div>}
     </>

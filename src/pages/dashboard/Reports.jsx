@@ -9,6 +9,7 @@ import {
   getRevenueByDepartment,
   getClaimsStatusSummary,
   getExpenseVsRevenue,
+  getDiscountSummary,
   formatMoney,
   CLAIM_STATUSES,
 } from '../../lib/billingService'
@@ -37,6 +38,7 @@ const REPORTS = [
   { key: 'patient_statements', label: 'Patient Statements', icon: 'users', description: 'Generate patient account statements' },
   { key: 'expense_revenue', label: 'P&L Overview',      icon: 'billing', description: 'Profit & loss: revenue vs expenses with margin' },
   { key: 'regulatory',       label: 'Regulatory',        icon: 'reports',  description: 'Public health / regulatory reports — disease surveillance, maternal mortality, notifiable diseases, immunization, birth/death registration, inpatient/outpatient statistics' },
+  { key: 'discounts',        label: 'Discounts',         icon: 'billing',  description: 'Total discounts issued, by cashier / approver / type, approval outcomes, and revenue impact' },
 ]
 
 export default function Reports(){
@@ -65,6 +67,9 @@ export default function Reports(){
   // ---- Lab data for the new Lab Report tab (Section 8) ----
   const { records: labOrders } = useOfflineTable('lab_orders', hospital?.id)
   const { records: labTests } = useOfflineTable('lab_tests', hospital?.id)
+  // ---- Discount approvals for the Discounts tab (approval_requests
+  //      with request_type='discount'; reused, not a new table) ----
+  const { records: approvalRequests } = useOfflineTable('approval_requests', hospital?.id)
 
   const loading = loadingInv || loadingPay || loadingExp || loadingClaims
 
@@ -95,6 +100,15 @@ export default function Reports(){
     expenses: filterByPeriod(expenses || [], 'paid_at'),
     periodFrom, periodTo,
   }), [invoices, expenses, periodFrom, periodTo])
+
+  // Discounts report — aggregates invoices with a discount applied +
+  // approval_requests of type 'discount'. Reuses getDiscountSummary
+  // (billingService.js) which is a pure client-side reducer.
+  const discountSummary = useMemo(() => getDiscountSummary({
+    invoices: invoices || [],
+    approvals: approvalRequests || [],
+    periodFrom, periodTo,
+  }), [invoices, approvalRequests, periodFrom, periodTo])
 
   return (
     <>
@@ -622,6 +636,65 @@ export default function Reports(){
           {activeReport === 'regulatory' && (
             <RegulatoryReports periodFrom={periodFrom} periodTo={periodTo} />
           )}
+
+          {activeReport === 'discounts' && (
+            <>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 14 }}>
+                Period: {periodFrom || '—'} to {periodTo || '—'} · Discounts issued, by cashier / approver / type, approval outcomes, and revenue impact. Discounts are never counted as revenue or expenses.
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
+                <StatCard label="Total Discounts" value={formatMoney(discountSummary.totalDiscountAmount)} color="var(--danger)" />
+                <StatCard label="Discounted Invoices" value={String(discountSummary.discountCount)} />
+                <StatCard label="Avg Discount %" value={`${discountSummary.avgDiscountPercent.toFixed(1)}%`} color="var(--gold)" />
+                <StatCard label="Original Revenue" value={formatMoney(discountSummary.totalOriginalSubtotal)} color="var(--teal)" />
+                <StatCard label="Final Revenue" value={formatMoney(discountSummary.totalFinalPayable)} />
+                <StatCard label="Revenue Impact" value={formatMoney(discountSummary.revenueImpact)} color="var(--danger)" />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                {/* Approval outcomes */}
+                <div style={{ border: '1px solid var(--line-soft)', borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Approval Outcomes</div>
+                  <Row label="Pending" value={String(discountSummary.approvals.pending)} />
+                  <Row label="Approved" value={String(discountSummary.approvals.approved)} />
+                  <Row label="Rejected" value={String(discountSummary.approvals.rejected)} />
+                  <Row label="Total Requests" value={String(discountSummary.approvals.total)} />
+                </div>
+                {/* By discount type */}
+                <div style={{ border: '1px solid var(--line-soft)', borderRadius: 10, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>By Discount Type</div>
+                  <Row label="Percentage" value={formatMoney(discountSummary.byType.percent)} />
+                  <Row label="Fixed amount" value={formatMoney(discountSummary.byType.fixed)} />
+                  <Row label="Per item" value={formatMoney(discountSummary.byType.item)} />
+                </div>
+              </div>
+
+              {/* By cashier */}
+              <div style={{ border: '1px solid var(--line-soft)', borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Discounts by Cashier</div>
+                {Object.keys(discountSummary.byCashier).length === 0
+                  ? <EmptyRow text="No discount requests in this period." />
+                  : Object.entries(discountSummary.byCashier)
+                      .sort((a, b) => b[1].amount - a[1].amount)
+                      .map(([name, s]) => (
+                        <Row key={name} label={`${name} (${s.count})`} value={formatMoney(s.amount)} />
+                      ))
+                }
+              </div>
+
+              {/* By approver */}
+              <div style={{ border: '1px solid var(--line-soft)', borderRadius: 10, padding: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Discounts by Approver</div>
+                {Object.keys(discountSummary.byApprover).length === 0
+                  ? <EmptyRow text="No approved/rejected requests in this period." />
+                  : Object.entries(discountSummary.byApprover).map(([name, s]) => (
+                      <Row key={name} label={`${name} — approved ${s.approved}, rejected ${s.rejected}`} value={formatMoney(s.amount)} />
+                    ))
+                }
+              </div>
+            </>
+          )}
         </>
       )}
     </>
@@ -639,4 +712,13 @@ function StatCard({ label, value, color }) {
 
 function EmptyRow({ text = 'No data.' }) {
   return <div style={{ padding: 20, textAlign: 'center', color: 'var(--muted)', fontSize: 12.5 }}>{text}</div>
+}
+
+function Row({ label, value }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid var(--line-soft)' }}>
+      <span style={{ color: 'var(--muted)' }}>{label}</span>
+      <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono, monospace)', color: 'var(--ivory)' }}>{value}</span>
+    </div>
+  )
 }
